@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Mic, Monitor, Phone, Play, Radio, Send, Square, UserRoundCheck, Waves } from "lucide-react";
+import { Mic, Monitor, Phone, Play, Radio, Square, UserRoundCheck, Waves } from "lucide-react";
 import { TranscriptBuffer, type TranscriptLine } from "@meeting/transcript";
 import { newEventId, nowIso, type AgentHandRaiseEvent, type AgentMessageEvent, type MeetingEvent } from "@meeting/protocol";
 // markdown2.html.js is intentionally a runtime JS translator file.
@@ -16,20 +16,34 @@ function App() {
   const transcript = useMemo(() => new TranscriptBuffer(), []);
   const [events, setEvents] = useState<MeetingEvent[]>([]);
   const [lines, setLines] = useState<TranscriptLine[]>([]);
-  const [input, setInput] = useState("");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [connected, setConnected] = useState(false);
   const [recording, setRecording] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
 
   useEffect(() => {
-    const source = new EventSource(`${api}/events/stream`);
-    source.addEventListener("meeting", (message) => {
-      const event = JSON.parse((message as MessageEvent).data) as MeetingEvent;
-      setEvents((current) => [event, ...current].slice(0, 100));
-      setLines(transcript.apply(event));
-    });
-    return () => source.close();
+    let alive = true;
+    let source: EventSource | undefined;
+
+    void fetch(`${api}/events`)
+      .then((response) => response.json() as Promise<{ events: MeetingEvent[] }>)
+      .then((snapshot) => {
+        if (!alive) return;
+        setEvents([...snapshot.events].reverse().slice(0, 100));
+        setLines(transcript.applyAll(snapshot.events));
+        source = new EventSource(`${api}/events/stream`);
+        source.addEventListener("meeting", (message) => {
+          const event = JSON.parse((message as MessageEvent).data) as MeetingEvent;
+          setEvents((current) => [event, ...current].slice(0, 100));
+          setLines(transcript.apply(event));
+        });
+      })
+      .catch((error) => console.warn("event stream failed", error));
+
+    return () => {
+      alive = false;
+      source?.close();
+    };
   }, [transcript]);
 
   useEffect(() => {
@@ -76,16 +90,6 @@ function App() {
     setRecording(false);
   }
 
-  async function sendMockUtterance() {
-    if (!input.trim()) return;
-    await fetch(`${api}/mock/utterance`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, speakerLabel: "Host" })
-    });
-    setInput("");
-  }
-
   async function grantFloor(hand: AgentHandRaiseEvent, granted: boolean) {
     await postEvent({
       id: newEventId("floor"),
@@ -107,7 +111,7 @@ function App() {
             <h1>Meeting</h1>
             <p>P2P-ready room with transcript-driven local agents.</p>
           </div>
-          <div className="status"><Radio size={16} /> {connected ? "local media on" : "mock mode"}</div>
+          <div className="status"><Radio size={16} /> {recording ? "local Whisper on" : connected ? "local media on" : "waiting for audio"}</div>
         </header>
 
         <div className="videoGrid">
@@ -142,11 +146,6 @@ function App() {
           )}
           <button onClick={() => void postEvent(systemEvent("P2P signaling is intentionally not connected yet."))}><Square size={16} /> P2P status</button>
         </div>
-
-        <section className="composer">
-          <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Type a mock utterance for the agents..." />
-          <button onClick={sendMockUtterance}><Send size={16} /> Send</button>
-        </section>
       </section>
 
       <aside className="side">

@@ -23,6 +23,15 @@ export class TranscriptBuffer {
     return this.snapshot();
   }
 
+  applyAll(events: MeetingEvent[]): TranscriptLine[] {
+    this.lines = [];
+    this.partialBySpeaker.clear();
+    for (const event of events) {
+      this.apply(event);
+    }
+    return this.snapshot();
+  }
+
   snapshot(): TranscriptLine[] {
     return [...this.lines, ...this.partialBySpeaker.values()].sort((a, b) => a.startMs - b.startMs);
   }
@@ -49,4 +58,3 @@ export class TranscriptBuffer {
     });
   }
 }
-

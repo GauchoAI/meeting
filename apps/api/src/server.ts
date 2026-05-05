@@ -11,7 +11,6 @@ const sseClients = new Set<ServerResponse>();
 
 loadDotEnv();
 seedSystemEvent();
-startMockTranscript();
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -31,22 +30,6 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/events") {
     const event = await readJson<MeetingEvent>(req);
     appendEvent(event);
-    return sendJson(res, { ok: true, next: events.length });
-  }
-  if (req.method === "POST" && url.pathname === "/mock/utterance") {
-    const body = await readJson<{ text?: string; speakerLabel?: string }>(req);
-    const startMs = Date.now() % 3_600_000;
-    appendEvent({
-      id: newEventId("utt"),
-      type: "utterance.final",
-      meetingId,
-      createdAt: nowIso(),
-      speakerId: "host",
-      speakerLabel: body.speakerLabel || "Host",
-      text: body.text || "Let's ask Codex to sketch the repository workflow.",
-      startMs,
-      endMs: startMs + 2500
-    });
     return sendJson(res, { ok: true, next: events.length });
   }
   if (req.method === "POST" && url.pathname === "/audio/chunk") {
@@ -148,35 +131,6 @@ function seedSystemEvent(): void {
     meetingId,
     createdAt: nowIso(),
     level: "info",
-    text: process.env.DEEPGRAM_API_KEY ? "Deepgram key detected." : "Running with mock transcript events until DEEPGRAM_API_KEY is set."
+    text: "Meeting API ready. Transcripts come from local Whisper; agent output comes through MCP."
   });
-}
-
-function startMockTranscript(): void {
-  if (process.env.MOCK_TRANSCRIPT === "false") {
-    return;
-  }
-  const lines = [
-    "Welcome. We are designing an agentic meeting room.",
-    "The agents should listen silently and raise a hand only when useful.",
-    "Can Codex prepare a branch with the transcript panel prototype?",
-    "We need interruption support for agent speech.",
-    "Let's keep the first demo local and P2P-ready."
-  ];
-  let index = 0;
-  setInterval(() => {
-    const startMs = Date.now() % 3_600_000;
-    appendEvent({
-      id: newEventId("utt"),
-      type: "utterance.final",
-      meetingId,
-      createdAt: nowIso(),
-      speakerId: "mock-host",
-      speakerLabel: "Mock Host",
-      text: lines[index % lines.length],
-      startMs,
-      endMs: startMs + 2200
-    });
-    index += 1;
-  }, 8000);
 }

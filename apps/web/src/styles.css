@@ -40,7 +40,7 @@ input { min-width: 0; width: 100%; }
 }
 .stage {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 18px;
   padding: 22px;
 }
@@ -124,11 +124,6 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-}
-.composer {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
 }
 .side {
   border-left: 1px solid var(--line);

@@ -10,7 +10,6 @@ the host grants permission.
 
 - P2P-ready meeting UI with transcript and agent side panel.
 - Local API event bus.
-- Mock transcript stream before local Whisper is configured.
 - Local Whisper speech-to-text through `whisper.cpp`.
 - Deepgram remains a fallback provider, not the agent brain.
 - Local agent-worker scaffold for Codex or Claude subscription CLIs.
@@ -27,7 +26,8 @@ pnpm dev
 
 Open `http://localhost:5173`.
 
-The app works with mock transcript events immediately.
+The app expects real local audio. There is no mock transcript loop in the
+default product path.
 
 ## Local Whisper
 
@@ -54,6 +54,12 @@ Run the meeting MCP server:
 MEETING_AGENT_ID=codex-ui pnpm dev:mcp
 ```
 
+Smoke-test the MCP server against the running meeting API:
+
+```bash
+pnpm --filter @meeting/mcp-server smoke
+```
+
 Tools:
 
 - `meeting_raise_hand`
@@ -71,3 +77,21 @@ flowchart LR
   Agent --> UI
 ```
 ````
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "meeting": {
+      "command": "pnpm",
+      "args": ["--dir", "/Users/miguel_lemos/Desktop/mamba3/meeting", "--filter", "@meeting/mcp-server", "dev"],
+      "env": {
+        "MEETING_API_URL": "http://localhost:4317",
+        "MEETING_ID": "local-demo",
+        "MEETING_AGENT_ID": "codex-ui"
+      }
+    }
+  }
+}
+```
