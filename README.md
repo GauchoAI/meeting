@@ -21,7 +21,8 @@ the host grants permission.
 ```bash
 pnpm install
 cp .env.example .env
-pnpm dev
+bash scripts/install-daemon.sh
+bash scripts/install-mcp-clients.sh
 ```
 
 Open `http://localhost:5173`.
@@ -48,16 +49,16 @@ API. The API converts browser audio with `ffmpeg` and invokes `whisper-cli`.
 
 ## MCP
 
-Run the meeting MCP server:
+The portable default is the local daemon endpoint:
 
 ```bash
-MEETING_AGENT_ID=codex-ui scripts/meeting-mcp-stdio.sh
+http://localhost:4318/mcp
 ```
 
-Smoke-test the MCP server against the running meeting API:
+Smoke-test the HTTP MCP server against the running meeting API:
 
 ```bash
-pnpm --filter @meeting/mcp-server smoke
+pnpm --filter @meeting/mcp-server smoke:http
 ```
 
 Install the MCP server into local Codex and Claude Code configs:
@@ -93,13 +94,7 @@ Example MCP client configuration:
 {
   "mcpServers": {
     "meeting": {
-      "command": "/Users/miguel_lemos/Desktop/mamba3/meeting/scripts/meeting-mcp-stdio.sh",
-      "args": [],
-      "env": {
-        "MEETING_API_URL": "http://localhost:4317",
-        "MEETING_ID": "local-demo",
-        "MEETING_AGENT_ID": "codex-ui"
-      }
+      "url": "http://localhost:4318/mcp"
     }
   }
 }

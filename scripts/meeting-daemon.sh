@@ -17,4 +17,22 @@ if [ -z "$PNPM_BIN" ]; then
 fi
 
 cd "$ROOT"
-exec "$PNPM_BIN" --silent --filter @meeting/mcp-server exec tsx src/server.ts
+
+pids=()
+cleanup() {
+  for pid in "${pids[@]}"; do
+    kill "$pid" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup EXIT INT TERM
+
+"$PNPM_BIN" --silent --filter @meeting/api dev &
+pids+=("$!")
+
+"$PNPM_BIN" --silent --filter @meeting/mcp-server http &
+pids+=("$!")
+
+"$PNPM_BIN" --silent --filter @meeting/web dev &
+pids+=("$!")
+
+wait "${pids[@]}"

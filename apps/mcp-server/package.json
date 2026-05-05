@@ -8,7 +8,9 @@
   },
   "scripts": {
     "dev": "tsx src/server.ts",
+    "http": "tsx src/http.ts",
     "smoke": "tsx src/smoke.ts",
+    "smoke:http": "tsx src/smoke.ts http://localhost:4318/mcp",
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"

@@ -1,16 +1,20 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-const transport = new StdioClientTransport({
-  command: "../../scripts/meeting-mcp-stdio.sh",
-  args: [],
-  env: {
-    ...process.env,
-    MEETING_API_URL: process.env.MEETING_API_URL || "http://localhost:4317",
-    MEETING_ID: process.env.MEETING_ID || "local-demo",
-    MEETING_AGENT_ID: process.env.MEETING_AGENT_ID || "codex-mcp-smoke"
-  }
-});
+const url = process.argv[2];
+const transport = url
+  ? new StreamableHTTPClientTransport(new URL(url))
+  : new StdioClientTransport({
+      command: "../../scripts/meeting-mcp-stdio.sh",
+      args: [],
+      env: {
+        ...process.env,
+        MEETING_API_URL: process.env.MEETING_API_URL || "http://localhost:4317",
+        MEETING_ID: process.env.MEETING_ID || "local-demo",
+        MEETING_AGENT_ID: process.env.MEETING_AGENT_ID || "codex-mcp-smoke"
+      }
+    });
 
 const client = new Client({ name: "meeting-mcp-smoke", version: "0.1.0" });
 await client.connect(transport);
