@@ -92,10 +92,11 @@ Start with two interchangeable adapters:
 - `SpeechProvider`: start with `openai` or `azure`, but keep `deepgram` as a
   first-class target because interruption and latency are central to the product.
 
-The MVP should support P2P for 2-3 people and not assume hosted SFU costs. The
-architecture should still allow switching a room to LiveKit Cloud when the room
-needs reliability, larger groups, server-side recording, or easier agent media
-insertion.
+Updated project decision: the MVP should support P2P for 2-3 people and local
+Whisper STT first. Deepgram remains the fallback for cases where local latency
+or quality are not good enough. Agents do not need TTS in the first product
+shape; they express themselves through Markdown, Mermaid diagrams, visible task
+cards, branches, diffs, and previews.
 
 ## Sources
 

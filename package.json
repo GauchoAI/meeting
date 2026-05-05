@@ -1,0 +1,21 @@
+{
+  "name": "@gauchoai/meeting",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @meeting/api --filter @meeting/web dev",
+    "dev:api": "pnpm --filter @meeting/api dev",
+    "dev:web": "pnpm --filter @meeting/web dev",
+    "dev:agent": "pnpm --filter @meeting/agent-worker dev",
+    "dev:mcp": "pnpm --filter @meeting/mcp-server dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,223 @@
+:root {
+  color-scheme: dark;
+  --bg: #11130f;
+  --panel: #191c17;
+  --panel2: #20241e;
+  --ink: #f2f3eb;
+  --muted: #adb6a5;
+  --line: #353b31;
+  --accent: #84cc16;
+  --blue: #60a5fa;
+  --bad: #f87171;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+button, input {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel2);
+  color: var(--ink);
+  font: inherit;
+  padding: 10px 12px;
+}
+button {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+}
+input { min-width: 0; width: 100%; }
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 430px;
+  min-height: 100vh;
+}
+.stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 18px;
+  padding: 22px;
+}
+.topbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+h1, h2, p { margin: 0; }
+h1 { font-size: 32px; line-height: 1; }
+h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(--muted); }
+.topbar p, .muted { color: var(--muted); }
+.status {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--accent);
+  display: inline-flex;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.videoGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1.4fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  min-height: 0;
+}
+.tile {
+  background: #050604;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 190px;
+  overflow: hidden;
+  position: relative;
+}
+.tile.primary { grid-row: span 2; }
+.tile video {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.tile span {
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 999px;
+  bottom: 12px;
+  left: 12px;
+  padding: 6px 10px;
+  position: absolute;
+}
+.artifactTile {
+  align-content: start;
+  display: grid;
+  padding: 16px;
+}
+.artifactTile .generated {
+  max-height: 100%;
+  overflow: auto;
+  padding-bottom: 44px;
+}
+.artifactTile .markdown h1 {
+  font-size: 22px;
+  line-height: 1.1;
+}
+.artifactTile .diagram {
+  background: #070907;
+}
+.placeholder {
+  align-items: center;
+  color: var(--muted);
+  display: grid;
+  gap: 12px;
+  height: 100%;
+  justify-items: center;
+  min-height: 190px;
+  text-align: center;
+}
+.placeholder svg { color: var(--blue); height: 34px; width: 34px; }
+.controls, .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.composer {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.side {
+  border-left: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-rows: 1.1fr auto 0.85fr 0.85fr auto;
+  max-height: 100vh;
+  min-height: 0;
+  padding: 14px;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px;
+}
+.scroll {
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+}
+.scroll.small { max-height: 180px; }
+article {
+  border-left: 3px solid var(--accent);
+  display: grid;
+  gap: 4px;
+  padding-left: 10px;
+}
+article strong { font-size: 13px; }
+article p { color: var(--ink); line-height: 1.35; overflow-wrap: anywhere; }
+article.partial { opacity: 0.65; }
+.stack {
+  display: grid;
+  gap: 10px;
+}
+.hand {
+  border-left-color: var(--blue);
+}
+.generated {
+  border-left-color: var(--blue);
+}
+.generated.expanded {
+  min-height: 130px;
+}
+.markdown {
+  display: grid;
+  gap: 8px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.markdown h1, .markdown h2, .markdown h3 {
+  margin: 4px 0;
+}
+.markdown ul, .markdown ol {
+  margin: 0;
+  padding-left: 20px;
+}
+.markdown pre {
+  background: #080a07;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: auto;
+  padding: 10px;
+}
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.markdown a {
+  color: var(--blue);
+}
+.diagram {
+  background: #0c100b;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+  padding: 12px;
+}
+.diagram svg {
+  max-width: 100%;
+}
+.diagram-error {
+  color: var(--bad);
+}
+@media (max-width: 980px) {
+  .shell { grid-template-columns: 1fr; }
+  .side { border-left: 0; max-height: none; }
+  .videoGrid { grid-template-columns: 1fr; }
+  .tile.primary { grid-row: span 1; }
+}
