@@ -60,6 +60,15 @@ Smoke-test the MCP server against the running meeting API:
 pnpm --filter @meeting/mcp-server smoke
 ```
 
+Install the MCP server into local Codex and Claude Code configs:
+
+```bash
+bash scripts/install-mcp-clients.sh
+```
+
+Then restart Codex or Claude sessions so the new `meeting` tools are mounted in
+the model context.
+
 Tools:
 
 - `meeting_raise_hand`
