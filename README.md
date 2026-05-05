@@ -51,7 +51,7 @@ API. The API converts browser audio with `ffmpeg` and invokes `whisper-cli`.
 Run the meeting MCP server:
 
 ```bash
-MEETING_AGENT_ID=codex-ui pnpm dev:mcp
+MEETING_AGENT_ID=codex-ui scripts/meeting-mcp-stdio.sh
 ```
 
 Smoke-test the MCP server against the running meeting API:
@@ -93,8 +93,8 @@ Example MCP client configuration:
 {
   "mcpServers": {
     "meeting": {
-      "command": "pnpm",
-      "args": ["--dir", "/Users/miguel_lemos/Desktop/mamba3/meeting", "--filter", "@meeting/mcp-server", "dev"],
+      "command": "/Users/miguel_lemos/Desktop/mamba3/meeting/scripts/meeting-mcp-stdio.sh",
+      "args": [],
       "env": {
         "MEETING_API_URL": "http://localhost:4317",
         "MEETING_ID": "local-demo",

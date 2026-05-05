@@ -2,8 +2,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const transport = new StdioClientTransport({
-  command: "pnpm",
-  args: ["--filter", "@meeting/mcp-server", "dev"],
+  command: "../../scripts/meeting-mcp-stdio.sh",
+  args: [],
   env: {
     ...process.env,
     MEETING_API_URL: process.env.MEETING_API_URL || "http://localhost:4317",
