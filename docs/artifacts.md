@@ -27,8 +27,9 @@ artifacts/dt=2026-05-06/hour=03/status-meeting-ui/artifact.smart.md
 
 - One folder is one evolving idea.
 - `artifact.smart.md` is edited in place.
+- The Meeting extension watches artifact files and renders the latest file automatically as it changes.
 - Git provides versioning, rollback, and diffs.
-- Commits should describe the semantic improvement, e.g. `Improve project-flow hierarchy`.
+- The watcher commits artifact file changes using the host utterance as the commit message.
 - `manifest.json` makes artifacts discoverable without parsing the Markdown body.
 
 ## Manifest

@@ -1,4 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { execFile } from "node:child_process";
+import { watch, type FSWatcher } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import { Type } from "typebox";
 
 const DEFAULT_API = "http://localhost:4317";
@@ -36,16 +40,22 @@ export default function (pi: ExtensionAPI) {
 	let lastStreamPost = 0;
 	let firstUpdatePosted = false;
 	let currentLatency: { utteranceId?: string; utteranceCreatedAt?: number; extensionReceivedAt?: number; agentStartedAt?: number } = {};
+	let artifactWatcher: FSWatcher | undefined;
+	let lastHostUtterance = "Update smart-down artifact";
+	const artifactDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 	const seen = new Set<string>();
 
 	pi.on("session_start", async (_event, ctx) => {
 		ctx.ui.setStatus("meeting", "meeting: connecting");
 		await initialiseCursor(ctx);
+		startArtifactWatcher(ctx);
 		if (listen) startListening(ctx);
 	});
 
 	pi.on("session_shutdown", () => {
 		if (timer) clearInterval(timer);
+		artifactWatcher?.close();
+		for (const timeout of artifactDebounce.values()) clearTimeout(timeout);
 		streamAbort?.abort();
 	});
 
@@ -168,6 +178,42 @@ export default function (pi: ExtensionAPI) {
 		void poll(ctx);
 	}
 
+	function startArtifactWatcher(ctx: ExtensionContext) {
+		artifactWatcher?.close();
+		const artifactsDir = resolve(ctx.cwd, "artifacts");
+		artifactWatcher = watch(artifactsDir, { recursive: true }, (_event, filename) => {
+			if (!filename || basename(String(filename)) !== "artifact.smart.md") return;
+			const artifactPath = resolve(artifactsDir, String(filename));
+			const previous = artifactDebounce.get(artifactPath);
+			if (previous) clearTimeout(previous);
+			artifactDebounce.set(artifactPath, setTimeout(() => void publishArtifactChange(artifactPath, ctx), 180));
+		});
+	}
+
+	async function publishArtifactChange(artifactPath: string, ctx: ExtensionContext) {
+		artifactDebounce.delete(artifactPath);
+		try {
+			if (!(await stat(artifactPath)).isFile()) return;
+			const markdown = await readFile(artifactPath, "utf8");
+			const messageId = `artifact_${Buffer.from(artifactPath).toString("base64url").slice(0, 18)}_${Date.now().toString(36)}`;
+			await postAgentMessage(messageId, markdown, false);
+			await commitArtifactChange(artifactPath, lastHostUtterance, ctx);
+		} catch (error) {
+			await postTrace("error", `artifact watcher failed: ${errorMessage(error)}`, { artifactPath });
+		}
+	}
+
+	async function commitArtifactChange(artifactPath: string, message: string, ctx: ExtensionContext) {
+		const relativeArtifact = artifactPath.startsWith(ctx.cwd) ? artifactPath.slice(ctx.cwd.length + 1) : artifactPath;
+		const manifestPath = resolve(dirname(artifactPath), "manifest.json");
+		const files = [relativeArtifact];
+		try { if ((await stat(manifestPath)).isFile()) files.push(manifestPath.slice(ctx.cwd.length + 1)); } catch {}
+		await execGit(ctx.cwd, ["add", ...files]);
+		const diffState = await execGit(ctx.cwd, ["diff", "--cached", "--quiet"]).then(() => "clean", () => "dirty");
+		if (diffState === "clean") return;
+		await execGit(ctx.cwd, ["commit", "-m", message.trim() || "Update smart-down artifact"]);
+	}
+
 	async function initialiseCursor(ctx: ExtensionContext) {
 		try {
 			const snapshot = await getEvents(0);
@@ -243,6 +289,7 @@ export default function (pi: ExtensionAPI) {
 	function handleUtterance(event: UtteranceFinalEvent, ctx: ExtensionContext) {
 		const text = event.text.trim();
 		if (!text || isIgnorableTranscript(text)) return;
+		lastHostUtterance = text;
 		const extensionReceivedAt = Date.now();
 		const utteranceCreatedAt = Date.parse(event.createdAt);
 		currentLatency = { utteranceId: event.id, utteranceCreatedAt: Number.isFinite(utteranceCreatedAt) ? utteranceCreatedAt : undefined, extensionReceivedAt };
@@ -262,7 +309,9 @@ export default function (pi: ExtensionAPI) {
 			`> ${text}`,
 			"",
 			"Decide whether this is a work request or a conversational request.",
-			"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, commit, create/update an artifact/file, or use a screenshot/screen source: perform the work now with tools, continue until complete, validate it, commit when appropriate, then give a concise final status.",
+			"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, or create/update an artifact/file: perform only the necessary work now with tools and continue until complete.",
+			"For smart-down artifact edits, edit only the artifact file in place and stop; do not render screenshots or rewrite the artifact. The artifact watcher will publish and commit the file with the host utterance as the commit message.",
+			"For code implementation work, validate when appropriate and commit only when explicitly requested or when the repo workflow clearly requires it.",
 			"If it only asks for explanation or brainstorming: answer the host directly with concise Markdown.",
 			"Do not merely acknowledge actionable work requests.",
 		].join("\n");
@@ -345,6 +394,15 @@ function newEventId(prefix: string): string {
 
 function nowIso(): string {
 	return new Date().toISOString();
+}
+
+function execGit(cwd: string, args: string[]): Promise<string> {
+	return new Promise((resolvePromise, reject) => {
+		execFile("git", args, { cwd }, (error, stdout, stderr) => {
+			if (error) reject(new Error(stderr || error.message));
+			else resolvePromise(stdout);
+		});
+	});
 }
 
 function errorMessage(error: unknown): string {
