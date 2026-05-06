@@ -1,4 +1,3 @@
-```diagram
 nodes: 14
 
 shapes:
