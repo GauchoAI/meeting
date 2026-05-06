@@ -775,7 +775,7 @@ function renderNativeArrow(element: MeasuredDiagramElement, index: number, eleme
   const headTo = route.points[route.points.length - 1];
   return (
     <g key={index} className="nativeArrow" style={{ color: stroke }} opacity={typeof element.opacity === "number" ? element.opacity : undefined}>
-      {renderRoughPolyline(route.points, stroke, index, element)}
+      {renderRoughRoute(route, stroke, index, element)}
       {element.endArrowhead && headFrom && headTo ? renderNativeArrowhead(headFrom.x, headFrom.y, headTo.x, headTo.y, stroke, index, String(element.endArrowhead)) : null}
       {label ? (
         <g>
@@ -918,18 +918,18 @@ function routeSelfConnector(shape: MeasuredDiagramElement | undefined) {
   const top = bounds.y;
   const start = bounds.type === "diamond" ? { x: right + 12, y: cy - 4 } : { x: right + 12, y: cy - bounds.height * 0.18 };
   const end = bounds.type === "diamond" ? { x: cx + bounds.width * 0.28, y: top - 10 } : { x: cx + bounds.width * 0.28, y: top - 10 };
-  const points = [start, { x: right + 98, y: top - 82 }, { x: cx + 32, y: top - 92 }, end];
-  return { points, label: { x: right + 72, y: top - 88 } };
+  const points = [start, { x: right + 116, y: top - 92 }, { x: cx + 26, y: top - 104 }, end];
+  return { points, label: { x: right + 82, y: top - 92 }, curve: true };
 }
 
 function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: number, rawY1: number, rawX2: number, rawY2: number, elements: MeasuredDiagramElement[]) {
   const backEdge = rawX2 < rawX1 || rawY2 < rawY1 - 40;
   if (backEdge) {
-    const offset = 78;
+    const offset = 92;
     const midX = (x1 + x2) / 2;
     const routeBelow = rawY2 > rawY1 + 24;
     const midY = routeBelow ? Math.max(y1, y2) + offset : Math.min(y1, y2) - offset;
-    return { points: [{ x: x1, y: y1 }, { x: x1, y: midY }, { x: x2, y: midY }, { x: x2, y: y2 }], label: { x: midX, y: midY + (routeBelow ? 22 : -8) } };
+    return { points: [{ x: x1, y: y1 }, { x: midX, y: midY }, { x: x2, y: y2 }], label: { x: midX, y: midY + (routeBelow ? 22 : -8) }, curve: true };
   }
   const obstacle = elements
     .filter((shape) => !isConnectorElement(shape))
@@ -939,9 +939,9 @@ function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: n
     const above = Math.min(y1, y2, obstacle.y) - 38;
     const below = Math.max(y1, y2, obstacle.y + obstacle.height) + 38;
     const midY = Math.abs(above - (y1 + y2) / 2) < Math.abs(below - (y1 + y2) / 2) ? above : below;
-    return { points: [{ x: x1, y: y1 }, { x: x1, y: midY }, { x: x2, y: midY }, { x: x2, y: y2 }], label: { x: (x1 + x2) / 2, y: midY - 8 } };
+    return { points: [{ x: x1, y: y1 }, { x: (x1 + x2) / 2, y: midY }, { x: x2, y: y2 }], label: { x: (x1 + x2) / 2, y: midY - 8 }, curve: true };
   }
-  return { points: [{ x: x1, y: y1 }, { x: x2, y: y2 }], label: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 10 } };
+  return { points: [{ x: x1, y: y1 }, { x: x2, y: y2 }], label: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 10 }, curve: false };
 }
 
 function segmentIntersectsRect(x1: number, y1: number, x2: number, y2: number, rect: { x: number; y: number; width: number; height: number }): boolean {
@@ -949,8 +949,22 @@ function segmentIntersectsRect(x1: number, y1: number, x2: number, y2: number, r
   return Boolean(hit && hit.t <= 1);
 }
 
+function renderRoughRoute(route: { points: Array<{ x: number; y: number }>; curve?: boolean }, stroke: string, seed: number, element: MeasuredDiagramElement) {
+  return renderRoughPath(routePath(route.points, Boolean(route.curve)), stroke, seed, element);
+}
+
 function renderRoughPolyline(points: Array<{ x: number; y: number }>, stroke: string, seed: number, element: MeasuredDiagramElement) {
-  const path = `M ${points.map((point) => `${point.x} ${point.y}`).join(" L ")}`;
+  return renderRoughPath(routePath(points, false), stroke, seed, element);
+}
+
+function routePath(points: Array<{ x: number; y: number }>, curve: boolean): string {
+  if (!points.length) return "";
+  if (!curve || points.length < 3) return `M ${points.map((point) => `${point.x} ${point.y}`).join(" L ")}`;
+  if (points.length === 3) return `M ${points[0].x} ${points[0].y} Q ${points[1].x} ${points[1].y} ${points[2].x} ${points[2].y}`;
+  return `M ${points[0].x} ${points[0].y} C ${points[1].x} ${points[1].y} ${points[2].x} ${points[2].y} ${points[3].x} ${points[3].y}`;
+}
+
+function renderRoughPath(path: string, stroke: string, seed: number, element: MeasuredDiagramElement) {
   const drawable = roughGenerator.path(path, {
     stroke,
     strokeWidth: typeof element.strokeWidth === "number" ? element.strokeWidth : 2.2,
