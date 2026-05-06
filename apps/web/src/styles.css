@@ -99,16 +99,16 @@ input { min-width: 0; width: 100%; }
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 .stage {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) minmax(190px, 30vh);
-  gap: 18px;
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: 22px;
+  padding: 14px;
 }
 .topbar {
   align-items: center;
@@ -131,6 +131,7 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
 .appearanceControls {
   align-items: center;
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .appearanceControls select,
@@ -226,15 +227,15 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
 }
 .canvas {
   background: var(--canvas);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   min-height: 0;
   min-width: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: var(--canvas-padding);
-  transition: background-color 420ms ease, border-color 420ms ease, border-radius 320ms ease, box-shadow 420ms ease;
+  padding: clamp(18px, 3vw, 42px);
+  transition: background-color 420ms ease;
 }
 .tile {
   background: var(--canvas);
@@ -304,6 +305,66 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   min-height: 0;
   overflow: hidden;
 }
+.floatingButtons {
+  display: inline-flex;
+  gap: 8px;
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  z-index: 30;
+}
+.floatingButtons button,
+.floatingTalk {
+  backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--panel), transparent 12%);
+  border-color: color-mix(in srgb, var(--accent), transparent 48%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  font-weight: 900;
+}
+.floatingButtons button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.floatingPanel {
+  backdrop-filter: blur(18px);
+  background: color-mix(in srgb, var(--panel), transparent 5%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
+  color: var(--ink);
+  display: grid;
+  gap: 12px;
+  position: absolute;
+  right: 18px;
+  top: 64px;
+  z-index: 29;
+}
+.drawerHeader {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.menuPanel {
+  max-width: min(520px, calc(100vw - 36px));
+  padding: 14px;
+}
+.menuPanel .status {
+  justify-self: start;
+}
+.terminalPanel {
+  grid-template-rows: auto minmax(0, 1fr);
+  height: min(52vh, 520px);
+  overflow: hidden;
+  top: 64px;
+  width: min(760px, calc(100vw - 36px));
+}
+.floatingTalk {
+  bottom: 18px;
+  position: absolute;
+  right: 18px;
+  z-index: 28;
+}
 .terminalToolbar {
   align-items: center;
   background: #0f172a;
@@ -357,11 +418,9 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
 }
 .scroll.small { max-height: 180px; }
 article {
-  border-left: 3px solid var(--accent);
   display: grid;
   gap: 4px;
   min-width: 0;
-  padding-left: 10px;
 }
 article strong { font-size: 13px; }
 article p { color: var(--ink); line-height: 1.35; overflow-wrap: anywhere; }
@@ -376,10 +435,12 @@ article.partial { opacity: 0.65; }
 }
 .generated {
   align-content: start;
-  border-left-color: var(--blue);
 }
 .generated.expanded {
   min-height: 0;
+}
+.generated.expanded > strong {
+  display: none;
 }
 .emptyCanvas {
   align-content: center;
@@ -452,8 +513,132 @@ article.partial { opacity: 0.65; }
 .markdown pre code .token.cdata {
   color: var(--code-muted);
 }
+.markdown .diagram {
+  background: color-mix(in srgb, var(--canvas) 86%, var(--panel2));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin: 10px 0;
+  overflow: auto;
+  padding: 14px;
+}
+.markdown .diagram svg {
+  display: block;
+  height: auto;
+  margin: 0 auto;
+  max-width: 100%;
+}
+.markdown .diagram .node rect,
+.markdown .diagram .node circle,
+.markdown .diagram .node ellipse,
+.markdown .diagram .node polygon,
+.markdown .diagram .node path {
+  fill: var(--panel2) !important;
+  stroke: var(--accent) !important;
+}
+.markdown .diagram text,
+.markdown .diagram .label,
+.markdown .diagram .nodeLabel,
+.markdown .diagram .edgeLabel,
+.markdown .diagram .label span,
+.markdown .diagram .nodeLabel span,
+.markdown .diagram .edgeLabel span {
+  color: var(--ink) !important;
+  fill: var(--ink) !important;
+}
+.markdown .diagram .edgePath path,
+.markdown .diagram .flowchart-link {
+  stroke: var(--muted) !important;
+}
+.markdown .diagram .arrowheadPath {
+  fill: var(--muted) !important;
+  stroke: var(--muted) !important;
+}
+.markdown .diagram .edgeLabel,
+.markdown .diagram .edgeLabel p,
+.markdown .diagram .labelBkg {
+  background: var(--canvas) !important;
+  color: var(--ink) !important;
+  fill: var(--canvas) !important;
+}
 .markdown a {
   color: var(--blue);
+}
+.excalidrawEmbed {
+  margin: 10px 0;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+.excalidrawEmbed .excalidraw {
+  --color-primary: var(--accent);
+  --color-primary-darker: var(--accent-strong);
+  --color-primary-light: rgba(var(--accent-rgb), 0.16);
+  background: transparent !important;
+  color: var(--ink);
+}
+.excalidrawEmbed .App-menu,
+.excalidrawEmbed .layer-ui__wrapper,
+.excalidrawEmbed .Island,
+.excalidrawEmbed footer,
+.excalidrawEmbed .FixedSideContainer,
+.excalidrawEmbed .App-toolbar,
+.excalidrawEmbed .Stack,
+.excalidrawEmbed .dropdown-menu-button,
+.excalidrawEmbed .help-icon,
+.excalidrawEmbed .encrypted-icon,
+.excalidrawEmbed .disable-zen-mode {
+  display: none !important;
+}
+.excalidrawEmbed canvas {
+  pointer-events: none;
+}
+.excalidrawLoading {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-weight: 700;
+  height: 100%;
+  justify-content: center;
+}
+.nativeDiagramEmbed {
+  margin: 10px 0;
+  min-height: 360px;
+  overflow: hidden;
+  width: 100%;
+}
+.nativeDiagramEmbed svg {
+  color: var(--ink);
+  display: block;
+  height: min(640px, 70vh);
+  width: 100%;
+}
+.nativeSketch {
+  filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
+  opacity: 0.88;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.1;
+  vector-effect: non-scaling-stroke;
+}
+.nativeLabel,
+.nativeArrowLabel {
+  fill: var(--ink);
+  font-family: Virgil, "Comic Sans MS", ui-sans-serif, system-ui;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.25);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.nativeArrow line {
+  opacity: 0.82;
+  stroke-linecap: round;
+  stroke-width: 2.1;
+  vector-effect: non-scaling-stroke;
+}
+.nativeArrowLabelBg {
+  fill: var(--canvas);
+  opacity: 0.92;
+  stroke: none;
 }
 .markdown .md-lede {
   color: var(--muted);

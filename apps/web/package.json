@@ -10,6 +10,8 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@chenglou/pretext": "^0.0.6",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@meeting/protocol": "workspace:*",
     "@meeting/transcript": "workspace:*",
     "@vitejs/plugin-react": "^5.1.1",
@@ -19,6 +21,7 @@
     "mermaid": "^11.14.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "roughjs": "^4.6.6",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"
   },

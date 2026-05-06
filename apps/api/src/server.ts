@@ -3,9 +3,10 @@ import { dirname, resolve } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
 import { speechProviderStatus } from "./speech.js";
-import { loadDotEnv } from "./env.js";
+import { loadDotEnv, loadLocalConfig } from "./env.js";
 import { transcribeWithLocalWhisper } from "./local-whisper.js";
 
+loadLocalConfig();
 loadDotEnv();
 
 const port = Number(process.env.MEETING_API_PORT || 4317);
@@ -40,11 +41,20 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/audio/chunk") {
     const extension = url.searchParams.get("extension") || "webm";
     const speakerLabel = url.searchParams.get("speaker") || "Host";
+    const clientStartedAt = Number(url.searchParams.get("clientStartedAt") || 0) || undefined;
+    const receivedAt = Date.now();
     const audio = await readBuffer(req);
+    const uploadReadAt = Date.now();
+    appendTrace("latency", "audio.upload.received", { bytes: audio.length, extension, clientStartedAt, receivedAt, uploadReadAt, clientToApiMs: clientStartedAt ? receivedAt - clientStartedAt : undefined, requestReadMs: uploadReadAt - receivedAt });
     try {
+      const whisperStartedAt = Date.now();
+      appendTrace("latency", "whisper.start", { whisperStartedAt, bytes: audio.length, extension });
       const result = await transcribeWithLocalWhisper(audio, extension);
+      const whisperEndedAt = Date.now();
+      appendTrace("latency", "whisper.end", { whisperStartedAt, whisperEndedAt, whisperMs: whisperEndedAt - whisperStartedAt, reportedWhisperMs: result.elapsedMs, textChars: result.text.length });
       if (result.text && !isIgnorableTranscript(result.text)) {
-        const startMs = Date.now() % 3_600_000;
+        const utteranceCreatedAt = Date.now();
+        const startMs = utteranceCreatedAt % 3_600_000;
         appendEvent({
           id: newEventId("utt"),
           type: "utterance.final",
@@ -56,6 +66,7 @@ const server = createServer(async (req, res) => {
           startMs,
           endMs: startMs + result.elapsedMs
         });
+        appendTrace("latency", "utterance.final", { utteranceCreatedAt, totalApiMs: utteranceCreatedAt - receivedAt, clientToUtteranceMs: clientStartedAt ? utteranceCreatedAt - clientStartedAt : undefined, textChars: result.text.length });
       }
       return sendJson(res, { ok: true, result });
     } catch (error) {
@@ -78,8 +89,26 @@ server.listen(port, () => {
   console.log(`[meeting-api] http://localhost:${port}`);
 });
 
+function appendTrace(channel: string, text: string, details?: unknown): void {
+  appendEvent({
+    id: newEventId("trace"),
+    type: "agent.trace",
+    meetingId,
+    createdAt: nowIso(),
+    agentId: "meeting-api",
+    channel,
+    text,
+    details
+  } as MeetingEvent);
+}
+
 function appendEvent(event: MeetingEvent, persist = true): void {
-  events.push(event);
+  const existingIndex = events.findIndex((candidate) => candidate.id === event.id);
+  if (existingIndex >= 0) {
+    events[existingIndex] = event;
+  } else {
+    events.push(event);
+  }
   if (persist) persistEvent(event);
   const payload = `event: meeting\nid: ${events.length}\ndata: ${JSON.stringify(event)}\n\n`;
   for (const client of sseClients) {

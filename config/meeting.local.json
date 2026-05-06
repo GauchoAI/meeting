@@ -1,0 +1,10 @@
+{
+  "sttProvider": "local-whisper",
+  "whisperCppBin": "whisper-cli",
+  "whisperModelPath": "models/ggml-small.bin",
+  "meetingApiPort": 4317,
+  "meetingWebPort": 5173,
+  "meetingAgentBackend": "codex",
+  "meetingWorkspaceRoot": "..",
+  "meetingId": "local-demo"
+}

@@ -30,21 +30,28 @@ export default function (pi: ExtensionAPI) {
 
 	let cursor = 0;
 	let timer: ReturnType<typeof setInterval> | undefined;
+	let streamAbort: AbortController | undefined;
 	let pendingMeetingResponses = 0;
+	let currentMeetingMessageId: string | undefined;
+	let lastStreamPost = 0;
+	let firstUpdatePosted = false;
+	let currentLatency: { utteranceId?: string; utteranceCreatedAt?: number; extensionReceivedAt?: number; agentStartedAt?: number } = {};
 	const seen = new Set<string>();
 
 	pi.on("session_start", async (_event, ctx) => {
 		ctx.ui.setStatus("meeting", "meeting: connecting");
 		await initialiseCursor(ctx);
-		if (listen) startPolling(ctx);
+		if (listen) startListening(ctx);
 	});
 
 	pi.on("session_shutdown", () => {
 		if (timer) clearInterval(timer);
+		streamAbort?.abort();
 	});
 
 	pi.on("agent_start", async () => {
-		await postTrace("agent", "agent_start");
+		currentLatency.agentStartedAt = Date.now();
+		await postTrace("agent", "agent_start", currentLatency.utteranceId ? { ...currentLatency, utteranceToAgentStartMs: currentLatency.utteranceCreatedAt ? currentLatency.agentStartedAt - currentLatency.utteranceCreatedAt : undefined } : undefined);
 	});
 
 	pi.on("agent_end", async () => {
@@ -59,6 +66,21 @@ export default function (pi: ExtensionAPI) {
 		await postTrace("tool", `tool_result: ${event.toolName}`, { isError: event.isError, content: event.content });
 	});
 
+	pi.on("message_update", async (event) => {
+		if (pendingMeetingResponses <= 0) return;
+		const now = Date.now();
+		if (now - lastStreamPost < 350) return;
+		const markdown = extractText(event.message.content).trim();
+		if (!markdown) return;
+		lastStreamPost = now;
+		if (!firstUpdatePosted) {
+			firstUpdatePosted = true;
+			await postTrace("latency", "assistant.first_update", { ...currentLatency, firstUpdateAt: now, agentStartToFirstUpdateMs: currentLatency.agentStartedAt ? now - currentLatency.agentStartedAt : undefined, utteranceToFirstUpdateMs: currentLatency.utteranceCreatedAt ? now - currentLatency.utteranceCreatedAt : undefined, chars: markdown.length });
+		}
+		currentMeetingMessageId ||= newEventId("msg");
+		await postAgentMessage(currentMeetingMessageId, markdown, true).catch(() => undefined);
+	});
+
 	pi.on("message_end", async (event, ctx) => {
 		if (event.message.role !== "assistant") return;
 		if (pendingMeetingResponses <= 0) return;
@@ -67,23 +89,18 @@ export default function (pi: ExtensionAPI) {
 		if (!markdown) return;
 
 		await postTrace("message", markdown);
+		await postTrace("latency", "assistant.final", { ...currentLatency, finalAt: Date.now(), chars: markdown.length });
 		pendingMeetingResponses = Math.max(0, pendingMeetingResponses - 1);
-		await postMeetingEvent({
-			id: newEventId("msg"),
-			type: "agent.message",
-			meetingId,
-			createdAt: nowIso(),
-			agentId,
-			format: "markdown",
-			text: markdown,
-		}).catch((error) => ctx.ui.notify(`Meeting post failed: ${errorMessage(error)}`, "error"));
+		const messageId = currentMeetingMessageId || newEventId("msg");
+		currentMeetingMessageId = undefined;
+		await postAgentMessage(messageId, markdown, false).catch((error) => ctx.ui.notify(`Meeting post failed: ${errorMessage(error)}`, "error"));
 	});
 
 	pi.registerCommand("meeting-connect", {
 		description: "Connect this Pi session to the local Meeting UI event stream",
 		handler: async (_args, ctx) => {
 			await initialiseCursor(ctx);
-			startPolling(ctx);
+			startListening(ctx);
 			ctx.ui.notify(`Meeting bridge connected to ${api}`, "success");
 		},
 	});
@@ -93,6 +110,8 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			if (timer) clearInterval(timer);
 			timer = undefined;
+			streamAbort?.abort();
+			streamAbort = undefined;
 			ctx.ui.setStatus("meeting", "meeting: off");
 			ctx.ui.notify("Meeting bridge disconnected", "info");
 		},
@@ -133,10 +152,19 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	function startPolling(ctx: ExtensionContext) {
+	function startListening(ctx: ExtensionContext) {
+		if (timer) clearInterval(timer);
+		timer = undefined;
+		streamAbort?.abort();
+		streamAbort = new AbortController();
+		ctx.ui.setStatus("meeting", "meeting: streaming");
+		void connectEventStream(ctx, streamAbort.signal);
+	}
+
+	function startPollingFallback(ctx: ExtensionContext) {
 		if (timer) clearInterval(timer);
 		timer = setInterval(() => void poll(ctx), 1200);
-		ctx.ui.setStatus("meeting", "meeting: listening");
+		ctx.ui.setStatus("meeting", "meeting: polling fallback");
 		void poll(ctx);
 	}
 
@@ -148,6 +176,51 @@ export default function (pi: ExtensionAPI) {
 		} catch (error) {
 			ctx.ui.setStatus("meeting", "meeting: offline");
 			ctx.ui.notify(`Meeting API unavailable at ${api}: ${errorMessage(error)}`, "warning");
+		}
+	}
+
+	async function connectEventStream(ctx: ExtensionContext, signal: AbortSignal) {
+		try {
+			const res = await fetch(`${api}/events/stream`, { signal });
+			if (!res.ok || !res.body) throw new Error(`GET /events/stream returned ${res.status}`);
+			ctx.ui.setStatus("meeting", "meeting: streaming");
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = "";
+			while (!signal.aborted) {
+				const { value, done } = await reader.read();
+				if (done) break;
+				buffer += decoder.decode(value, { stream: true });
+				let boundary = buffer.indexOf("\n\n");
+				while (boundary >= 0) {
+					const raw = buffer.slice(0, boundary);
+					buffer = buffer.slice(boundary + 2);
+					handleSseBlock(raw, ctx);
+					boundary = buffer.indexOf("\n\n");
+				}
+			}
+			if (!signal.aborted) startPollingFallback(ctx);
+		} catch (error) {
+			if (!signal.aborted) {
+				ctx.ui.setStatus("meeting", "meeting: stream reconnecting");
+				await postTrace("latency", "pi.extension.stream_error", { error: errorMessage(error) });
+				startPollingFallback(ctx);
+			}
+		}
+	}
+
+	function handleSseBlock(raw: string, ctx: ExtensionContext) {
+		const data = raw.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+		if (!data) return;
+		try {
+			const event = JSON.parse(data) as MeetingEvent | { next?: number };
+			if (typeof (event as { next?: unknown }).next === "number") cursor = (event as { next: number }).next;
+			if ((event as MeetingEvent).type === "utterance.final" && !seen.has((event as MeetingEvent).id)) {
+				seen.add((event as MeetingEvent).id);
+				handleUtterance(event as UtteranceFinalEvent, ctx);
+			}
+		} catch {
+			// Ignore malformed SSE blocks.
 		}
 	}
 
@@ -170,11 +243,18 @@ export default function (pi: ExtensionAPI) {
 	function handleUtterance(event: UtteranceFinalEvent, ctx: ExtensionContext) {
 		const text = event.text.trim();
 		if (!text || isIgnorableTranscript(text)) return;
+		const extensionReceivedAt = Date.now();
+		const utteranceCreatedAt = Date.parse(event.createdAt);
+		currentLatency = { utteranceId: event.id, utteranceCreatedAt: Number.isFinite(utteranceCreatedAt) ? utteranceCreatedAt : undefined, extensionReceivedAt };
+		void postTrace("latency", "pi.extension.received_utterance", { ...currentLatency, eventAgeMs: currentLatency.utteranceCreatedAt ? extensionReceivedAt - currentLatency.utteranceCreatedAt : undefined, textChars: text.length });
 		injectMeetingPrompt(text, event.speakerLabel || "Meeting speaker", ctx);
 	}
 
 	function injectMeetingPrompt(text: string, speaker: string, ctx: ExtensionContext) {
 		pendingMeetingResponses++;
+		currentMeetingMessageId = newEventId("msg");
+		lastStreamPost = 0;
+		firstUpdatePosted = false;
 		void postTrace("input", `${speaker}: ${text}`);
 		const prompt = [
 			`The host spoke in the Meeting UI as ${speaker}:`,
@@ -198,7 +278,20 @@ export default function (pi: ExtensionAPI) {
 		return await res.json() as { events: MeetingEvent[]; next: number };
 	}
 
-	async function postTrace(channel: "input" | "agent" | "message" | "tool" | "error" | "debug", text: string, details?: unknown): Promise<void> {
+	async function postAgentMessage(id: string, text: string, streaming: boolean): Promise<void> {
+		await postMeetingEvent({
+			id,
+			type: "agent.message",
+			meetingId,
+			createdAt: nowIso(),
+			agentId,
+			format: "markdown",
+			text,
+			streaming,
+		});
+	}
+
+	async function postTrace(channel: "input" | "agent" | "message" | "tool" | "error" | "debug" | "latency", text: string, details?: unknown): Promise<void> {
 		await postMeetingEvent({
 			id: newEventId("trace"),
 			type: "agent.trace",

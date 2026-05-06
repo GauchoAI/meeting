@@ -40,6 +40,7 @@
 
   <script type="module">
     const api = localStorage.getItem("meeting.api") || "http://localhost:4317";
+    const meetingId = localStorage.getItem("meeting.id") || "local-demo";
     const statusEl = document.getElementById("status");
     const dotEl = document.getElementById("dot");
     const joinButton = document.getElementById("join");
@@ -156,11 +157,42 @@
 
     async function sendAudioChunk(blob) {
       const extension = blob.type.includes("mp4") ? "mp4" : "webm";
-      await fetch(`${api}/audio/chunk?extension=${extension}&speaker=Host`, {
-        method: "POST",
-        headers: { "Content-Type": blob.type || "application/octet-stream" },
-        body: await blob.arrayBuffer(),
-      }).catch((error) => console.warn("audio chunk failed", error));
+      const arrayBuffer = await blob.arrayBuffer();
+      const uploadStartedAt = Date.now();
+      void postTrace("audio.upload.start", { bytes: arrayBuffer.byteLength, mimeType: blob.type, extension, uploadStartedAt });
+      try {
+        const response = await fetch(`${api}/audio/chunk?extension=${extension}&speaker=Host&clientStartedAt=${uploadStartedAt}`, {
+          method: "POST",
+          headers: { "Content-Type": blob.type || "application/octet-stream" },
+          body: arrayBuffer,
+        });
+        const uploadEndedAt = Date.now();
+        void postTrace("audio.upload.end", { status: response.status, elapsedMs: uploadEndedAt - uploadStartedAt, uploadStartedAt, uploadEndedAt });
+      } catch (error) {
+        void postTrace("audio.upload.error", { elapsedMs: Date.now() - uploadStartedAt, error: error?.message || String(error) });
+        console.warn("audio chunk failed", error);
+      }
+    }
+
+    async function postTrace(text, details) {
+      try {
+        await fetch(`${api}/events`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: `trace_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            type: "agent.trace",
+            meetingId,
+            createdAt: new Date().toISOString(),
+            agentId: "stable-shell",
+            channel: "latency",
+            text,
+            details,
+          }),
+        });
+      } catch {
+        // Tracing must never break push-to-talk.
+      }
     }
 
     function preferredMimeType() {

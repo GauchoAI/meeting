@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI) {
 			return {
 				content: [
 					{ type: "text" as const, text: `Screenshot captured: ${output}` },
-					{ type: "image" as const, source: { type: "base64" as const, mediaType: "image/png", data: image } },
+					{ type: "image" as const, data: image, mimeType: "image/png" },
 				],
 				details: { output, url, width, height },
 			};
