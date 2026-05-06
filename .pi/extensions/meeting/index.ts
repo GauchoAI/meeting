@@ -190,13 +190,11 @@ export default function (pi: ExtensionAPI) {
 
 	function startListening(ctx: ExtensionContext) {
 		if (timer) clearInterval(timer);
+		timer = undefined;
 		streamAbort?.abort();
 		streamAbort = new AbortController();
 		ctx.ui.setStatus("meeting", "meeting: streaming");
 		void connectEventStream(ctx, streamAbort.signal);
-		// Keep a low-frequency poll active even when SSE appears connected. After extension reloads
-		// or dev-server restarts, we have seen an open SSE socket stop delivering new events.
-		timer = setInterval(() => void poll(ctx), 1500);
 	}
 
 	function startPollingFallback(ctx: ExtensionContext) {
@@ -207,19 +205,15 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function startArtifactWatcher(ctx: ExtensionContext) {
-		try {
-			artifactWatcher?.close();
-			const artifactsDir = resolve(ctx.cwd, "artifacts");
-			artifactWatcher = watch(artifactsDir, { recursive: true }, (_event, filename) => {
-				if (!filename || basename(String(filename)) !== "artifact.smart.md") return;
-				const artifactPath = resolve(artifactsDir, String(filename));
-				const previous = artifactDebounce.get(artifactPath);
-				if (previous) clearTimeout(previous);
-				artifactDebounce.set(artifactPath, setTimeout(() => void publishArtifactChange(artifactPath, ctx), 180));
-			});
-		} catch (error) {
-			void postTrace("error", `artifact watcher unavailable: ${errorMessage(error)}`);
-		}
+		artifactWatcher?.close();
+		const artifactsDir = resolve(ctx.cwd, "artifacts");
+		artifactWatcher = watch(artifactsDir, { recursive: true }, (_event, filename) => {
+			if (!filename || basename(String(filename)) !== "artifact.smart.md") return;
+			const artifactPath = resolve(artifactsDir, String(filename));
+			const previous = artifactDebounce.get(artifactPath);
+			if (previous) clearTimeout(previous);
+			artifactDebounce.set(artifactPath, setTimeout(() => void publishArtifactChange(artifactPath, ctx), 180));
+		});
 	}
 
 	async function publishArtifactChange(artifactPath: string, ctx: ExtensionContext) {
