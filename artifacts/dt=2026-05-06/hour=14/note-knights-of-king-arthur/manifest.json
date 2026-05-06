@@ -1,0 +1,15 @@
+{
+  "kind": "note",
+  "slug": "knights-of-king-arthur",
+  "title": "Knights of King Arthur",
+  "createdAt": "2026-05-06T17:03:18.254Z",
+  "updatedAt": "2026-05-06T17:03:18.254Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "legend",
+    "arthur",
+    "history",
+    "storytelling"
+  ],
+  "summary": "A combined markdown note with both Excalidraw and Mermaid diagrams about the Knights of King Arthur."
+}
