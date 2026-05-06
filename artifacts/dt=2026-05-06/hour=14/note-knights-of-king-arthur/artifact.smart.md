@@ -9,7 +9,7 @@ A polished, narrative-rich overview of the Knights of King Arthur and the ideals
 - **Sir Lancelot** — renowned for martial skill, loyalty, and tragic emotional conflict.
 - **Sir Gawain** — a symbol of honor, discipline, and duty.
 - **Sir Percival** — the pure-hearted knight associated with the Quest for the Holy Grail.
-- **Sir Gawain** — brave and steadfast, defending chivalric promises.
+- **Sir Galahad** — the paragon of purity and ultimate quest integrity.
 
 ## 2) Knights’ guiding values
 
