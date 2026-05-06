@@ -769,7 +769,7 @@ function renderNativeArrow(element: MeasuredDiagramElement, index: number, eleme
     ? routeSelfConnector(elements[element.fromIndex])
     : (() => {
       const trimmed = trimConnectorToShapes(rawX1, rawY1, rawX2, rawY2, elements);
-      return routeConnector(trimmed.x1, trimmed.y1, trimmed.x2, trimmed.y2, rawX1, rawY1, rawX2, rawY2, elements);
+      return routeConnector(trimmed.x1, trimmed.y1, trimmed.x2, trimmed.y2, rawX1, rawY1, rawX2, rawY2, elements, typeof element.fromIndex === "number" ? element.fromIndex : undefined, typeof element.toIndex === "number" ? element.toIndex : undefined);
     })();
   const headFrom = route.points[Math.max(0, route.points.length - 2)];
   const headTo = route.points[route.points.length - 1];
@@ -922,14 +922,20 @@ function routeSelfConnector(shape: MeasuredDiagramElement | undefined) {
   return { points, label: { x: right + 82, y: top - 92 }, curve: true };
 }
 
-function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: number, rawY1: number, rawX2: number, rawY2: number, elements: MeasuredDiagramElement[]) {
+function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: number, rawY1: number, rawX2: number, rawY2: number, elements: MeasuredDiagramElement[], fromIndex?: number, toIndex?: number) {
   const backEdge = rawX2 < rawX1 || rawY2 < rawY1 - 40;
   if (backEdge) {
-    const offset = 92;
     const midX = (x1 + x2) / 2;
-    const routeBelow = rawY2 > rawY1 + 24;
-    const midY = routeBelow ? Math.max(y1, y2) + offset : Math.min(y1, y2) - offset;
-    return { points: [{ x: x1, y: y1 }, { x: midX, y: midY }, { x: x2, y: y2 }], label: { x: midX, y: midY + (routeBelow ? 22 : -8) }, curve: true };
+    const candidates = [
+      { x: midX, y: Math.min(y1, y2) - 112, labelDy: -8 },
+      { x: midX, y: Math.max(y1, y2) + 112, labelDy: 22 },
+      { x: Math.min(x1, x2) - 112, y: (y1 + y2) / 2, labelDy: -8 },
+      { x: Math.max(x1, x2) + 112, y: (y1 + y2) / 2, labelDy: -8 }
+    ];
+    const best = candidates
+      .map((control) => ({ control, score: routeCollisionScore([{ x: x1, y: y1 }, control, { x: x2, y: y2 }], elements, true, fromIndex, toIndex) }))
+      .sort((a, b) => a.score - b.score)[0].control;
+    return { points: [{ x: x1, y: y1 }, best, { x: x2, y: y2 }], label: { x: best.x, y: best.y + best.labelDy }, curve: true };
   }
   const obstacle = elements
     .filter((shape) => !isConnectorElement(shape))
@@ -947,6 +953,47 @@ function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: n
 function segmentIntersectsRect(x1: number, y1: number, x2: number, y2: number, rect: { x: number; y: number; width: number; height: number }): boolean {
   const hit = intersectRectRayWithT(rect, x1, y1, x2, y2);
   return Boolean(hit && hit.t <= 1);
+}
+
+function routeCollisionScore(points: Array<{ x: number; y: number }>, elements: MeasuredDiagramElement[], curve: boolean, fromIndex?: number, toIndex?: number): number {
+  const obstacles = elements
+    .map((shape, index) => ({ shape, index }))
+    .filter(({ shape, index }) => !isConnectorElement(shape) && index !== fromIndex && index !== toIndex)
+    .map(({ shape }) => ({ x: numberOr(shape.x, 0) - 34, y: numberOr(shape.y, 0) - 34, width: numberOr(shape.width, 0) + 68, height: numberOr(shape.height, 0) + 68 }));
+  let score = 0;
+  const samples = 36;
+  for (let index = 1; index < samples - 1; index++) {
+    const t = index / (samples - 1);
+    const point = sampleRoute(points, t, curve);
+    for (const rect of obstacles) {
+      if (pointInRect(point.x, point.y, rect)) score += 1_000;
+      const cx = rect.x + rect.width / 2;
+      const cy = rect.y + rect.height / 2;
+      const dx = Math.max(Math.abs(point.x - cx) - rect.width / 2, 0);
+      const dy = Math.max(Math.abs(point.y - cy) - rect.height / 2, 0);
+      score += Math.max(0, 24 - Math.hypot(dx, dy));
+    }
+  }
+  return score;
+}
+
+function sampleRoute(points: Array<{ x: number; y: number }>, t: number, curve: boolean): { x: number; y: number } {
+  if (!curve || points.length < 3) {
+    const a = points[0];
+    const b = points[points.length - 1];
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+  if (points.length === 3) {
+    const [a, b, c] = points;
+    const mt = 1 - t;
+    return { x: mt * mt * a.x + 2 * mt * t * b.x + t * t * c.x, y: mt * mt * a.y + 2 * mt * t * b.y + t * t * c.y };
+  }
+  const [a, b, c, d] = points;
+  const mt = 1 - t;
+  return {
+    x: mt * mt * mt * a.x + 3 * mt * mt * t * b.x + 3 * mt * t * t * c.x + t * t * t * d.x,
+    y: mt * mt * mt * a.y + 3 * mt * mt * t * b.y + 3 * mt * t * t * c.y + t * t * t * d.y
+  };
 }
 
 function renderRoughRoute(route: { points: Array<{ x: number; y: number }>; curve?: boolean }, stroke: string, seed: number, element: MeasuredDiagramElement) {
