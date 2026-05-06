@@ -4,6 +4,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Type } from "typebox";
+import { isMeetingTaskClass, setNextMeetingRoute } from "../../lib/meeting-route-state";
 
 const DEFAULT_API = "http://localhost:4317";
 const DEFAULT_MEETING_ID = "local-demo";
@@ -24,6 +25,7 @@ type UtteranceFinalEvent = MeetingEvent & {
 	text: string;
 	startMs: number;
 	endMs: number;
+	taskClass?: unknown;
 };
 
 export default function (pi: ExtensionAPI) {
@@ -43,7 +45,7 @@ export default function (pi: ExtensionAPI) {
 	let currentLatency: { utteranceId?: string; utteranceCreatedAt?: number; extensionReceivedAt?: number; agentStartedAt?: number } = {};
 	let artifactWatcher: FSWatcher | undefined;
 	let lastHostUtterance = "Update smart-down artifact";
-	let suppressMeetingAssistantResponse = false;
+	let currentTaskClass: string | undefined;
 	const artifactDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 	const seen = new Set<string>();
 
@@ -80,7 +82,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("message_update", async (event) => {
-		if (pendingMeetingResponses <= 0 || suppressMeetingAssistantResponse) return;
+		if (pendingMeetingResponses <= 0) return;
 		const now = Date.now();
 		if (now - lastStreamPost < 350) return;
 		const markdown = extractText(event.message.content).trim();
@@ -100,13 +102,6 @@ export default function (pi: ExtensionAPI) {
 
 		const markdown = extractText(event.message.content).trim();
 		if (!markdown) return;
-		if (suppressMeetingAssistantResponse) {
-			await postTrace("message", `suppressed assistant response: ${markdown}`);
-			pendingMeetingResponses = Math.max(0, pendingMeetingResponses - 1);
-			currentMeetingMessageId = undefined;
-			suppressMeetingAssistantResponse = false;
-			return;
-		}
 
 		await postTrace("message", markdown);
 		await postTrace("latency", "assistant.final", { ...currentLatency, finalAt: Date.now(), chars: markdown.length });
@@ -162,7 +157,7 @@ export default function (pi: ExtensionAPI) {
 			const artifactPath = await resolveArtifactPath(ctx.cwd, params.path, params.slug);
 			const markdown = await readFile(artifactPath, "utf8");
 			const messageId = newEventId("artifact");
-			await streamMarkdownToMeeting(messageId, markdown, Math.max(0, params.delayMs ?? 35));
+			await streamMarkdownToMeeting(messageId, markdown, Math.max(0, params.delayMs ?? 35), artifactPath);
 			return { content: [{ type: "text" as const, text: `Opened ${artifactPath}.` }], details: { artifactPath } };
 		},
 	});
@@ -185,6 +180,8 @@ export default function (pi: ExtensionAPI) {
 				agentId,
 				format: "markdown",
 				text,
+				surface: "canvas",
+				lifecycle: "final",
 			});
 			return { content: [{ type: "text" as const, text: "Posted Markdown to the Meeting UI." }], details: {} };
 		},
@@ -224,22 +221,22 @@ export default function (pi: ExtensionAPI) {
 			if (!(await stat(artifactPath)).isFile()) return;
 			const markdown = await readFile(artifactPath, "utf8");
 			const messageId = `artifact_${Buffer.from(artifactPath).toString("base64url").slice(0, 18)}_${Date.now().toString(36)}`;
-			await streamMarkdownToMeeting(messageId, markdown, 20);
+			await streamMarkdownToMeeting(messageId, markdown, 20, artifactPath);
 			await commitArtifactChange(artifactPath, lastHostUtterance, ctx);
 		} catch (error) {
 			await postTrace("error", `artifact watcher failed: ${errorMessage(error)}`, { artifactPath });
 		}
 	}
 
-	async function streamMarkdownToMeeting(messageId: string, markdown: string, delayMs: number) {
+	async function streamMarkdownToMeeting(messageId: string, markdown: string, delayMs: number, documentId?: string) {
 		const lines = markdown.split(/(?<=\n)/);
 		let buffer = "";
 		for (const line of lines) {
 			buffer += line;
-			await postAgentMessage(messageId, buffer, true);
+			await postAgentMessage(messageId, buffer, true, { surface: "canvas", lifecycle: "draft", documentId });
 			if (delayMs > 0) await sleep(delayMs);
 		}
-		await postAgentMessage(messageId, markdown, false);
+		await postAgentMessage(messageId, markdown, false, { surface: "canvas", lifecycle: "final", documentId });
 	}
 
 	async function commitArtifactChange(artifactPath: string, message: string, ctx: ExtensionContext) {
@@ -339,10 +336,15 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		lastHostUtterance = text;
-		suppressMeetingAssistantResponse = isArtifactSurfaceRequest(text);
 		const extensionReceivedAt = Date.now();
 		currentLatency = { utteranceId: event.id, utteranceCreatedAt, extensionReceivedAt };
 		void postTrace("latency", "pi.extension.received_utterance", { ...currentLatency, eventAgeMs: currentLatency.utteranceCreatedAt ? extensionReceivedAt - currentLatency.utteranceCreatedAt : undefined, textChars: text.length });
+		if (isMeetingTaskClass(event.taskClass)) {
+			currentTaskClass = event.taskClass;
+			setNextMeetingRoute({ taskClass: event.taskClass, source: `utterance:${event.id}` });
+		} else {
+			currentTaskClass = undefined;
+		}
 		injectMeetingPrompt(text, event.speakerLabel || "Meeting speaker", ctx);
 	}
 
@@ -353,17 +355,10 @@ export default function (pi: ExtensionAPI) {
 		firstUpdatePosted = false;
 		void postTrace("input", `${speaker}: ${text}`);
 		const prompt = [
-			`The host spoke in the Meeting UI as ${speaker}:`,
-			"",
-			`> ${text}`,
-			"",
-				"Decide whether this is a work request or a conversational request.",
-				"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, or create/update an artifact/file: perform only the necessary work now with tools and continue until complete.",
-				"To open an existing smart-down artifact in the Meeting UI, use meeting_open_artifact; do not read and paste the file yourself.",
-				"For smart-down artifact edits, edit only the artifact file in place, then stop without a final Markdown status. The artifact watcher will stream the file line by line, commit with the host utterance as the commit message, and push.",
-				"For code implementation work, validate when appropriate and commit only when explicitly requested or when the repo workflow clearly requires it.",
-			"If it only asks for explanation or brainstorming: answer the host directly with concise Markdown.",
-			"Do not merely acknowledge actionable work requests.",
+			`Meeting input from ${speaker}:`,
+			`taskClass: ${currentTaskClass || "conversation"}`,
+			"message:",
+			text,
 		].join("\n");
 
 		if (ctx.isIdle()) {
@@ -380,7 +375,7 @@ export default function (pi: ExtensionAPI) {
 		return await res.json() as { events: MeetingEvent[]; next: number };
 	}
 
-	async function postAgentMessage(id: string, text: string, streaming: boolean): Promise<void> {
+	async function postAgentMessage(id: string, text: string, streaming: boolean, options: { surface?: "canvas" | "status"; lifecycle?: "draft" | "final"; documentId?: string } = {}): Promise<void> {
 		await postMeetingEvent({
 			id,
 			type: "agent.message",
@@ -389,6 +384,9 @@ export default function (pi: ExtensionAPI) {
 			agentId,
 			format: "markdown",
 			text,
+			surface: options.surface || "status",
+			lifecycle: options.lifecycle || (streaming ? "draft" : "final"),
+			documentId: options.documentId,
 			streaming,
 		});
 	}
@@ -482,16 +480,6 @@ async function findFiles(root: string, name: string): Promise<string[]> {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-}
-
-function isArtifactSurfaceRequest(text: string): boolean {
-	const normalized = text.toLowerCase();
-	return normalized.includes("hot-reload")
-		|| normalized.includes("hot reload")
-		|| normalized.includes("file watcher")
-		|| normalized.includes("filewatcher")
-		|| /open\s+(?:the\s+)?diagram/.test(normalized)
-		|| /instead of .+\b(?:say|write|label|word)\b/.test(normalized);
 }
 
 function execGit(cwd: string, args: string[]): Promise<string> {

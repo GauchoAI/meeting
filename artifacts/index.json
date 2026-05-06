@@ -1,6 +1,90 @@
 {
-  "updatedAt": "2026-05-06T14:52:27.294Z",
+  "updatedAt": "2026-05-06T17:11:45.471Z",
   "artifacts": [
+    {
+      "kind": "note",
+      "slug": "arthur-battle-evidence-map",
+      "title": "Arthur: Mount Badon & Camlann Evidence Map",
+      "createdAt": "2026-05-06T17:11:45.460Z",
+      "updatedAt": "2026-05-06T17:11:45.460Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "arthur",
+        "battle",
+        "history",
+        "evidence"
+      ],
+      "summary": "A source chain and confidence map comparing Mount Badon and Camlann with primary, chronicle, and literary layers.",
+      "path": "artifacts/dt=2026-05-06/hour=14/note-arthur-battle-evidence-map/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=14/note-arthur-battle-evidence-map",
+      "mtime": "2026-05-06T17:11:45.465Z"
+    },
+    {
+      "kind": "note",
+      "slug": "king-arthur-and-the-romans",
+      "title": "King Arthur and the Romans",
+      "createdAt": "2026-05-06T17:10:26.799Z",
+      "updatedAt": "2026-05-06T17:11:01.067Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "legend",
+        "arthur",
+        "romans",
+        "history"
+      ],
+      "summary": "A diagram-only artifact showing possible relationship pathways between Arthur and Roman-influenced traditions, preserving prior structure.",
+      "path": "artifacts/dt=2026-05-06/hour=14/note-king-arthur-and-the-romans/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=14/note-king-arthur-and-the-romans",
+      "mtime": "2026-05-06T17:11:01.071Z"
+    },
+    {
+      "kind": "note",
+      "slug": "night-of-camelot-bell-river",
+      "title": "One Night in Camelot: The Silent Bells",
+      "createdAt": "2026-05-06T17:09:58.502Z",
+      "updatedAt": "2026-05-06T17:09:58.502Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "story",
+        "arthur",
+        "knights"
+      ],
+      "summary": "A single-night Arthurian tale told with a timeline diagram and Excalidraw cast map.",
+      "path": "artifacts/dt=2026-05-06/hour=14/note-night-of-camelot-bell-river/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=14/note-night-of-camelot-bell-river",
+      "mtime": "2026-05-06T17:10:03.739Z"
+    },
+    {
+      "kind": "note",
+      "slug": "knights-of-king-arthur",
+      "title": "Knights of King Arthur",
+      "createdAt": "2026-05-06T17:03:18.254Z",
+      "updatedAt": "2026-05-06T17:03:18.254Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "legend",
+        "arthur",
+        "history",
+        "storytelling"
+      ],
+      "summary": "A combined markdown note with both Excalidraw and Mermaid diagrams about the Knights of King Arthur.",
+      "path": "artifacts/dt=2026-05-06/hour=14/note-knights-of-king-arthur/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=14/note-knights-of-king-arthur",
+      "mtime": "2026-05-06T17:03:24.121Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "medieval-knight-morning-routine",
+      "title": "Morning routine of a medieval knight",
+      "createdAt": "2026-05-06T15:52:58.361Z",
+      "updatedAt": "2026-05-06T15:52:58.361Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "A medieval knight starts the day with dawn wake-up, gear checks, and morning departure.",
+      "path": "artifacts/dt=2026-05-06/hour=12/diagram-medieval-knight-morning-routine/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=12/diagram-medieval-knight-morning-routine",
+      "mtime": "2026-05-06T15:52:58.368Z"
+    },
     {
       "kind": "diagram",
       "slug": "project-flow",
@@ -17,7 +101,7 @@
       "summary": "Project flow artifact updated to use Excalidron naming",
       "path": "artifacts/dt=2026-05-06/hour=04/diagram-project-flow/artifact.smart.md",
       "dir": "artifacts/dt=2026-05-06/hour=04/diagram-project-flow",
-      "mtime": "2026-05-06T14:47:07.397Z"
+      "mtime": "2026-05-06T15:11:50.484Z"
     }
   ]
 }

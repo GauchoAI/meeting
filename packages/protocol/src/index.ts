@@ -1,6 +1,13 @@
 export type MeetingId = string;
 export type AgentId = string;
 export type ParticipantId = string;
+export type MeetingTaskClass =
+  | "artifact.render"
+  | "artifact.edit"
+  | "code.change"
+  | "research.explore"
+  | "critique.review"
+  | "conversation";
 
 export type MeetingEvent =
   | UtteranceEvent
@@ -26,6 +33,7 @@ export interface UtteranceEvent extends BaseEvent {
   text: string;
   startMs: number;
   endMs: number;
+  taskClass?: MeetingTaskClass;
 }
 
 export interface PartialUtteranceEvent extends BaseEvent {
@@ -57,6 +65,10 @@ export interface AgentMessageEvent extends BaseEvent {
   agentId: AgentId;
   format: "markdown" | "plain";
   text: string;
+  surface?: "canvas" | "status";
+  lifecycle?: "draft" | "final";
+  documentId?: string;
+  streaming?: boolean;
 }
 
 export interface AgentTraceEvent extends BaseEvent {
@@ -72,6 +84,7 @@ export interface AgentTaskEvent extends BaseEvent {
   agentId: AgentId;
   status: "queued" | "working" | "blocked" | "done" | "failed";
   title: string;
+  taskClass?: MeetingTaskClass;
   repository?: RepositoryContext;
   branch?: string;
   previewUrl?: string;
@@ -104,4 +117,3 @@ export function newEventId(prefix: string): string {
 export function nowIso(): string {
   return new Date().toISOString();
 }
-

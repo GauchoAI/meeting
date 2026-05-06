@@ -84,11 +84,12 @@ export function createMeetingMcpServer() {
     {
       title: z.string(),
       status: z.enum(["queued", "working", "blocked", "done", "failed"]).default("queued"),
+      taskClass: z.enum(["artifact.render", "artifact.edit", "code.change", "research.explore", "critique.review", "conversation"]).optional(),
       branch: z.string().optional(),
       previewUrl: z.string().optional(),
       details: z.string().optional()
     },
-    async ({ title, status, branch, previewUrl, details }) => {
+    async ({ title, status, taskClass, branch, previewUrl, details }) => {
       await postEvent(api, {
         id: newEventId("task"),
         type: "agent.task",
@@ -97,6 +98,7 @@ export function createMeetingMcpServer() {
         agentId,
         title,
         status,
+        taskClass,
         branch,
         previewUrl,
         details

@@ -120,8 +120,9 @@ function App() {
   }, []);
 
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
-  const canvasDocument = resolveCanvasDocument(query, messages);
-  const latestMessage = messages[0];
+  const canvasMessages = messages.filter(isCanvasMessage);
+  const canvasDocument = resolveCanvasDocument(query, canvasMessages);
+  const latestMessage = canvasMessages[0];
   const renderStats = summarizeRenderSamples(renderSamples);
   const terminalLines = [formatRenderStats(renderStats), ...events.slice(0, 80).reverse().map(formatTerminalEvent)];
 
@@ -1287,7 +1288,9 @@ function upsertEvent(events: MeetingEvent[], event: MeetingEvent): MeetingEvent[
 function formatTerminalEvent(event: MeetingEvent): string {
   const time = new Date(event.createdAt).toLocaleTimeString();
   if (event.type === "agent.message") {
-    return `[${time}] assistant/${event.agentId}\n${event.text}`;
+    const surface = event.surface || "canvas";
+    const lifecycle = event.lifecycle || (event.streaming ? "draft" : "final");
+    return `[${time}] assistant/${event.agentId}/${surface}/${lifecycle}\n${event.text}`;
   }
   if (event.type === "utterance.final") {
     return `[${time}] host/${event.speakerLabel}\n${event.text}`;
@@ -1301,6 +1304,10 @@ function formatTerminalEvent(event: MeetingEvent): string {
     return `[${time}] trace/${trace.agentId || "agent"}/${trace.channel || "debug"}\n${trace.text || ""}${details}`;
   }
   return `[${time}] ${event.type}\n${JSON.stringify(event, null, 2)}`;
+}
+
+function isCanvasMessage(event: AgentMessageEvent): boolean {
+  return (event.surface || "canvas") === "canvas";
 }
 
 interface RenderStats {
