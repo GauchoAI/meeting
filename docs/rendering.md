@@ -66,6 +66,8 @@ But generated diagrams should prefer our measurement-first layer when they need 
 - Pretext is the label sizing foundation for native shapes.
 - Concise diagrams are progressive: unfinished fences, sections, labels, and edge lines should still render the valid prefix.
 - Prefer indexed edges (`0 -> 1`) for generated diagrams because they stream compactly and avoid repeated long labels.
+- Connectors should attach to the visible contours of source and target shapes. They should avoid passing through boxes, circles, node labels, and other important marks whenever a clear route exists.
+- Arrow labels should be placed in open space along the route. They should not overlap nodes, node labels, arrowheads, or other arrow labels.
 
 ## Concise native syntax
 

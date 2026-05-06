@@ -141,6 +141,10 @@ function defaultPrompt() {
     "",
     "Do not redraw the diagram. Do not restyle it. Do not improve the design. Do not change layout, spacing, colors, handwriting style, stroke texture, node shapes, node positions, labels, or arrow meanings.",
     "",
+    "When repairing connector defects, make arrows begin and end on the visible contour of their source/target shapes. Avoid arrow strokes passing through boxes, circles, or labels unless the existing diagram makes that unavoidable.",
+    "",
+    "Keep arrow labels readable and detached from boxes: labels should not overlap nodes, node labels, arrowheads, or other arrow labels.",
+    "",
     "Only repair visible defects that make the existing diagram incorrect or hard to read, using the smallest local edits possible. Preserve all unaffected pixels as close to unchanged as possible.",
     "",
     "If a defect can be fixed by moving or cleaning a small local element, do only that. Leave the rest of the image identical."
