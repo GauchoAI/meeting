@@ -487,20 +487,21 @@ function parseConciseDiagram(source: string): DiagramScene {
   const elements: DiagramElement[] = [];
   const labels = new Map<number, string>();
   const shapes = new Map<number, string>();
-  const edges: Array<{ from: number; to: number; label?: string }> = [];
+  const styles = new Map<number, Record<string, string>>();
+  const edges: Array<{ from: number; to: number; label?: string; arrowhead?: string; style?: Record<string, string> }> = [];
   let count = 0;
-  let section: "edges" | "labels" | "shapes" | undefined;
+  let section: "edges" | "labels" | "shapes" | "styles" | undefined;
 
   for (const line of lines) {
     const nodesMatch = line.match(/^nodes\s*:\s*(\d+)$/i);
     if (nodesMatch) { count = Number(nodesMatch[1]); section = undefined; continue; }
-    const sectionMatch = line.match(/^(edges|labels|shapes)\s*:\s*$/i);
+    const sectionMatch = line.match(/^(edges|labels|shapes|styles)\s*:\s*$/i);
     if (sectionMatch) { section = sectionMatch[1].toLowerCase() as typeof section; continue; }
 
     const edgeText = line.replace(/^[-*]\s*/, "");
-    const edgeMatch = edgeText.match(/^(\d+)\s*->\s*(\d+)(?:\s+[\"“](.*)[\"”])?$/);
+    const edgeMatch = edgeText.match(/^(\d+)\s*->\s*(\d+)(?:\s+[\"“]([^\"”]*)[\"”]?)?(?:\s+(none|arrow|triangle|dot|bar))?(?:\s+(.*))?$/);
     if (section === "edges" && edgeMatch) {
-      edges.push({ from: Number(edgeMatch[1]), to: Number(edgeMatch[2]), label: edgeMatch[3] });
+      edges.push({ from: Number(edgeMatch[1]), to: Number(edgeMatch[2]), label: edgeMatch[3], arrowhead: edgeMatch[4], style: parseInlineStyle(edgeMatch[5] || "") });
       count = Math.max(count, Number(edgeMatch[1]) + 1, Number(edgeMatch[2]) + 1);
       continue;
     }
@@ -508,6 +509,7 @@ function parseConciseDiagram(source: string): DiagramScene {
     const valueMatch = parseProgressiveKeyValue(edgeText);
     if (valueMatch && section === "labels") { labels.set(valueMatch.index, valueMatch.value); continue; }
     if (valueMatch && section === "shapes") { shapes.set(valueMatch.index, valueMatch.value.trim() || "rectangle"); continue; }
+    if (valueMatch && section === "styles") { styles.set(valueMatch.index, parseInlineStyle(valueMatch.value)); continue; }
   }
 
   if (!count) count = Math.max(...Array.from(labels.keys()), ...Array.from(shapes.keys()), -1) + 1;
@@ -521,9 +523,15 @@ function parseConciseDiagram(source: string): DiagramScene {
       y: position.y,
       width: 190,
       height: 80,
-      strokeColor: "#94a3b8",
-      backgroundColor: "transparent",
-      label: { text: labels.get(index) || `Node ${index}`, fontSize: 22 }
+      strokeColor: styles.get(index)?.stroke || "#94a3b8",
+      backgroundColor: styles.get(index)?.fill || "transparent",
+      fillStyle: styles.get(index)?.fillStyle,
+      strokeStyle: styles.get(index)?.strokeStyle,
+      strokeWidth: styles.get(index)?.strokeWidth ? Number(styles.get(index)?.strokeWidth) : undefined,
+      roughness: styles.get(index)?.roughness ? Number(styles.get(index)?.roughness) : undefined,
+      opacity: styles.get(index)?.opacity ? Number(styles.get(index)?.opacity) : undefined,
+      textAlign: styles.get(index)?.textAlign,
+      label: { text: labels.get(index) || `Node ${index}`, fontSize: styles.get(index)?.fontSize ? Number(styles.get(index)?.fontSize) : 22 }
     });
   }
   for (const edge of edges) {
@@ -535,12 +543,25 @@ function parseConciseDiagram(source: string): DiagramScene {
       y: from.y + 40,
       width: to.x + 95 - (from.x + 95),
       height: to.y + 40 - (from.y + 40),
-      strokeColor: "#64748b",
-      endArrowhead: "arrow",
-      label: edge.label ? { text: edge.label, fontSize: 16 } : undefined
+      strokeColor: edge.style?.stroke || "#64748b",
+      strokeStyle: edge.style?.strokeStyle,
+      strokeWidth: edge.style?.strokeWidth ? Number(edge.style.strokeWidth) : undefined,
+      roughness: edge.style?.roughness ? Number(edge.style.roughness) : undefined,
+      opacity: edge.style?.opacity ? Number(edge.style.opacity) : undefined,
+      endArrowhead: edge.arrowhead === "none" ? undefined : edge.arrowhead || edge.style?.arrowhead || "arrow",
+      label: edge.label ? { text: edge.label, fontSize: edge.style?.fontSize ? Number(edge.style.fontSize) : 16 } : undefined
     });
   }
   return { elements };
+}
+
+function parseInlineStyle(value: string): Record<string, string> {
+  const style: Record<string, string> = {};
+  for (const part of value.split(/[,;]\s*|\s+/).filter(Boolean)) {
+    const [key, raw] = part.split("=");
+    if (key && raw) style[key.trim()] = raw.trim();
+  }
+  return style;
 }
 
 function parseProgressiveKeyValue(line: string): { index: number; value: string } | undefined {
@@ -666,9 +687,10 @@ function renderNativeShape(element: MeasuredDiagramElement, index: number, type:
   const height = Math.max(1, numberOr(element.height, 80));
   const stroke = typeof element.strokeColor === "string" ? element.strokeColor : "currentColor";
   const fill = typeof element.backgroundColor === "string" && element.backgroundColor !== "transparent" ? element.backgroundColor : "var(--canvas)";
+  const opacity = typeof element.opacity === "number" ? element.opacity : undefined;
   return (
-    <g key={index}>
-      {renderRoughShape(type, x, y, width, height, stroke, fill, index)}
+    <g key={index} opacity={opacity}>
+      {renderRoughShape(type, x, y, width, height, stroke, fill, index, element)}
       {element.measuredLabel && renderLabel(element.measuredLabel, x + width / 2, y + height / 2, index)}
     </g>
   );
@@ -679,8 +701,19 @@ function roundedRectPath(x: number, y: number, width: number, height: number, ra
   return `M ${x + r} ${y} L ${x + width - r} ${y} Q ${x + width} ${y} ${x + width} ${y + r} L ${x + width} ${y + height - r} Q ${x + width} ${y + height} ${x + width - r} ${y + height} L ${x + r} ${y + height} Q ${x} ${y + height} ${x} ${y + height - r} L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} Z`;
 }
 
-function renderRoughShape(type: string, x: number, y: number, width: number, height: number, stroke: string, fill: string, seed: number) {
-  const options = { stroke, fill, fillStyle: fill === "var(--canvas)" ? "solid" : "hachure", hachureGap: 8, hachureAngle: -45, strokeWidth: 2.1, seed: seed + 1, roughness: 1.35, bowing: 1.8 };
+function renderRoughShape(type: string, x: number, y: number, width: number, height: number, stroke: string, fill: string, seed: number, element: MeasuredDiagramElement) {
+  const options = {
+    stroke,
+    fill,
+    fillStyle: typeof element.fillStyle === "string" ? element.fillStyle : fill === "var(--canvas)" ? "solid" : "hachure",
+    hachureGap: 8,
+    hachureAngle: -45,
+    strokeWidth: typeof element.strokeWidth === "number" ? element.strokeWidth : 2.1,
+    seed: seed + 1,
+    roughness: typeof element.roughness === "number" ? element.roughness : 1.35,
+    bowing: 1.8,
+    strokeLineDash: element.strokeStyle === "dashed" ? [12, 8] : element.strokeStyle === "dotted" ? [2, 8] : undefined
+  };
   const drawable = type === "ellipse"
     ? roughGenerator.ellipse(x + width / 2, y + height / 2, width, height, options)
     : type === "diamond"
@@ -715,14 +748,17 @@ function renderNativeArrow(element: MeasuredDiagramElement, index: number, eleme
   const label = normalizeLabel(element.label, undefined);
   const labelX = (x1 + x2) / 2;
   const labelY = (y1 + y2) / 2 - 10;
+  const route = routeConnector(x1, y1, x2, y2, rawX1, rawY1, rawX2, rawY2, elements);
+  const headFrom = route.points[Math.max(0, route.points.length - 2)];
+  const headTo = route.points[route.points.length - 1];
   return (
-    <g key={index} className="nativeArrow" style={{ color: stroke }}>
-      {renderRoughLine(x1, y1, x2, y2, stroke, index)}
-      {element.endArrowhead ? renderNativeArrowhead(x1, y1, x2, y2, stroke, index) : null}
+    <g key={index} className="nativeArrow" style={{ color: stroke }} opacity={typeof element.opacity === "number" ? element.opacity : undefined}>
+      {renderRoughPolyline(route.points, stroke, index, element)}
+      {element.endArrowhead && headFrom && headTo ? renderNativeArrowhead(headFrom.x, headFrom.y, headTo.x, headTo.y, stroke, index, String(element.endArrowhead)) : null}
       {label ? (
         <g>
-          <rect className="nativeArrowLabelBg" x={labelX - estimateTextWidth(label.text, label.fontSize || 16) / 2 - 8} y={labelY - (label.fontSize || 16)} width={estimateTextWidth(label.text, label.fontSize || 16) + 16} height={(label.fontSize || 16) + 8} rx={8} />
-          <text className="nativeArrowLabel" x={labelX} y={labelY} textAnchor="middle" fontSize={label.fontSize || 16}>{label.text}</text>
+          <rect className="nativeArrowLabelBg" x={route.label.x - estimateTextWidth(label.text, label.fontSize || 16) / 2 - 8} y={route.label.y - (label.fontSize || 16)} width={estimateTextWidth(label.text, label.fontSize || 16) + 16} height={(label.fontSize || 16) + 8} rx={8} />
+          <text className="nativeArrowLabel" x={route.label.x} y={route.label.y} textAnchor="middle" fontSize={label.fontSize || 16}>{label.text}</text>
         </g>
       ) : null}
     </g>
@@ -798,16 +834,66 @@ function intersectRectRayWithT(rect: { x: number; y: number; width: number; heig
   return candidates[0];
 }
 
-function renderRoughLine(x1: number, y1: number, x2: number, y2: number, stroke: string, seed: number) {
-  const drawable = roughGenerator.line(x1, y1, x2, y2, { stroke, strokeWidth: 2.2, seed: seed + 100, roughness: 1.35, bowing: 1.8 });
-  return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, index) => <path key={index} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill="none" />)}</g>;
+function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: number, rawY1: number, rawX2: number, rawY2: number, elements: MeasuredDiagramElement[]) {
+  if (Math.hypot(rawX2 - rawX1, rawY2 - rawY1) < 4) {
+    const loop = [{ x: x1, y: y1 }, { x: x1 + 74, y: y1 - 74 }, { x: x1 + 148, y: y1 }, { x: x2 + 18, y: y2 + 38 }];
+    return { points: loop, label: loop[1] };
+  }
+  const backEdge = rawX2 < rawX1 || rawY2 < rawY1 - 40;
+  if (backEdge) {
+    const offset = 48;
+    const midX = (x1 + x2) / 2;
+    const midY = Math.min(y1, y2) - offset;
+    return { points: [{ x: x1, y: y1 }, { x: midX, y: midY }, { x: x2, y: y2 }], label: { x: midX, y: midY - 8 } };
+  }
+  const obstacle = elements
+    .filter((shape) => !isConnectorElement(shape))
+    .map((shape) => ({ x: numberOr(shape.x, 0) - 16, y: numberOr(shape.y, 0) - 16, width: numberOr(shape.width, 0) + 32, height: numberOr(shape.height, 0) + 32 }))
+    .find((rect) => !pointInRect(x1, y1, rect) && !pointInRect(x2, y2, rect) && segmentIntersectsRect(x1, y1, x2, y2, rect));
+  if (obstacle) {
+    const above = Math.min(y1, y2, obstacle.y) - 38;
+    const below = Math.max(y1, y2, obstacle.y + obstacle.height) + 38;
+    const midY = Math.abs(above - (y1 + y2) / 2) < Math.abs(below - (y1 + y2) / 2) ? above : below;
+    return { points: [{ x: x1, y: y1 }, { x: x1, y: midY }, { x: x2, y: midY }, { x: x2, y: y2 }], label: { x: (x1 + x2) / 2, y: midY - 8 } };
+  }
+  return { points: [{ x: x1, y: y1 }, { x: x2, y: y2 }], label: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 10 } };
 }
 
-function renderNativeArrowhead(x1: number, y1: number, x2: number, y2: number, stroke: string, index: number) {
+function segmentIntersectsRect(x1: number, y1: number, x2: number, y2: number, rect: { x: number; y: number; width: number; height: number }): boolean {
+  const hit = intersectRectRayWithT(rect, x1, y1, x2, y2);
+  return Boolean(hit && hit.t <= 1);
+}
+
+function renderRoughPolyline(points: Array<{ x: number; y: number }>, stroke: string, seed: number, element: MeasuredDiagramElement) {
+  const path = `M ${points.map((point) => `${point.x} ${point.y}`).join(" L ")}`;
+  const drawable = roughGenerator.path(path, {
+    stroke,
+    strokeWidth: typeof element.strokeWidth === "number" ? element.strokeWidth : 2.2,
+    seed: seed + 100,
+    roughness: typeof element.roughness === "number" ? element.roughness : 1.35,
+    bowing: 1.8,
+    strokeLineDash: element.strokeStyle === "dashed" ? [12, 8] : element.strokeStyle === "dotted" ? [2, 8] : undefined
+  });
+  return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((pathItem, index) => <path key={index} d={pathItem.d} stroke={pathItem.stroke} strokeWidth={pathItem.strokeWidth} fill="none" />)}</g>;
+}
+
+function renderNativeArrowhead(x1: number, y1: number, x2: number, y2: number, stroke: string, index: number, kind = "arrow") {
   const angle = Math.atan2(y2 - y1, x2 - x1);
   const size = 18;
   const left: [number, number] = [x2 - size * Math.cos(angle - Math.PI / 7), y2 - size * Math.sin(angle - Math.PI / 7)];
   const right: [number, number] = [x2 - size * Math.cos(angle + Math.PI / 7), y2 - size * Math.sin(angle + Math.PI / 7)];
+  if (kind === "dot") {
+    const drawable = roughGenerator.circle(x2 - 5 * Math.cos(angle), y2 - 5 * Math.sin(angle), 12, { stroke, fill: stroke, fillStyle: "solid", seed: index + 210, roughness: 0.7 });
+    return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || stroke} />)}</g>;
+  }
+  if (kind === "bar") {
+    const bx = 9 * Math.cos(angle + Math.PI / 2);
+    const by = 9 * Math.sin(angle + Math.PI / 2);
+    return renderRoughPolyline([{ x: x2 - bx, y: y2 - by }, { x: x2 + bx, y: y2 + by }], stroke, index + 220, { strokeWidth: 2.4 });
+  }
+  if (kind === "arrow") {
+    return <g className="nativeSketch">{[left, right].map((point, pointIndex) => renderRoughPolyline([{ x: point[0], y: point[1] }, { x: x2, y: y2 }], stroke, index + 230 + pointIndex, { strokeWidth: 2.2 }))}</g>;
+  }
   const drawable = roughGenerator.polygon([[x2, y2], left, right], { stroke, fill: stroke, fillStyle: "solid", strokeWidth: 1.8, seed: index + 200, roughness: 0.9 });
   return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || stroke} />)}</g>;
 }
@@ -1103,6 +1189,44 @@ labels:
   1: "Editable generative canvas renders Markdown Mermaid and Excalidraw"
   2: "Pi bridge streams assistant updates back into the meeting"
   3: "Normalization layer measures labels wraps text and expands boxes before rendering"
+\`\`\``,
+  "native-diagram-expressive-test": `# Native diagram expressive test
+
+\`\`\`diagram
+nodes: 8
+
+shapes:
+  0: ellipse
+  2: diamond
+  5: diamond
+  7: ellipse
+
+styles:
+  0: stroke=#60a5fa fill=#172554 fillStyle=hachure fontSize=20
+  2: stroke=#facc15 fill=#422006 strokeStyle=dashed roughness=2
+  5: stroke=#fb7185 fill=#4c0519 fillStyle=zigzag strokeWidth=3
+  7: stroke=#34d399 fill=#052e16 opacity=0.95
+
+edges:
+  0 -> 1 "speech" arrow stroke=#60a5fa
+  1 -> 2 "intent" triangle stroke=#facc15 strokeStyle=dashed
+  2 -> 3 "yes" dot stroke=#34d399
+  2 -> 1 "revise" bar stroke=#fb7185
+  3 -> 4 "render"
+  4 -> 5 "validate" triangle
+  5 -> 5 "retry" arrow stroke=#fb7185
+  5 -> 6 "pass" none stroke=#94a3b8
+  6 -> 7 "ship" arrow stroke=#34d399 strokeWidth=3
+
+labels:
+  0: "Host speaks in stable shell"
+  1: "Audio capture and transcription pipeline"
+  2: "Can the assistant infer the next useful step?"
+  3: "Measured native layout"
+  4: "Sketch renderer with owned text"
+  5: "Validation loop stays visible"
+  6: "Commit completed milestone"
+  7: "Meeting canvas updates live"
 \`\`\``
 };
 

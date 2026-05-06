@@ -61,14 +61,43 @@ But generated diagrams should prefer our measurement-first layer when they need 
 
 ## Current policy
 
-- Excalidraw normalization is behind a flag and defaults off.
-- Pretext is the preferred foundation for the next sizing/layout pass.
-- Avoid hand-rolled character-width estimates for production diagram layout.
+- Native diagram rendering is enabled for generated `diagram` / `native-diagram` blocks.
+- Excalidraw normalization is behind a flag and defaults off for authored JSON scenes.
+- Pretext is the label sizing foundation for native shapes.
+- Concise diagrams are progressive: unfinished fences, sections, labels, and edge lines should still render the valid prefix.
+- Prefer indexed edges (`0 -> 1`) for generated diagrams because they stream compactly and avoid repeated long labels.
+
+## Concise native syntax
+
+```diagram
+nodes: 4
+
+shapes:
+  0: ellipse
+  2: diamond
+
+styles:
+  0: stroke=#60a5fa fill=#172554 fillStyle=hachure fontSize=20
+  2: stroke=#facc15 strokeStyle=dashed roughness=2 strokeWidth=3
+
+edges:
+  0 -> 1 "speech" arrow stroke=#60a5fa
+  1 -> 2 "decision" triangle stroke=#facc15 strokeStyle=dashed
+  2 -> 1 "revise" bar stroke=#fb7185
+  2 -> 2 "retry" dot stroke=#fb7185
+  2 -> 3 "done" none
+
+labels:
+  0: "Host speaks in stable shell"
+  1: "Audio capture and transcription pipeline"
+  2: "Need another pass?"
+  3: "Meeting canvas updates live"
+```
+
+Supported first-party renderer features now include measured auto-sizing boxes, rough rectangles/ellipses/diamonds, fills/hachures, dashed/dotted strokes, stroke width, roughness, opacity, arrow/triangle/dot/bar/none arrowheads, back-edge routing, self-loop routing, and edge labels with backgrounds.
 
 ## Next steps
 
-1. Replace heuristic label measurement with Pretext.
-2. Add a small `measureLabel()` helper shared by diagram renderers.
-3. Use measured line stats to size boxes and arrow labels.
-4. Keep raw Excalidraw rendering available for authored scenes.
-5. Add visual regression screenshots for normalization on/off and Pretext sizing.
+1. Add parser unit tests once the web package has a browser-test harness.
+2. Expand JSON compatibility for more Excalidraw element metadata.
+3. Add visual regression automation around the native diagram templates.
