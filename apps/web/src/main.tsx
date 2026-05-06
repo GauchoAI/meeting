@@ -1118,7 +1118,7 @@ function renderNativeArrowhead(x1: number, y1: number, x2: number, y2: number, s
     return renderRoughPolyline([{ x: x2 - bx, y: y2 - by }, { x: x2 + bx, y: y2 + by }], stroke, index + 220, { strokeWidth: 2.4 });
   }
   if (kind === "arrow") {
-    return <g className="nativeSketch">{[left, right].map((point, pointIndex) => renderRoughPolyline([{ x: point[0], y: point[1] }, { x: x2, y: y2 }], stroke, index + 230 + pointIndex, { strokeWidth: 2.2 }))}</g>;
+    return <g className="nativeSketch">{[left, right].map((point, pointIndex) => <React.Fragment key={pointIndex}>{renderRoughPolyline([{ x: point[0], y: point[1] }, { x: x2, y: y2 }], stroke, index + 230 + pointIndex, { strokeWidth: 2.2 })}</React.Fragment>)}</g>;
   }
   const drawable = roughGenerator.polygon([[x2, y2], left, right], { stroke, fill: stroke, fillStyle: "solid", strokeWidth: 1.8, seed: index + 200, roughness: 0.9 });
   return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || stroke} />)}</g>;
