@@ -1,16 +1,21 @@
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
 import { speechProviderStatus } from "./speech.js";
 import { loadDotEnv } from "./env.js";
 import { transcribeWithLocalWhisper } from "./local-whisper.js";
 
+loadDotEnv();
+
 const port = Number(process.env.MEETING_API_PORT || 4317);
-const meetingId = "local-demo";
+const meetingId = process.env.MEETING_ID || "local-demo";
+const eventLogPath = resolveRepoPath(process.env.MEETING_EVENT_LOG || ".meeting/events.jsonl");
 const events: MeetingEvent[] = [];
 const sseClients = new Set<ServerResponse>();
 
-loadDotEnv();
-seedSystemEvent();
+loadEventLog();
+if (!events.length) seedSystemEvent();
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -38,7 +43,7 @@ const server = createServer(async (req, res) => {
     const audio = await readBuffer(req);
     try {
       const result = await transcribeWithLocalWhisper(audio, extension);
-      if (result.text) {
+      if (result.text && !isIgnorableTranscript(result.text)) {
         const startMs = Date.now() % 3_600_000;
         appendEvent({
           id: newEventId("utt"),
@@ -73,12 +78,30 @@ server.listen(port, () => {
   console.log(`[meeting-api] http://localhost:${port}`);
 });
 
-function appendEvent(event: MeetingEvent): void {
+function appendEvent(event: MeetingEvent, persist = true): void {
   events.push(event);
+  if (persist) persistEvent(event);
   const payload = `event: meeting\nid: ${events.length}\ndata: ${JSON.stringify(event)}\n\n`;
   for (const client of sseClients) {
     client.write(payload);
   }
+}
+
+function loadEventLog(): void {
+  if (!existsSync(eventLogPath)) return;
+  const lines = readFileSync(eventLogPath, "utf8").split("\n").filter(Boolean);
+  for (const line of lines) {
+    try {
+      events.push(JSON.parse(line) as MeetingEvent);
+    } catch {
+      // Ignore malformed historical lines so one bad write does not prevent startup.
+    }
+  }
+}
+
+function persistEvent(event: MeetingEvent): void {
+  mkdirSync(dirname(eventLogPath), { recursive: true });
+  appendFileSync(eventLogPath, `${JSON.stringify(event)}\n`);
 }
 
 function attachSse(req: IncomingMessage, res: ServerResponse): void {
@@ -124,6 +147,26 @@ function sendCorsHeaders(res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+function resolveRepoPath(path: string): string {
+  if (path.startsWith("/")) return path;
+  const cwd = process.cwd();
+  if (cwd.endsWith("/apps/api")) return resolve(cwd, "../..", path);
+  return resolve(cwd, path);
+}
+
+function isIgnorableTranscript(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (/^[\[(]\s*[^\])]{1,80}\s*[\])]$/.test(normalized)) return true;
+  if (/^[\[(]?\s*(blank_audio|no audio|silence|music|noise|background_noise|whooshing|wind|static|keyboard clicking|typing|clicking|people chattering|chattering|background chatter|sighs?|breathing|cough|coughing|crickets chirping|crickets|chirping|bell ringing|ringing)\s*[\])]?$/i.test(normalized)) return true;
+
+  const words = normalized.replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const filler = new Set(["um", "uh", "er", "ah", "okay", "ok", "so", "this", "that", "is", "like"]);
+  const fillerCount = words.filter((word) => filler.has(word)).length;
+  const uniqueWords = new Set(words);
+  return words.length >= 8 && (fillerCount / words.length > 0.75 || uniqueWords.size <= 4);
+}
+
 function seedSystemEvent(): void {
   appendEvent({
     id: newEventId("sys"),
@@ -131,6 +174,6 @@ function seedSystemEvent(): void {
     meetingId,
     createdAt: nowIso(),
     level: "info",
-    text: "Meeting API ready. Transcripts come from local Whisper; agent output comes through MCP."
+    text: "Meeting API ready. Transcripts come from local Whisper; agent output comes through Pi or MCP."
   });
 }

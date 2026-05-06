@@ -6,3 +6,6 @@ models/
 .DS_Store
 *.log
 coverage/
+.meeting/
+.pi/browser-profile/
+.pi/screenshots/

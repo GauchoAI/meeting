@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meeting Stable Shell</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #050816; }
+    body { margin: 0; color: #f8fafc; }
+    .bar { width: 100%; height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid rgba(148, 163, 184, 0.22); background: rgba(15, 23, 42, 0.98); overflow: hidden; }
+    .brand { font-weight: 800; letter-spacing: -0.02em; }
+    .status { display: inline-flex; align-items: center; gap: 8px; color: #cbd5e1; font-size: 13px; }
+    .dot { width: 9px; height: 9px; border-radius: 999px; background: #64748b; box-shadow: 0 0 18px rgba(100, 116, 139, 0.35); }
+    .dot.ready { background: #f59e0b; box-shadow: 0 0 20px rgba(245, 158, 11, 0.45); }
+    .dot.speaking { background: #22c55e; box-shadow: 0 0 20px rgba(34, 197, 94, 0.7); }
+    button { border: 0; border-radius: 999px; padding: 8px 12px; background: #7c3aed; color: white; font-weight: 700; cursor: pointer; user-select: none; }
+    button.secondary { background: rgba(148, 163, 184, 0.18); color: #e2e8f0; }
+    button.speak { background: #16a34a; min-width: 160px; }
+    button.speak[disabled] { opacity: 0.5; cursor: not-allowed; }
+    button.speak.active { background: #dc2626; }
+    kbd { border: 1px solid rgba(148, 163, 184, 0.45); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; background: rgba(15, 23, 42, 0.9); color: #e2e8f0; font-size: 12px; }
+    iframe { display: block; width: 100%; height: calc(100% - 52px); border: 0; background: #050816; }
+    .spacer { flex: 1 1 auto; min-width: 0; }
+    .hint { color: #94a3b8; font-size: 12px; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div class="brand">Meeting</div>
+    <div class="status"><span id="dot" class="dot"></span><span id="status">stable shell idle</span></div>
+    <div class="spacer"></div>
+    <div class="hint">Hold <kbd>Space</kbd> to speak. UI below can reload safely.</div>
+    <button id="join">Join meeting</button>
+    <button id="speak" class="speak" disabled>Hold to speak</button>
+    <button id="leave" class="secondary" hidden>Leave</button>
+  </div>
+  <iframe id="ui" src="/?embedded=1"></iframe>
+
+  <script type="module">
+    const api = localStorage.getItem("meeting.api") || "http://localhost:4317";
+    const statusEl = document.getElementById("status");
+    const dotEl = document.getElementById("dot");
+    const joinButton = document.getElementById("join");
+    const leaveButton = document.getElementById("leave");
+    const speakButton = document.getElementById("speak");
+
+    let localStream = null;
+    let audioOnlyStream = null;
+    let recorder = null;
+    let joined = false;
+    let speaking = false;
+    let spaceDown = false;
+
+    joinButton.addEventListener("click", () => join().catch((error) => {
+      console.warn(error);
+      setStatus(`join failed: ${error.message || error}`, "idle");
+    }));
+    leaveButton.addEventListener("click", leave);
+
+    speakButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      startSpeaking();
+    });
+    speakButton.addEventListener("pointerup", stopSpeaking);
+    speakButton.addEventListener("pointerleave", stopSpeaking);
+    speakButton.addEventListener("pointercancel", stopSpeaking);
+
+    window.addEventListener("keydown", (event) => {
+      if (event.code !== "Space" || event.repeat || isEditableTarget(event.target)) return;
+      event.preventDefault();
+      spaceDown = true;
+      startSpeaking();
+    });
+    window.addEventListener("keyup", (event) => {
+      if (event.code !== "Space") return;
+      event.preventDefault();
+      spaceDown = false;
+      stopSpeaking();
+    });
+
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === "meeting:push-to-talk:start") startSpeaking();
+      if (event.data?.type === "meeting:push-to-talk:stop") stopSpeaking();
+    });
+
+    async function join() {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      audioOnlyStream = new MediaStream(localStream.getAudioTracks());
+      joined = true;
+      joinButton.hidden = true;
+      leaveButton.hidden = false;
+      speakButton.disabled = false;
+      setStatus("ready — hold Space to speak", "ready");
+    }
+
+    function leave() {
+      stopSpeaking();
+      joined = false;
+      localStream?.getTracks().forEach((track) => track.stop());
+      localStream = null;
+      audioOnlyStream = null;
+      recorder = null;
+      joinButton.hidden = false;
+      leaveButton.hidden = true;
+      speakButton.disabled = true;
+      setStatus("stable shell idle", "idle");
+    }
+
+    function startSpeaking() {
+      if (!joined || speaking || !audioOnlyStream) return;
+      speaking = true;
+      speakButton.classList.add("active");
+      speakButton.textContent = "Recording… release to send";
+      setStatus("recording speech — release to send", "speaking");
+      startUtteranceRecorder();
+    }
+
+    function stopSpeaking() {
+      if (!speaking) return;
+      speaking = false;
+      if (recorder?.state === "recording") recorder.stop();
+      speakButton.classList.remove("active");
+      speakButton.textContent = "Hold to speak";
+      if (joined) setStatus("processing speech…", "ready");
+    }
+
+    function startUtteranceRecorder() {
+      if (!audioOnlyStream) return;
+      if (!audioOnlyStream.getAudioTracks().some((track) => track.readyState === "live")) {
+        leave();
+        return;
+      }
+
+      const mimeType = preferredMimeType();
+      recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        if (chunks.length > 0) {
+          const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+          void sendAudioChunk(blob).finally(() => {
+            if (joined && !speaking) setStatus("ready — hold Space to speak", "ready");
+          });
+        } else if (joined) {
+          setStatus("ready — hold Space to speak", "ready");
+        }
+      };
+      recorder.onerror = (event) => console.warn("stable shell recorder failed", event);
+      recorder.start();
+    }
+
+    async function sendAudioChunk(blob) {
+      const extension = blob.type.includes("mp4") ? "mp4" : "webm";
+      await fetch(`${api}/audio/chunk?extension=${extension}&speaker=Host`, {
+        method: "POST",
+        headers: { "Content-Type": blob.type || "application/octet-stream" },
+        body: await blob.arrayBuffer(),
+      }).catch((error) => console.warn("audio chunk failed", error));
+    }
+
+    function preferredMimeType() {
+      for (const type of ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"]) {
+        if (MediaRecorder.isTypeSupported(type)) return type;
+      }
+      return "";
+    }
+
+    function setStatus(text, state) {
+      statusEl.textContent = text;
+      dotEl.className = `dot ${state === "ready" ? "ready" : state === "speaking" ? "speaking" : ""}`;
+    }
+
+    function isEditableTarget(target) {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName.toLowerCase();
+      return tag === "input" || tag === "textarea" || target.isContentEditable;
+    }
+  </script>
+</body>
+</html>
