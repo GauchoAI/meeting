@@ -773,14 +773,15 @@ function renderNativeArrow(element: MeasuredDiagramElement, index: number, eleme
     })();
   const headFrom = route.points[Math.max(0, route.points.length - 2)];
   const headTo = route.points[route.points.length - 1];
+  const routeLabel = label ? placeRouteLabel(route, label, elements) : route.label;
   return (
     <g key={index} className="nativeArrow" style={{ color: stroke }} opacity={typeof element.opacity === "number" ? element.opacity : undefined}>
       {renderRoughRoute(route, stroke, index, element)}
       {element.endArrowhead && headFrom && headTo ? renderNativeArrowhead(headFrom.x, headFrom.y, headTo.x, headTo.y, stroke, index, String(element.endArrowhead)) : null}
       {label ? (
         <g>
-          <rect className="nativeArrowLabelBg" x={route.label.x - estimateTextWidth(label.text, label.fontSize || 16) / 2 - 8} y={route.label.y - (label.fontSize || 16)} width={estimateTextWidth(label.text, label.fontSize || 16) + 16} height={(label.fontSize || 16) + 8} rx={8} />
-          <text className="nativeArrowLabel" x={route.label.x} y={route.label.y} textAnchor="middle" fontSize={label.fontSize || 16}>{label.text}</text>
+          <rect className="nativeArrowLabelBg" x={routeLabel.x - estimateTextWidth(label.text, label.fontSize || 16) / 2 - 8} y={routeLabel.y - (label.fontSize || 16)} width={estimateTextWidth(label.text, label.fontSize || 16) + 16} height={(label.fontSize || 16) + 8} rx={8} />
+          <text className="nativeArrowLabel" x={routeLabel.x} y={routeLabel.y} textAnchor="middle" fontSize={label.fontSize || 16}>{label.text}</text>
         </g>
       ) : null}
     </g>
@@ -953,6 +954,44 @@ function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: n
 function segmentIntersectsRect(x1: number, y1: number, x2: number, y2: number, rect: { x: number; y: number; width: number; height: number }): boolean {
   const hit = intersectRectRayWithT(rect, x1, y1, x2, y2);
   return Boolean(hit && hit.t <= 1);
+}
+
+function placeRouteLabel(route: { points: Array<{ x: number; y: number }>; curve?: boolean; label: { x: number; y: number } }, label: { text: string; fontSize?: number }, elements: MeasuredDiagramElement[]): { x: number; y: number } {
+  const fontSize = label.fontSize || 16;
+  const width = estimateTextWidth(label.text, fontSize) + 18;
+  const height = fontSize + 10;
+  const candidates = [0.5, 0.42, 0.58, 0.34, 0.66].flatMap((t) => {
+    const point = sampleRoute(route.points, t, Boolean(route.curve));
+    const normal = routeNormal(route.points, t, Boolean(route.curve));
+    return [
+      { x: point.x + normal.x * 18, y: point.y + normal.y * 18 + fontSize / 3 },
+      { x: point.x - normal.x * 18, y: point.y - normal.y * 18 + fontSize / 3 }
+    ];
+  });
+  return candidates
+    .map((candidate) => ({ candidate, score: labelCollisionScore(candidate, width, height, elements) }))
+    .sort((a, b) => a.score - b.score)[0]?.candidate || route.label;
+}
+
+function routeNormal(points: Array<{ x: number; y: number }>, t: number, curve: boolean): { x: number; y: number } {
+  const before = sampleRoute(points, Math.max(0, t - 0.02), curve);
+  const after = sampleRoute(points, Math.min(1, t + 0.02), curve);
+  const dx = after.x - before.x;
+  const dy = after.y - before.y;
+  const length = Math.hypot(dx, dy) || 1;
+  return { x: -dy / length, y: dx / length };
+}
+
+function labelCollisionScore(candidate: { x: number; y: number }, width: number, height: number, elements: MeasuredDiagramElement[]): number {
+  const box = { x: candidate.x - width / 2, y: candidate.y - height, width, height };
+  return elements
+    .filter((shape) => !isConnectorElement(shape))
+    .map((shape) => ({ x: numberOr(shape.x, 0) - 8, y: numberOr(shape.y, 0) - 8, width: numberOr(shape.width, 0) + 16, height: numberOr(shape.height, 0) + 16 }))
+    .reduce((score, rect) => score + (rectsOverlap(box, rect) ? 1_000 : 0), 0);
+}
+
+function rectsOverlap(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
 function routeCollisionScore(points: Array<{ x: number; y: number }>, elements: MeasuredDiagramElement[], curve: boolean, fromIndex?: number, toIndex?: number): number {
