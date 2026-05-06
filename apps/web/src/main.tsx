@@ -488,14 +488,15 @@ function parseConciseDiagram(source: string): DiagramScene {
   const labels = new Map<number, string>();
   const shapes = new Map<number, string>();
   const styles = new Map<number, Record<string, string>>();
+  const positions = new Map<number, { x: number; y: number }>();
   const edges: Array<{ from: number; to: number; label?: string; arrowhead?: string; style?: Record<string, string> }> = [];
   let count = 0;
-  let section: "edges" | "labels" | "shapes" | "styles" | undefined;
+  let section: "edges" | "labels" | "shapes" | "styles" | "positions" | undefined;
 
   for (const line of lines) {
     const nodesMatch = line.match(/^nodes\s*:\s*(\d+)$/i);
     if (nodesMatch) { count = Number(nodesMatch[1]); section = undefined; continue; }
-    const sectionMatch = line.match(/^(edges|labels|shapes|styles)\s*:\s*$/i);
+    const sectionMatch = line.match(/^(edges|labels|shapes|styles|positions)\s*:\s*$/i);
     if (sectionMatch) { section = sectionMatch[1].toLowerCase() as typeof section; continue; }
 
     const edgeText = line.replace(/^[-*]\s*/, "");
@@ -510,13 +511,14 @@ function parseConciseDiagram(source: string): DiagramScene {
     if (valueMatch && section === "labels") { labels.set(valueMatch.index, valueMatch.value); continue; }
     if (valueMatch && section === "shapes") { shapes.set(valueMatch.index, valueMatch.value.trim() || "rectangle"); continue; }
     if (valueMatch && section === "styles") { styles.set(valueMatch.index, parseInlineStyle(valueMatch.value)); continue; }
+    if (valueMatch && section === "positions") { positions.set(valueMatch.index, parsePosition(valueMatch.value)); continue; }
   }
 
-  if (!count) count = Math.max(...Array.from(labels.keys()), ...Array.from(shapes.keys()), -1) + 1;
+  if (!count) count = Math.max(...Array.from(labels.keys()), ...Array.from(shapes.keys()), ...Array.from(positions.keys()), -1) + 1;
   if (!count) throw new Error("Concise diagram requires `nodes: <count>` or at least one edge/label.");
-  const positions = layoutConciseNodes(count, edges);
+  const autoPositions = layoutConciseNodes(count, edges);
   for (let index = 0; index < count; index++) {
-    const position = positions[index];
+    const position = positions.get(index) || autoPositions[index];
     elements.push({
       type: shapes.get(index) || "rectangle",
       x: position.x,
@@ -535,8 +537,8 @@ function parseConciseDiagram(source: string): DiagramScene {
     });
   }
   for (const edge of edges) {
-    const from = positions[edge.from];
-    const to = positions[edge.to];
+    const from = positions.get(edge.from) || autoPositions[edge.from];
+    const to = positions.get(edge.to) || autoPositions[edge.to];
     elements.push({
       type: "arrow",
       x: from.x + 95,
@@ -555,6 +557,12 @@ function parseConciseDiagram(source: string): DiagramScene {
     });
   }
   return { elements };
+}
+
+function parsePosition(value: string): { x: number; y: number } {
+  const match = value.match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return { x: 80, y: 80 };
+  return { x: Number(match[1]), y: Number(match[2]) };
 }
 
 function parseInlineStyle(value: string): Record<string, string> {
