@@ -42,7 +42,16 @@ type ArtifactRecord = {
 
 type ArtifactMatch = ArtifactRecord & {
 	score: number;
+	lexicalScore?: number;
 	reasons: string[];
+};
+
+type ArtifactIntent = {
+	decision: "create_new_artifact" | "edit_current_artifact" | "open_existing_artifact" | "artifact_lookup" | "conversation_only";
+	rationale: string;
+	currentArtifact?: ArtifactRecord;
+	bestMatch?: ArtifactMatch;
+	instruction: string;
 };
 
 export default function (pi: ExtensionAPI) {
@@ -217,6 +226,45 @@ export default function (pi: ExtensionAPI) {
 				return `${index + 1}. ${title}\n   slug: ${match.slug || ""}\n   path: ${match.path || ""}\n   score: ${match.score}\n   why: ${match.reasons.join(", ") || "indexed artifact"}`;
 			}).join("\n");
 			return { content: [{ type: "text" as const, text }], details: { query, matches } };
+		},
+	});
+
+	pi.registerTool({
+		name: "meeting_write_artifact",
+		label: "Write Meeting Artifact",
+		description: "Create a separate smart-down artifact for new artifact/document/note/diagram content. Use this instead of appending unrelated new topics to the current artifact.",
+		parameters: Type.Object({
+			kind: Type.Optional(Type.String({ description: "Artifact kind. Defaults to note." })),
+			slug: Type.String({ description: "Stable lowercase slug, e.g. napoleon-artillery-armament." }),
+			title: Type.String({ description: "Artifact title." }),
+			summary: Type.Optional(Type.String({ description: "Short artifact summary for the manifest and search index." })),
+			tags: Type.Optional(Type.Array(Type.String({ description: "Search/index tags." }))),
+			markdown: Type.String({ description: "Complete smart-down Markdown body to write." }),
+			delayMs: Type.Optional(Type.Number({ description: "Delay between streamed lines. Defaults to 20ms." })),
+		}),
+		async execute(_toolCallId, params, ctx) {
+			const cwd = effectiveCwd(ctx.cwd);
+			const input = normalizeWriteArtifactParams(params);
+			const args = [
+				"scripts/smart-artifact.mjs",
+				"write",
+				"--kind", input.kind,
+				"--slug", input.slug,
+				"--title", input.title,
+				"--body", input.markdown,
+			];
+			if (input.summary) args.push("--summary", input.summary);
+			if (input.tags.length) args.push("--tags", input.tags.join(","));
+			const stdout = await execCommand(cwd, "node", args, 30_000);
+			const outputLines = stdout.trim().split(/\r?\n/).filter(Boolean);
+			if (!outputLines.length) throw new Error("meeting_write_artifact did not receive an artifact path from smart-artifact.mjs");
+			const artifactPath = resolve(cwd, outputLines[outputLines.length - 1]);
+			await rememberArtifactAccess(cwd, artifactPath, input.title);
+			const messageId = newEventId("artifact");
+			await streamMarkdownToMeeting(messageId, input.markdown, Math.max(0, input.delayMs ?? 20), artifactPath);
+			await postTrace("tool", "wrote smart artifact", { artifactPath, slug: input.slug, title: input.title });
+			markCanvasToolSatisfied();
+			return { content: [{ type: "text" as const, text: `Wrote ${artifactPath}.` }], details: { artifactPath, slug: input.slug } };
 		},
 	});
 
@@ -748,6 +796,35 @@ function normalizePromoteDiagramParams(params: unknown): {
 	};
 }
 
+function normalizeWriteArtifactParams(params: unknown): {
+	kind: string;
+	slug: string;
+	title: string;
+	summary?: string;
+	tags: string[];
+	markdown: string;
+	delayMs?: number;
+} {
+	if (!params || typeof params !== "object") throw new Error("meeting_write_artifact requires parameters");
+	const value = params as Record<string, unknown>;
+	const slug = cleanString(value.slug);
+	const title = cleanString(value.title);
+	const markdown = cleanString(value.markdown);
+	if (!slug) throw new Error("meeting_write_artifact requires slug");
+	if (!title) throw new Error("meeting_write_artifact requires title");
+	if (!markdown) throw new Error("meeting_write_artifact requires markdown");
+	const rawTags = Array.isArray(value.tags) ? value.tags : [];
+	return {
+		kind: cleanString(value.kind) || "note",
+		slug,
+		title,
+		summary: cleanString(value.summary),
+		tags: rawTags.map(cleanString).filter((tag): tag is string => Boolean(tag)),
+		markdown,
+		delayMs: typeof value.delayMs === "number" && Number.isFinite(value.delayMs) ? Math.max(0, Math.floor(value.delayMs)) : undefined,
+	};
+}
+
 function cleanString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -887,6 +964,7 @@ async function buildArtifactContext(cwd: string, query: string): Promise<string>
 	const artifacts = await readArtifactIndex(cwd);
 	if (!artifacts.length) return "";
 	const matches = await searchArtifacts(cwd, query, 5);
+	const intent = await classifyArtifactIntent(cwd, query, artifacts, matches);
 	const recent = artifacts
 		.filter((artifact) => typeof artifact.path === "string")
 		.sort((a, b) => dateValue(b.updatedAt || b.mtime) - dateValue(a.updatedAt || a.mtime))
@@ -900,10 +978,89 @@ async function buildArtifactContext(cwd: string, query: string): Promise<string>
 		return `[${index + 1}] ${title} | slug=${artifact.slug || ""} | path=${artifact.path || ""}${score}`;
 	});
 	return [
+		"artifactIntent:",
+		`decision=${intent.decision}`,
+		`rationale=${intent.rationale}`,
+		intent.currentArtifact?.path ? `currentArtifact=${formatArtifactInline(intent.currentArtifact)}` : undefined,
+		intent.bestMatch?.path ? `bestMatch=${formatArtifactInline(intent.bestMatch)} score=${intent.bestMatch.score}` : undefined,
+		`instruction=${intent.instruction}`,
 		"artifactIndex:",
 		...lines,
-		"artifactTools: use meeting_find_artifact for search; use meeting_open_artifact with path, slug, or query to render one artifact; use meeting_inspect_artifact to verify rendered sections/diagrams with browser screenshots; use meeting_queue_visual_review to hand off a rendered artifact to the critique.review route; use meeting_promote_diagram_image to persist a generated diagram PNG and replace the source diagram block.",
-	].join("\n");
+		"artifactTools: use meeting_write_artifact for create_new_artifact; use meeting_find_artifact for search; use meeting_open_artifact with path, slug, or query to render one artifact; use meeting_inspect_artifact to verify rendered sections/diagrams with browser screenshots; use meeting_queue_visual_review to hand off a rendered artifact to the critique.review route; use meeting_promote_diagram_image to persist a generated diagram PNG and replace the source diagram block.",
+	].filter(Boolean).join("\n");
+}
+
+async function classifyArtifactIntent(cwd: string, query: string, artifacts: ArtifactRecord[], matches: ArtifactMatch[]): Promise<ArtifactIntent> {
+	const normalized = normalizeText(query);
+	const currentArtifact = await currentAttentionArtifact(cwd, artifacts);
+	const bestMatch = matches[0];
+	const createSignal = hasCreateArtifactSignal(normalized);
+	const editSignal = hasEditArtifactSignal(normalized);
+	const openSignal = hasOpenArtifactSignal(normalized);
+	const artifactSignal = createSignal || editSignal || openSignal || /\b(artifact|document|note|chapter|section|diagram|markdown)\b/.test(normalized);
+	const currentSimilarity = currentArtifact ? similarityScore(query, artifactText(currentArtifact)) : 0;
+	const bestSimilarity = bestMatch ? similarityScore(query, artifactText(bestMatch)) : 0;
+	const strongCurrentMatch = Boolean(currentArtifact && currentSimilarity >= 2);
+	const strongBestMatch = Boolean(bestMatch && bestSimilarity >= 2);
+	const currentReference = /\b(this|current|here|same|existing|it|that)\b/.test(normalized);
+
+	if (openSignal) {
+		return {
+			decision: "open_existing_artifact",
+			rationale: "request asks to open/show/get an existing artifact",
+			currentArtifact,
+			bestMatch,
+			instruction: "Resolve the requested artifact by path, slug, query, or artifactIndex entry and call meeting_open_artifact. Do not edit files."
+		};
+	}
+
+	if (editSignal && (strongCurrentMatch || currentReference)) {
+		return {
+			decision: "edit_current_artifact",
+			rationale: "request is an edit/iteration and refers to the current artifact context",
+			currentArtifact,
+			bestMatch,
+			instruction: "Edit only the current/specified artifact, then verify or open it as appropriate."
+		};
+	}
+
+	if (createSignal && !strongCurrentMatch && !strongBestMatch) {
+		return {
+			decision: "create_new_artifact",
+			rationale: "request asks for new artifact-like content and does not semantically fit the current or matched artifact",
+			currentArtifact,
+			bestMatch,
+			instruction: "Call meeting_write_artifact to create a separate smart artifact for this new topic. Do not append it to the current artifact just because the word chapter or section was used."
+		};
+	}
+
+	if (createSignal && currentArtifact && isTopicMismatch(query, currentArtifact)) {
+		return {
+			decision: "create_new_artifact",
+			rationale: "request asks for a new chapter/topic, but the requested topic is outside the current artifact topic",
+			currentArtifact,
+			bestMatch,
+			instruction: "Call meeting_write_artifact to create a new smart artifact for the requested topic. Do not edit the current artifact unless the user explicitly says it belongs there."
+		};
+	}
+
+	if (artifactSignal) {
+		return {
+			decision: "artifact_lookup",
+			rationale: "request is artifact-related but target scope is ambiguous",
+			currentArtifact,
+			bestMatch,
+			instruction: "Use artifact search/context to resolve whether this is an existing artifact edit or a new artifact. If topic containment is weak, create a new artifact instead of appending to the current one."
+		};
+	}
+
+	return {
+		decision: "conversation_only",
+		rationale: "no artifact action signal detected",
+		currentArtifact,
+		bestMatch,
+		instruction: "Answer conversationally unless the message asks for concrete artifact work."
+	};
 }
 
 async function readArtifactIndex(cwd: string): Promise<ArtifactRecord[]> {
@@ -913,6 +1070,64 @@ async function readArtifactIndex(cwd: string): Promise<ArtifactRecord[]> {
 		if (Array.isArray(index.artifacts)) return index.artifacts;
 	} catch {}
 	return artifactRecordsFromManifests(cwd);
+}
+
+async function currentAttentionArtifact(cwd: string, artifacts: ArtifactRecord[]): Promise<ArtifactRecord | undefined> {
+	const attention = await readArtifactAttention(cwd);
+	const latest = Object.entries(attention)
+		.filter(([path]) => artifacts.some((artifact) => artifact.path === path))
+		.sort((a, b) => dateValue(b[1].lastOpenedAt) - dateValue(a[1].lastOpenedAt))[0];
+	if (!latest) return undefined;
+	return artifacts.find((artifact) => artifact.path === latest[0]);
+}
+
+function hasCreateArtifactSignal(normalized: string): boolean {
+	return /\b(make|create|write|draft|build|add)\s+(a\s+)?new\b/.test(normalized)
+		|| /\bnew\s+(artifact|document|doc|note|chapter|section|markdown|page)\b/.test(normalized)
+		|| /\b(chapter|section|document|note|artifact)\s+about\b/.test(normalized);
+}
+
+function hasEditArtifactSignal(normalized: string): boolean {
+	return /\b(fix|change|update|improve|iterate|revise|edit|adjust|modify|replace|remove|rerender|re-render)\b/.test(normalized)
+		|| /\b(add|append)\s+(this|it|that|to|into|here)\b/.test(normalized)
+		|| /\b(add|append)\b.*\b(this|current|here|same|existing|it|that)\b/.test(normalized);
+}
+
+function hasOpenArtifactSignal(normalized: string): boolean {
+	return /\b(open|show|get|bring|load)\b/.test(normalized)
+		&& /\b(artifact|document|doc|note|diagram|file|tristan|arthur|napoleon)\b/.test(normalized);
+}
+
+function isTopicMismatch(query: string, artifact: ArtifactRecord): boolean {
+	const queryTokens = contentTokens(query);
+	const artifactTokens = new Set(contentTokens(artifactText(artifact)));
+	const overlap = queryTokens.filter((token) => artifactTokens.has(token));
+	const topicTokens = queryTokens.filter((token) => !artifactIntentStopwords().has(token));
+	return topicTokens.length >= 2 && overlap.length === 0;
+}
+
+function similarityScore(query: string, artifactTextValue: string): number {
+	const artifactTokens = new Set(contentTokens(artifactTextValue));
+	return contentTokens(query).filter((token) => artifactTokens.has(token)).length;
+}
+
+function artifactText(artifact: ArtifactRecord): string {
+	return [artifact.title, artifact.slug, artifact.summary, artifact.kind, artifact.path, ...(artifact.tags || [])].filter(Boolean).join(" ");
+}
+
+function formatArtifactInline(artifact: ArtifactRecord): string {
+	return `${artifact.title || artifact.slug || "Untitled artifact"} | slug=${artifact.slug || ""} | path=${artifact.path || ""}`;
+}
+
+function contentTokens(value: string): string[] {
+	const stop = artifactIntentStopwords();
+	return normalizeText(value).split(" ").filter((token) => token.length > 2 && !stop.has(token));
+}
+
+function artifactIntentStopwords(): Set<string> {
+	return new Set([
+		"about", "across", "add", "all", "and", "chapter", "different", "diagram", "diagrams", "doc", "document", "explanation", "for", "from", "give", "good", "here", "into", "make", "markdown", "new", "nice", "note", "now", "section", "show", "the", "this", "type", "used", "with"
+	]);
 }
 
 async function artifactRecordsFromManifests(cwd: string): Promise<ArtifactRecord[]> {
