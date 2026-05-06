@@ -548,6 +548,8 @@ function parseConciseDiagram(source: string): DiagramScene {
       strokeWidth: edge.style?.strokeWidth ? Number(edge.style.strokeWidth) : undefined,
       roughness: edge.style?.roughness ? Number(edge.style.roughness) : undefined,
       opacity: edge.style?.opacity ? Number(edge.style.opacity) : undefined,
+      fromIndex: edge.from,
+      toIndex: edge.to,
       endArrowhead: edge.arrowhead === "none" ? undefined : edge.arrowhead || edge.style?.arrowhead || "arrow",
       label: edge.label ? { text: edge.label, fontSize: edge.style?.fontSize ? Number(edge.style.fontSize) : 16 } : undefined
     });
@@ -587,7 +589,7 @@ function layoutConciseNodes(count: number, _edges: Array<{ from: number; to: num
 }
 
 function NativeDiagramSvg({ scene }: { scene: DiagramScene }) {
-  const measured = useMemo(() => applyDiagramMargins(measureDiagramElements(scene.elements)), [scene]);
+  const measured = useMemo(() => syncIndexedConnectors(applyDiagramMargins(measureDiagramElements(scene.elements))), [scene]);
   const bounds = diagramBounds(measured);
   const viewBox = `${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`;
   return (
@@ -645,6 +647,25 @@ function applyDiagramMargins(elements: MeasuredDiagramElement[], minGap = 72): M
         if (gap < minGap) lower.y = ly + (minGap - gap);
       }
     }
+  }
+  return adjusted;
+}
+
+function syncIndexedConnectors(elements: MeasuredDiagramElement[]): MeasuredDiagramElement[] {
+  const adjusted = elements.map((element) => ({ ...element }));
+  for (const connector of adjusted.filter(isConnectorElement)) {
+    if (typeof connector.fromIndex !== "number" || typeof connector.toIndex !== "number") continue;
+    const from = adjusted[connector.fromIndex];
+    const to = adjusted[connector.toIndex];
+    if (!from || !to) continue;
+    const x1 = numberOr(from.x, 0) + numberOr(from.width, 0) / 2;
+    const y1 = numberOr(from.y, 0) + numberOr(from.height, 0) / 2;
+    const x2 = numberOr(to.x, 0) + numberOr(to.width, 0) / 2;
+    const y2 = numberOr(to.y, 0) + numberOr(to.height, 0) / 2;
+    connector.x = x1;
+    connector.y = y1;
+    connector.width = x2 - x1;
+    connector.height = y2 - y1;
   }
   return adjusted;
 }
@@ -742,13 +763,14 @@ function renderNativeArrow(element: MeasuredDiagramElement, index: number, eleme
   const rawY1 = numberOr(element.y, 0);
   const rawX2 = rawX1 + numberOr(element.width, 0);
   const rawY2 = rawY1 + numberOr(element.height, 0);
-  const trimmed = trimConnectorToShapes(rawX1, rawY1, rawX2, rawY2, elements);
-  const { x1, y1, x2, y2 } = trimmed;
   const stroke = typeof element.strokeColor === "string" ? element.strokeColor : "currentColor";
   const label = normalizeLabel(element.label, undefined);
-  const labelX = (x1 + x2) / 2;
-  const labelY = (y1 + y2) / 2 - 10;
-  const route = routeConnector(x1, y1, x2, y2, rawX1, rawY1, rawX2, rawY2, elements);
+  const route = typeof element.fromIndex === "number" && element.fromIndex === element.toIndex
+    ? routeSelfConnector(elements[element.fromIndex])
+    : (() => {
+      const trimmed = trimConnectorToShapes(rawX1, rawY1, rawX2, rawY2, elements);
+      return routeConnector(trimmed.x1, trimmed.y1, trimmed.x2, trimmed.y2, rawX1, rawY1, rawX2, rawY2, elements);
+    })();
   const headFrom = route.points[Math.max(0, route.points.length - 2)];
   const headTo = route.points[route.points.length - 1];
   return (
@@ -888,17 +910,26 @@ function intersectEllipseRayWithT(shape: ShapeBounds, x1: number, y1: number, x2
   return t === undefined ? undefined : { t, x: x1 + t * dx, y: y1 + t * dy };
 }
 
+function routeSelfConnector(shape: MeasuredDiagramElement | undefined) {
+  const bounds = shape ? toShapeBounds(shape) : { type: "rectangle", x: 0, y: 0, width: 120, height: 80 };
+  const right = bounds.x + bounds.width;
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  const top = bounds.y;
+  const start = bounds.type === "diamond" ? { x: right + 12, y: cy - 4 } : { x: right + 12, y: cy - bounds.height * 0.18 };
+  const end = bounds.type === "diamond" ? { x: cx + bounds.width * 0.28, y: top - 10 } : { x: cx + bounds.width * 0.28, y: top - 10 };
+  const points = [start, { x: right + 98, y: top - 82 }, { x: cx + 32, y: top - 92 }, end];
+  return { points, label: { x: right + 72, y: top - 88 } };
+}
+
 function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: number, rawY1: number, rawX2: number, rawY2: number, elements: MeasuredDiagramElement[]) {
-  if (Math.hypot(rawX2 - rawX1, rawY2 - rawY1) < 4) {
-    const loop = [{ x: x1, y: y1 }, { x: x1 + 74, y: y1 - 74 }, { x: x1 + 148, y: y1 }, { x: x2 + 18, y: y2 + 38 }];
-    return { points: loop, label: loop[1] };
-  }
   const backEdge = rawX2 < rawX1 || rawY2 < rawY1 - 40;
   if (backEdge) {
-    const offset = 48;
+    const offset = 78;
     const midX = (x1 + x2) / 2;
-    const midY = Math.min(y1, y2) - offset;
-    return { points: [{ x: x1, y: y1 }, { x: midX, y: midY }, { x: x2, y: y2 }], label: { x: midX, y: midY - 8 } };
+    const routeBelow = rawY2 > rawY1 + 24;
+    const midY = routeBelow ? Math.max(y1, y2) + offset : Math.min(y1, y2) - offset;
+    return { points: [{ x: x1, y: y1 }, { x: x1, y: midY }, { x: x2, y: midY }, { x: x2, y: y2 }], label: { x: midX, y: midY + (routeBelow ? 22 : -8) } };
   }
   const obstacle = elements
     .filter((shape) => !isConnectorElement(shape))

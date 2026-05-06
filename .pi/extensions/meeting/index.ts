@@ -261,7 +261,9 @@ export default function (pi: ExtensionAPI) {
 			"",
 			`> ${text}`,
 			"",
-			"Answer the host directly. Use concise Markdown. If useful, include Mermaid diagrams or bullets; avoid mentioning implementation details unless asked.",
+			"If the host asks for explanation, answer directly with concise Markdown.",
+			"If the host asks to fix, iterate, implement, inspect, validate, or use screenshots/screen source, start the coding work immediately and continue until the requested objective is complete; do not only acknowledge.",
+			"Avoid implementation details in the final meeting-facing answer unless asked, but do perform the implementation when requested.",
 		].join("\n");
 
 		if (ctx.isIdle()) {
