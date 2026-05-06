@@ -102,7 +102,7 @@ input { min-width: 0; width: 100%; }
 }
 .stage {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) minmax(190px, 30vh);
   gap: 18px;
   height: 100%;
   min-height: 0;
@@ -293,6 +293,44 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+.terminalFooter {
+  background: #020817;
+  border: 1px solid #1d4ed8;
+  border-radius: 0;
+  color: #eff6ff;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+.terminalToolbar {
+  align-items: center;
+  background: #0f172a;
+  border-bottom: 1px solid #1d4ed8;
+  color: #bfdbfe;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+}
+.terminalToolbar button {
+  background: #0b3b8f;
+  border-color: #60a5fa;
+  border-radius: 4px;
+  color: #eff6ff;
+  padding: 6px 10px;
+}
+.terminalOutput {
+  background: #020817;
+  color: #eff6ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
 }
 .side {
   border-left: 1px solid var(--line);

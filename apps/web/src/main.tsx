@@ -100,6 +100,7 @@ function App() {
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
   const canvasDocument = resolveCanvasDocument(query, messages);
   const latestMessage = messages[0];
+  const terminalLines = events.slice(0, 80).reverse().map(formatTerminalEvent);
 
   async function joinMeeting() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -203,22 +204,26 @@ function App() {
           )}
         </div>
 
-        <div className="controls">
-          {isEmbedded ? (
-            <button
-              onPointerDown={() => pushToTalk(true)}
-              onPointerUp={() => pushToTalk(false)}
-              onPointerLeave={() => pushToTalk(false)}
-              onPointerCancel={() => pushToTalk(false)}
-            >
-              <Mic size={16} /> Hold Space / hold here to speak
-            </button>
-          ) : !connected ? (
-            <button onClick={joinMeeting}><Play size={16} /> Join meeting</button>
-          ) : (
-            <button onClick={leaveMeeting}><Phone size={16} /> Leave meeting</button>
-          )}
-        </div>
+        <footer className="terminalFooter">
+          <div className="terminalToolbar">
+            <strong>Raw terminal</strong>
+            {isEmbedded ? (
+              <button
+                onPointerDown={() => pushToTalk(true)}
+                onPointerUp={() => pushToTalk(false)}
+                onPointerLeave={() => pushToTalk(false)}
+                onPointerCancel={() => pushToTalk(false)}
+              >
+                <Mic size={16} /> Hold Space / hold here to speak
+              </button>
+            ) : !connected ? (
+              <button onClick={joinMeeting}><Play size={16} /> Join meeting</button>
+            ) : (
+              <button onClick={leaveMeeting}><Phone size={16} /> Leave meeting</button>
+            )}
+          </div>
+          <pre className="terminalOutput">{terminalLines.join("\n\n") || "waiting for meeting events..."}</pre>
+        </footer>
       </section>
 
 
@@ -317,6 +322,25 @@ function MarkdownDocument({ agentId, text, expanded = false }: { agentId: string
       <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
     </article>
   );
+}
+
+function formatTerminalEvent(event: MeetingEvent): string {
+  const time = new Date(event.createdAt).toLocaleTimeString();
+  if (event.type === "agent.message") {
+    return `[${time}] assistant/${event.agentId}\n${event.text}`;
+  }
+  if (event.type === "utterance.final") {
+    return `[${time}] host/${event.speakerLabel}\n${event.text}`;
+  }
+  if (event.type === "system") {
+    return `[${time}] system/${event.level}\n${event.text}`;
+  }
+  if (event.type === "agent.trace") {
+    const trace = event as MeetingEvent & { agentId?: string; channel?: string; text?: string; details?: unknown };
+    const details = trace.details ? `\n${JSON.stringify(trace.details, null, 2)}` : "";
+    return `[${time}] trace/${trace.agentId || "agent"}/${trace.channel || "debug"}\n${trace.text || ""}${details}`;
+  }
+  return `[${time}] ${event.type}\n${JSON.stringify(event, null, 2)}`;
 }
 
 interface CanvasDocument {

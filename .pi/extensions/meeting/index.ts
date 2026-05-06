@@ -43,6 +43,22 @@ export default function (pi: ExtensionAPI) {
 		if (timer) clearInterval(timer);
 	});
 
+	pi.on("agent_start", async () => {
+		await postTrace("agent", "agent_start");
+	});
+
+	pi.on("agent_end", async () => {
+		await postTrace("agent", "agent_end");
+	});
+
+	pi.on("tool_call", async (event) => {
+		await postTrace("tool", `tool_call: ${event.toolName}`, event.input);
+	});
+
+	pi.on("tool_result", async (event) => {
+		await postTrace("tool", `tool_result: ${event.toolName}`, { isError: event.isError, content: event.content });
+	});
+
 	pi.on("message_end", async (event, ctx) => {
 		if (event.message.role !== "assistant") return;
 		if (pendingMeetingResponses <= 0) return;
@@ -50,6 +66,7 @@ export default function (pi: ExtensionAPI) {
 		const markdown = extractText(event.message.content).trim();
 		if (!markdown) return;
 
+		await postTrace("message", markdown);
 		pendingMeetingResponses = Math.max(0, pendingMeetingResponses - 1);
 		await postMeetingEvent({
 			id: newEventId("msg"),
@@ -158,6 +175,7 @@ export default function (pi: ExtensionAPI) {
 
 	function injectMeetingPrompt(text: string, speaker: string, ctx: ExtensionContext) {
 		pendingMeetingResponses++;
+		void postTrace("input", `${speaker}: ${text}`);
 		const prompt = [
 			`The host spoke in the Meeting UI as ${speaker}:`,
 			"",
@@ -178,6 +196,19 @@ export default function (pi: ExtensionAPI) {
 		const res = await fetch(`${api}/events?since=${since}`);
 		if (!res.ok) throw new Error(`GET /events returned ${res.status}`);
 		return await res.json() as { events: MeetingEvent[]; next: number };
+	}
+
+	async function postTrace(channel: "input" | "agent" | "message" | "tool" | "error" | "debug", text: string, details?: unknown): Promise<void> {
+		await postMeetingEvent({
+			id: newEventId("trace"),
+			type: "agent.trace",
+			meetingId,
+			createdAt: nowIso(),
+			agentId,
+			channel,
+			text,
+			details,
+		}).catch(() => undefined);
 	}
 
 	async function postMeetingEvent(event: MeetingEvent): Promise<void> {

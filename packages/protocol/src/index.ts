@@ -9,6 +9,7 @@ export type MeetingEvent =
   | AgentFloorEvent
   | AgentMessageEvent
   | AgentTaskEvent
+  | AgentTraceEvent
   | RepositoryContextEvent
   | SystemEvent;
 
@@ -56,6 +57,14 @@ export interface AgentMessageEvent extends BaseEvent {
   agentId: AgentId;
   format: "markdown" | "plain";
   text: string;
+}
+
+export interface AgentTraceEvent extends BaseEvent {
+  type: "agent.trace";
+  agentId: AgentId;
+  channel: "input" | "agent" | "message" | "tool" | "error" | "debug";
+  text: string;
+  details?: unknown;
 }
 
 export interface AgentTaskEvent extends BaseEvent {
