@@ -22,6 +22,7 @@ positions:
   10: 1120, 520
   11: 1420, 520
   12: 820, 740
+  13: 1120, 740
 
 styles:
   0: stroke=#60a5fa fill=#dbeafe fontSize=20
