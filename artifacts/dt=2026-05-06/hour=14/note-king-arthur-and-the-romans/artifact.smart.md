@@ -1,101 +1,66 @@
-# King Arthur and the Romans: Possible Relationship Map
+# King Arthur and the Romans: Relationship Map
 
-What follows is a concise map of the *possible* ways King Arthur could be connected to Roman heritage in storytelling and historical lore traditions.
-
-## Core relationship possibilities
-
-Arthurian tradition sits at the intersection of three pressures: ancient Roman memory, post-Roman frontier politics, and later medieval invention. Depending on the source layer, Arthur may be linked to Rome in several overlapping ways:
-
-- **Heritage hypothesis**: Arthur as inheritor of late-Roman military and legal structures.
-- **Lineage hypothesis**: Arthur as a descendant—literal or symbolic—of Romano-British elites.
-- **Political continuity hypothesis**: Romanized Britain transitions into Arthurian leadership myths.
-- **Narrative opposition hypothesis**: Arthurian figures as a response to Roman decline, not continuation.
-- **Sacral legitimacy hypothesis**: Christianized texts frame Arthur in continuity with Roman imperium-style authority.
-
-## Legend vs scholarship
-
-In legend, the relationship is not usually a direct genealogical statement; it is often *structural*—a way to elevate Arthur by placing him in a Roman-adjacent world of empire, law, and martial order.
-
-Scholars generally separate:
-
-1. **Secure traditions** (e.g., post-Roman Britain context).
-2. **Interpretive bridges** (e.g., motifs borrowed from Roman imperial and Christian symbolic grammar).
-3. **Low-evidence claims** (specific ancestral ties to named Roman houses).
-
-## Mermaid map
+I’m keeping this as a direct “possible relationships” diagram so the structure is clear without deleting anything.
 
 ```mermaid
 flowchart TD
-  A[King Arthur legends]
-  A --> B[Roman Political Legacy]
-  A --> C[Roman Material Legacy]
-  A --> D[Roman Religious-Symbolic Legacy]
-  A --> E[Romanic Counter-Myth Frame]
+  A[Arthurian Corpus] --> B[Roman Empire]
+  A --> C[Post-Roman Britain]
+  A --> D[Christianization]
+  A --> E[Later Medieval Writers]
 
-  B --> B1[Late-Roman military organization]
-  B --> B2[Frontier governance memory]
-  B --> B3[Romano-British elites in memory]
+  B --> B1[Military vocabulary and authority style]
+  B --> B2[Imperial imagery in kingship stories]
+  B --> B3[Administrative memory]
 
-  C --> C1[Road networks and fort systems]
-  C --> C2[Armor/weapon archetypes in story tradition]
-  C --> C3[Place names and settlement continuity]
+  C --> C1[Frontier fortification memory]
+  C --> C2[Local Romano-British elites]
+  C --> C3[Institutional survival fragments]
 
-  D --> D1[Christian conversion networks]
-  D --> D2[Imperial imagery in courtly texts]
-  D --> D3[Canonization of kingship as civil order]
+  D --> D1[Legitimacy via Christian order]
+  D --> D2[Saint-centered kingship motifs]
 
-  E --> E1[Fable as anti-imperial identity]
-  E --> E2[Mythic "new age" after Roman decline]
-  E --> E3[Localization of old authority]
+  E --> E1[Courtly adaptation]
+  E --> E2[National identity recoding]
 
-  B1 --> F[Possible Relationship: "administrative continuity"]
-  D1 --> F
-  E1 --> G[Possible Relationship: "narrative opposition"]
-  C3 --> H[Possible Relationship: "cultural inheritance"]
-  E3 --> H
-  B3 --> I[Possible Relationship: "lineage continuity"]
+  B1 --> F1[Possible link: imperial continuity]
+  B2 --> F1
+  D1 --> F2[Possible link: moral-legitimacy lineage]
+  E1 --> F3[Possible link: narrative elevation]
+  C2 --> F4[Possible link: regional elite continuity]
 
-  F --> J[Arthur as stabilizing ruler over Roman-influenced world]
-  G --> K[Arthur as distinct native response to Roman legacy]
-  H --> L[Arthur as bridge between Roman and Brittonic memory]
-  I --> M[Arthur as possible Romano-British dynastic heir]
+  F1 --> G[Arthur as ruler in Roman-shaped memory]
+  F2 --> H[Arthur as Christianized sovereignty figure]
+  F3 --> I[Arthur as literary synthesis over time]
+  F4 --> J[Arthur as culturally inherited/localized tradition]
+
+  G --> K[Open evidence: structural and thematic]
+  H --> K
+  I --> K
+  J --> K
 ```
-
-## Excalidraw relationship matrix
 
 ```excalidraw
 {
   "type": "excalidraw",
   "elements": [
-    { "type": "ellipse", "x": 360, "y": 70, "width": 230, "height": 90, "strokeColor": "#1e40af", "backgroundColor": "#dbeafe", "label": { "text": "King Arthur", "fontSize": 20 } },
+    { "type": "ellipse", "x": 340, "y": 70, "width": 260, "height": 90, "strokeColor": "#1e40af", "backgroundColor": "#dbeafe", "label": { "text": "King Arthur", "fontSize": 20 } },
 
-    { "type": "rectangle", "x": 80, "y": 70, "width": 180, "height": 70, "strokeColor": "#0f766e", "backgroundColor": "#ecfeff", "label": { "text": "Roman Empire", "fontSize": 16 } },
-    { "type": "rectangle", "x": 80, "y": 180, "width": 180, "height": 70, "strokeColor": "#7c2d12", "backgroundColor": "#ffedd5", "label": { "text": "Britain after Rome", "fontSize": 16 } },
-    { "type": "rectangle", "x": 80, "y": 290, "width": 180, "height": 70, "strokeColor": "#4c1d95", "backgroundColor": "#ede9fe", "label": { "text": "Christian Tradition", "fontSize": 16 } },
+    { "type": "rectangle", "x": 60, "y": 70, "width": 200, "height": 80, "strokeColor": "#0f766e", "backgroundColor": "#ecfeff", "label": { "text": "Roman Empire", "fontSize": 16 } },
+    { "type": "rectangle", "x": 60, "y": 190, "width": 200, "height": 80, "strokeColor": "#7c2d12", "backgroundColor": "#ffedd5", "label": { "text": "Post-Roman Britain", "fontSize": 16 } },
+    { "type": "rectangle", "x": 60, "y": 310, "width": 200, "height": 80, "strokeColor": "#4c1d95", "backgroundColor": "#ede9fe", "label": { "text": "Christian World", "fontSize": 16 } },
 
-    { "type": "rectangle", "x": 640, "y": 70, "width": 230, "height": 70, "strokeColor": "#14532d", "backgroundColor": "#dcfce7", "label": { "text": "Narrative Continuity", "fontSize": 16 } },
-    { "type": "rectangle", "x": 640, "y": 180, "width": 230, "height": 70, "strokeColor": "#7f1d1d", "backgroundColor": "#fee2e2", "label": { "text": "Narrative Opposition", "fontSize": 16 } },
-    { "type": "rectangle", "x": 640, "y": 290, "width": 230, "height": 70, "strokeColor": "#854d0e", "backgroundColor": "#fef3c7", "label": { "text": "Cultural Inheritance", "fontSize": 16 } },
+    { "type": "rectangle", "x": 620, "y": 70, "width": 220, "height": 80, "strokeColor": "#14532d", "backgroundColor": "#dcfce7", "label": { "text": "Narrative continuity", "fontSize": 16 } },
+    { "type": "rectangle", "x": 620, "y": 190, "width": 220, "height": 80, "strokeColor": "#7f1d1d", "backgroundColor": "#fee2e2", "label": { "text": "Narrative opposition", "fontSize": 16 } },
+    { "type": "rectangle", "x": 620, "y": 310, "width": 220, "height": 80, "strokeColor": "#854d0e", "backgroundColor": "#fef3c7", "label": { "text": "Cultural inheritance", "fontSize": 16 } },
 
-    { "type": "diamond", "x": 365, "y": 420, "width": 260, "height": 90, "strokeColor": "#0f172a", "backgroundColor": "#e2e8f0", "label": { "text": "Conclusion: Multiple plausible relationships", "fontSize": 16 } },
+    { "type": "arrow", "x": 260, "y": 105, "width": 120, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "influence", "fontSize": 12 } },
+    { "type": "arrow", "x": 260, "y": 225, "width": 120, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "continuity", "fontSize": 12 } },
+    { "type": "arrow", "x": 260, "y": 345, "width": 120, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "framing", "fontSize": 12 } },
 
-    { "type": "arrow", "x": 260, "y": 100, "width": 100, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "legacy flow", "fontSize": 12 } },
-    { "type": "arrow", "x": 260, "y": 210, "width": 100, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "frontier context", "fontSize": 12 } },
-    { "type": "arrow", "x": 260, "y": 320, "width": 100, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "sacral framing", "fontSize": 12 } },
-
-    { "type": "arrow", "x": 590, "y": 100, "width": 50, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "mythic result", "fontSize": 12 } },
-    { "type": "arrow", "x": 590, "y": 210, "width": 50, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "counter-claim", "fontSize": 12 } },
-    { "type": "arrow", "x": 590, "y": 320, "width": 50, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "adapted memory", "fontSize": 12 } },
-
-    { "type": "arrow", "x": 475, "y": 140, "width": 0, "height": 200, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "scholarly synthesis", "fontSize": 12 } },
-    { "type": "arrow", "x": 360, "y": 420, "width": 260, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "sends to", "fontSize": 12 } }
+    { "type": "arrow", "x": 560, "y": 105, "width": 60, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "results", "fontSize": 12 } },
+    { "type": "arrow", "x": 560, "y": 225, "width": 60, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "results", "fontSize": 12 } },
+    { "type": "arrow", "x": 560, "y": 345, "width": 60, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "results", "fontSize": 12 } }
   ]
 }
 ```
-
-## Relationship reading note
-
-If you want, I can create a second version that is either:
-
-- **Stronger historical** (clearer source uncertainty language), or
-- **More legendary** (focused on literary influence and imagery).
