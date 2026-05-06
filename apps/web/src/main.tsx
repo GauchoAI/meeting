@@ -726,8 +726,8 @@ function roundedRectPath(x: number, y: number, width: number, height: number, ra
 function renderRoughShape(type: string, x: number, y: number, width: number, height: number, stroke: string, fill: string, hachureColor: string, seed: number, element: MeasuredDiagramElement) {
   const options = {
     stroke,
-    fill,
-    fillStyle: typeof element.fillStyle === "string" ? element.fillStyle : fill === "var(--canvas)" ? "solid" : "hachure",
+    fill: undefined,
+    fillStyle: "solid",
     fillWeight: 1.1,
     hachureGap: 8,
     hachureAngle: -45,
@@ -743,7 +743,15 @@ function renderRoughShape(type: string, x: number, y: number, width: number, hei
     : type === "diamond"
       ? roughGenerator.polygon([[x + width / 2, y], [x + width, y + height / 2], [x + width / 2, y + height], [x, y + height / 2]], options)
       : roughGenerator.path(roundedRectPath(x, y, width, height, Math.min(24, width / 8, height / 3)), options);
-  return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || "none"} opacity={path.fill && path.stroke === hachureColor ? 0.12 : undefined} />)}</g>;
+  const baseFill = fill !== "var(--canvas)" ? renderNativeBaseFill(type, x, y, width, height, fill) : null;
+  const paths = roughGenerator.toPaths(drawable);
+  return <g className="nativeSketch">{baseFill}{paths.map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill="none" />)}</g>;
+}
+
+function renderNativeBaseFill(type: string, x: number, y: number, width: number, height: number, fill: string) {
+  if (type === "ellipse") return <ellipse cx={x + width / 2} cy={y + height / 2} rx={width / 2} ry={height / 2} fill={fill} opacity={0.10} />;
+  if (type === "diamond") return <polygon points={`${x + width / 2},${y} ${x + width},${y + height / 2} ${x + width / 2},${y + height} ${x},${y + height / 2}`} fill={fill} opacity={0.10} />;
+  return <path d={roundedRectPath(x, y, width, height, Math.min(24, width / 8, height / 3))} fill={fill} opacity={0.10} />;
 }
 
 function adjustColorForHachure(fill: string, stroke: string): string {
@@ -751,9 +759,13 @@ function adjustColorForHachure(fill: string, stroke: string): string {
   const rgb = parseHexColor(fill);
   if (!rgb) return stroke;
   const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
-  if (luminance > 0.62) return mixHex(fill, "#ffffff", 0.94);
-  if (luminance < 0.28) return mixHex(fill, "#ffffff", 0.86);
-  return mixHex(fill, "#ffffff", 0.9);
+  if (luminance > 0.62) return mixHex(fill, "#ffffff", 0.99);
+  if (luminance < 0.28) return mixHex(fill, "#ffffff", 0.97);
+  return mixHex(fill, "#ffffff", 0.98);
+}
+
+function normalizeColor(color: string | undefined): string {
+  return String(color || "").trim().toLowerCase();
 }
 
 function parseHexColor(color: string): { r: number; g: number; b: number } | undefined {
