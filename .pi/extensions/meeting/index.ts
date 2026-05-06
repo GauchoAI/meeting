@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Type } from "typebox";
 
@@ -148,6 +148,24 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		name: "meeting_open_artifact",
+		label: "Open Meeting Artifact",
+		description: "Open an existing smart-down artifact in the Meeting UI by streaming its Markdown line by line, as if it were being written.",
+		parameters: Type.Object({
+			path: Type.Optional(Type.String({ description: "Path to artifact.smart.md. If omitted, uses slug lookup or the most recent artifact." })),
+			slug: Type.Optional(Type.String({ description: "Artifact slug from manifest.json, e.g. diagram-project-flow or project-flow." })),
+			delayMs: Type.Optional(Type.Number({ description: "Delay between streamed lines. Defaults to 35ms." })),
+		}),
+		async execute(_toolCallId, params, ctx) {
+			const artifactPath = await resolveArtifactPath(ctx.cwd, params.path, params.slug);
+			const markdown = await readFile(artifactPath, "utf8");
+			const messageId = newEventId("artifact");
+			await streamMarkdownToMeeting(messageId, markdown, Math.max(0, params.delayMs ?? 35));
+			return { content: [{ type: "text" as const, text: `Opened ${artifactPath}.` }], details: { artifactPath } };
+		},
+	});
+
+	pi.registerTool({
 		name: "meeting_post_markdown",
 		label: "Post Markdown to Meeting",
 		description: "Render Markdown in the Meeting UI side panel. Mermaid code blocks are supported.",
@@ -204,11 +222,22 @@ export default function (pi: ExtensionAPI) {
 			if (!(await stat(artifactPath)).isFile()) return;
 			const markdown = await readFile(artifactPath, "utf8");
 			const messageId = `artifact_${Buffer.from(artifactPath).toString("base64url").slice(0, 18)}_${Date.now().toString(36)}`;
-			await postAgentMessage(messageId, markdown, false);
+			await streamMarkdownToMeeting(messageId, markdown, 20);
 			await commitArtifactChange(artifactPath, lastHostUtterance, ctx);
 		} catch (error) {
 			await postTrace("error", `artifact watcher failed: ${errorMessage(error)}`, { artifactPath });
 		}
+	}
+
+	async function streamMarkdownToMeeting(messageId: string, markdown: string, delayMs: number) {
+		const lines = markdown.split(/(?<=\n)/);
+		let buffer = "";
+		for (const line of lines) {
+			buffer += line;
+			await postAgentMessage(messageId, buffer, true);
+			if (delayMs > 0) await sleep(delayMs);
+		}
+		await postAgentMessage(messageId, markdown, false);
 	}
 
 	async function commitArtifactChange(artifactPath: string, message: string, ctx: ExtensionContext) {
@@ -320,7 +349,8 @@ export default function (pi: ExtensionAPI) {
 			"",
 			"Decide whether this is a work request or a conversational request.",
 			"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, or create/update an artifact/file: perform only the necessary work now with tools and continue until complete.",
-			"For smart-down artifact edits, edit only the artifact file in place, then stop without a final Markdown status. The artifact watcher will publish, commit with the host utterance as the commit message, and push.",
+			"To open an existing smart-down artifact in the Meeting UI, use meeting_open_artifact; do not read and paste the file yourself.",
+			"For smart-down artifact edits, edit only the artifact file in place, then stop without a final Markdown status. The artifact watcher will stream the file line by line, commit with the host utterance as the commit message, and push."
 			"For code implementation work, validate when appropriate and commit only when explicitly requested or when the repo workflow clearly requires it.",
 			"If it only asks for explanation or brainstorming: answer the host directly with concise Markdown.",
 			"Do not merely acknowledge actionable work requests.",
@@ -404,6 +434,44 @@ function newEventId(prefix: string): string {
 
 function nowIso(): string {
 	return new Date().toISOString();
+}
+
+async function resolveArtifactPath(cwd: string, requestedPath?: string, requestedSlug?: string): Promise<string> {
+	if (requestedPath) return resolve(cwd, requestedPath);
+	const artifactsRoot = resolve(cwd, "artifacts");
+	const manifests = await findFiles(artifactsRoot, "manifest.json");
+	let fallback: { path: string; updatedAt: number } | undefined;
+	for (const manifestPath of manifests) {
+		try {
+			const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { slug?: string; artifact?: string; updatedAt?: string };
+			const artifactPath = resolve(dirname(manifestPath), manifest.artifact || "artifact.smart.md");
+			const updatedAt = Date.parse(manifest.updatedAt || "") || (await stat(artifactPath)).mtimeMs;
+			if (!fallback || updatedAt > fallback.updatedAt) fallback = { path: artifactPath, updatedAt };
+			if (requestedSlug && (manifest.slug === requestedSlug || `${manifest.slug}`.includes(requestedSlug))) return artifactPath;
+		} catch {}
+	}
+	if (fallback) return fallback.path;
+	throw new Error(`No smart-down artifacts found in ${artifactsRoot}`);
+}
+
+async function findFiles(root: string, name: string): Promise<string[]> {
+	const out: string[] = [];
+	async function walk(dir: string) {
+		let entries: string[];
+		try { entries = await readdir(dir); } catch { return; }
+		for (const entry of entries) {
+			const path = resolve(dir, entry);
+			const info = await stat(path);
+			if (info.isDirectory()) await walk(path);
+			else if (entry === name) out.push(path);
+		}
+	}
+	await walk(root);
+	return out;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
 function isArtifactSurfaceRequest(text: string): boolean {
