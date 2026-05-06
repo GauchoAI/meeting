@@ -58,10 +58,10 @@ flowchart TD
     { "type": "rectangle", "x": 610, "y": 80, "width": 170, "height": 70, "strokeColor": "#0f766e", "backgroundColor": "#ecfeff", "label": { "text": "Armory Signals", "fontSize": 16 } },
     { "type": "rectangle", "x": 360, "y": 190, "width": 190, "height": 70, "strokeColor": "#166534", "backgroundColor": "#dcfce7", "label": { "text": "Gate Diversion", "fontSize": 16 } },
     { "type": "rectangle", "x": 610, "y": 190, "width": 170, "height": 70, "strokeColor": "#7c2d12", "backgroundColor": "#fee2e2", "label": { "text": "Scouts Redirected", "fontSize": 16 } },
-    { "type": "arrow", "x": 260, "y": 130, "width": 90, "height": 0, "strokeColor": #334155, "endArrowhead": "arrow", "label": { "text": "orders", "fontSize": 13 } },
-    { "type": "arrow", "x": 470, "y": 130, "width": 140, "height": 0, "strokeColor": #334155, "endArrowhead": "arrow", "label": { "text": "alert signal", "fontSize": 13 } },
-    { "type": "arrow", "x": 455, "y": 160, "width": 0, "height": 30, "strokeColor": #334155, "endArrowhead": "arrow", "label": { "text": "to gates", "fontSize": 13 } },
-    { "type": "arrow", "x": 690, "y": 160, "width": 0, "height": 40, "strokeColor": #334155, "endArrowhead": "arrow", "label": { "text": "re-route", "fontSize": 13 } },
+    { "type": "arrow", "x": 260, "y": 130, "width": 90, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "orders", "fontSize": 13 } },
+    { "type": "arrow", "x": 470, "y": 130, "width": 140, "height": 0, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "alert signal", "fontSize": 13 } },
+    { "type": "arrow", "x": 455, "y": 160, "width": 0, "height": 30, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "to gates", "fontSize": 13 } },
+    { "type": "arrow", "x": 690, "y": 160, "width": 0, "height": 40, "strokeColor": "#334155", "endArrowhead": "arrow", "label": { "text": "re-route", "fontSize": 13 } },
     { "type": "diamond", "x": 300, "y": 300, "width": 330, "height": 90, "strokeColor": "#713f12", "backgroundColor": "#fef3c7", "label": { "text": "Outcome: Dawn holds, convoy saved", "fontSize": 16 } }
   ]
 }
