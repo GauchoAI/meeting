@@ -121,8 +121,10 @@ function App() {
 
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
   const canvasMessages = messages.filter(isCanvasMessage);
+  const statusMessages = messages.filter((event) => !isCanvasMessage(event));
   const canvasDocument = resolveCanvasDocument(query, canvasMessages);
   const latestMessage = canvasMessages[0];
+  const latestStatusMessage = statusMessages[0];
   const renderStats = summarizeRenderSamples(renderSamples);
   const terminalLines = [formatRenderStats(renderStats), ...events.slice(0, 80).reverse().map(formatTerminalEvent)];
 
@@ -262,6 +264,18 @@ function App() {
           )}
         </div>
       </section>
+
+      {latestStatusMessage && (
+        <aside className="conversationPanel" aria-live="polite">
+          <MarkdownDocument
+            agentId={latestStatusMessage.agentId}
+            text={latestStatusMessage.text}
+            createdAt={latestStatusMessage.createdAt}
+            documentId={latestStatusMessage.documentId}
+            expanded
+          />
+        </aside>
+      )}
 
       {isEmbedded && (
         <button

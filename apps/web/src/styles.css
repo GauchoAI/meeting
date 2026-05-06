@@ -237,6 +237,39 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   padding: clamp(18px, 3vw, 42px);
   transition: background-color 420ms ease;
 }
+.conversationPanel {
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--line);
+  border-radius: min(var(--radius), 10px);
+  bottom: 20px;
+  box-shadow: var(--shadow);
+  max-height: min(30vh, 260px);
+  max-width: min(460px, calc(100vw - 40px));
+  overflow: auto;
+  padding: 14px 16px;
+  position: fixed;
+  right: 20px;
+  width: min(460px, calc(100vw - 40px));
+  z-index: 18;
+}
+.conversationPanel .generated {
+  max-width: 100%;
+}
+.conversationPanel .markdown {
+  font-size: calc(var(--font-base) * 0.86);
+  line-height: 1.45;
+}
+.conversationPanel .markdown h1,
+.conversationPanel .markdown h2,
+.conversationPanel .markdown h3 {
+  font-size: calc(var(--font-base) * 1.04);
+  margin: 0 0 8px;
+}
+.conversationPanel .markdown p,
+.conversationPanel .markdown ul,
+.conversationPanel .markdown ol {
+  margin: 0 0 8px;
+}
 .tile {
   background: var(--canvas);
   border: 1px solid var(--line);

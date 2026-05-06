@@ -115,6 +115,9 @@ export default function (pi: ExtensionAPI) {
 		const markdown = extractText(event.message.content).trim();
 		if (!markdown) return;
 		lastStreamPost = now;
+		const messageId = currentMeetingMessageId || newEventId("msg");
+		currentMeetingMessageId = messageId;
+		await postAgentMessage(messageId, markdown, true, { surface: "status", lifecycle: "draft" });
 		if (!firstUpdatePosted) {
 			firstUpdatePosted = true;
 			await postTrace("latency", "assistant.first_update", { ...currentLatency, firstUpdateAt: now, agentStartToFirstUpdateMs: currentLatency.agentStartedAt ? now - currentLatency.agentStartedAt : undefined, utteranceToFirstUpdateMs: currentLatency.utteranceCreatedAt ? now - currentLatency.utteranceCreatedAt : undefined, chars: markdown.length });
