@@ -74,7 +74,7 @@ flowchart LR
     { "type": "ellipse", "x": 320, "y": 230, "width": 120, "height": 90, "strokeColor": "#14532d", "backgroundColor": "#dcfce7", "label": { "text": "Loyalty", "fontSize": 18 } },
     { "type": "ellipse", "x": 510, "y": 230, "width": 120, "height": 90, "strokeColor": "#7f1d1d", "backgroundColor": "#fee2e2", "label": { "text": "Courage", "fontSize": 18 } },
     { "type": "arrow", "x": 190, "y": 280, "width": 90, "height": 0, "strokeColor": "#0ea5e9", "endArrowhead": "arrow", "label": { "text": "embodies", "fontSize": 12 } },
-    { "type": "arrow", "x": 440, "y": 275, "width": 70, "height": 0, "strokeColor": "#0284c7", "strokeWidth": 4, "endArrowhead": "arrow", "label": { "text": "Loyalty → Courage", "fontSize": 16 } }
+    { "type": "arrow", "x": 380, "y": 275, "width": 190, "height": 0, "strokeColor": "#111827", "strokeWidth": 6, "endArrowhead": "arrow" }
   ]
 }
 ```
