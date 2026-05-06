@@ -164,3 +164,32 @@ The assistant-facing tools map closely onto project operations:
 The strongest part of the architecture is the loop from **conversation → intent → tool call → durable artifact → rendered UI**.
 
 The next improvement would be stronger retrieval ergonomics: better fuzzy names, aliases like “the Napoleon one,” snippets in candidate results, and explicit clarification when confidence is low.
+
+## 9) Concise Excalidraw project sketch
+
+```excalidraw
+{
+  "type": "excalidraw",
+  "elements": [
+    { "type": "rectangle", "x": 40, "y": 40, "width": 900, "height": 430, "strokeColor": "#475569", "backgroundColor": "#f8fafc", "label": { "text": "Meeting: local-first agentic meeting room", "fontSize": 24 } },
+
+    { "type": "rectangle", "x": 90, "y": 165, "width": 150, "height": 85, "strokeColor": "#92400e", "backgroundColor": "#fef3c7", "label": { "text": "Humans\nspeak / type", "fontSize": 18 } },
+    { "type": "rectangle", "x": 300, "y": 135, "width": 160, "height": 115, "strokeColor": "#1d4ed8", "backgroundColor": "#dbeafe", "label": { "text": "Browser UI\ntranscript +\nartifact panel", "fontSize": 17 } },
+    { "type": "rectangle", "x": 520, "y": 135, "width": 160, "height": 115, "strokeColor": "#1d4ed8", "backgroundColor": "#bfdbfe", "label": { "text": "Local API\nevent bus +\nspeech", "fontSize": 17 } },
+    { "type": "rectangle", "x": 735, "y": 135, "width": 160, "height": 115, "strokeColor": "#6d28d9", "backgroundColor": "#ede9fe", "label": { "text": "Agent worker\nCodex / Claude", "fontSize": 17 } },
+
+    { "type": "rectangle", "x": 300, "y": 325, "width": 160, "height": 80, "strokeColor": "#166534", "backgroundColor": "#dcfce7", "label": { "text": "Artifacts\nsmart Markdown", "fontSize": 17 } },
+    { "type": "rectangle", "x": 520, "y": 325, "width": 160, "height": 80, "strokeColor": "#166534", "backgroundColor": "#d1fae5", "label": { "text": "Wiki / retrieval\nlocal memory", "fontSize": 17 } },
+    { "type": "rectangle", "x": 735, "y": 325, "width": 160, "height": 80, "strokeColor": "#6d28d9", "backgroundColor": "#ddd6fe", "label": { "text": "MCP tools\ncreate • open • edit", "fontSize": 17 } },
+
+    { "type": "arrow", "x": 240, "y": 207, "width": 60, "height": 0, "strokeColor": "#334155", "strokeWidth": 3, "endArrowhead": "arrow" },
+    { "type": "arrow", "x": 460, "y": 190, "width": 60, "height": 0, "strokeColor": "#334155", "strokeWidth": 3, "endArrowhead": "arrow" },
+    { "type": "arrow", "x": 680, "y": 190, "width": 55, "height": 0, "strokeColor": "#334155", "strokeWidth": 3, "endArrowhead": "arrow" },
+    { "type": "arrow", "x": 815, "y": 250, "width": 0, "height": 75, "strokeColor": "#6d28d9", "strokeWidth": 3, "endArrowhead": "arrow" },
+    { "type": "arrow", "x": 735, "y": 365, "width": -55, "height": 0, "strokeColor": "#6d28d9", "strokeWidth": 3, "endArrowhead": "arrow" },
+    { "type": "arrow", "x": 520, "y": 365, "width": -60, "height": 0, "strokeColor": "#166534", "strokeWidth": 3, "endArrowhead": "arrow" },
+    { "type": "arrow", "x": 380, "y": 325, "width": 0, "height": -75, "strokeColor": "#166534", "strokeWidth": 3, "endArrowhead": "arrow", "label": { "text": "render", "fontSize": 14 } },
+    { "type": "arrow", "x": 600, "y": 325, "width": 0, "height": -75, "strokeColor": "#166534", "strokeWidth": 3, "endArrowhead": "arrow", "label": { "text": "context", "fontSize": 14 } }
+  ]
+}
+```
