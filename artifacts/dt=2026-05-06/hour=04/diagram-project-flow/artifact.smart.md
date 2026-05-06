@@ -1,11 +1,12 @@
 ```diagram
-nodes: 13
+nodes: 14
 
 shapes:
   0: ellipse
   3: diamond
   6: diamond
   9: diamond
+  13: ellipse
 
 positions:
   0: 80, 80
@@ -21,12 +22,14 @@ positions:
   10: 1120, 520
   11: 1420, 520
   12: 820, 740
+  13: 1120, 740
 
 styles:
   0: stroke=#60a5fa fill=#dbeafe fontSize=20
   3: stroke=#f59e0b fill=#fef3c7 strokeStyle=dashed roughness=2
   6: stroke=#a855f7 fill=#f3e8ff
   9: stroke=#fb7185 fill=#ffe4e6 strokeWidth=3
+  13: stroke=#22c55e fill=#dcfce7
 
 edges:
   0 -> 1 "voice"
@@ -47,6 +50,7 @@ edges:
   12 -> 6 "iterate" arrow stroke=#a855f7
   9 -> 9 "retry UI" arrow stroke=#fb7185
   10 -> 3 "bad result" bar stroke=#f59e0b
+  12 -> 13 "ship" arrow stroke=#22c55e strokeWidth=3
 
 labels:
   0: "Host speaks in Meeting"
@@ -62,4 +66,5 @@ labels:
   10: "Meeting canvas renderer"
   11: "Human visual inspection"
   12: "Screenshot-driven fixes"
+  13: "Polished shared result"
 ```
