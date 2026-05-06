@@ -631,7 +631,8 @@ article.partial { opacity: 0.65; }
 }
 :root[data-mode="light"] .nativeLabel,
 :root[data-mode="light"] .nativeArrowLabel {
-  stroke: rgba(255, 255, 255, 0.82);
+  stroke: rgba(255, 255, 255, 0.42);
+  stroke-width: 2px;
 }
 .nativeArrow line {
   opacity: 0.82;

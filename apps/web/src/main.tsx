@@ -743,7 +743,7 @@ function renderRoughShape(type: string, x: number, y: number, width: number, hei
     : type === "diamond"
       ? roughGenerator.polygon([[x + width / 2, y], [x + width, y + height / 2], [x + width / 2, y + height], [x, y + height / 2]], options)
       : roughGenerator.path(roundedRectPath(x, y, width, height, Math.min(24, width / 8, height / 3)), options);
-  return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || "none"} opacity={path.fill && path.stroke === hachureColor ? 0.42 : undefined} />)}</g>;
+  return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || "none"} opacity={path.fill && path.stroke === hachureColor ? 0.24 : undefined} />)}</g>;
 }
 
 function adjustColorForHachure(fill: string, stroke: string): string {
@@ -751,9 +751,9 @@ function adjustColorForHachure(fill: string, stroke: string): string {
   const rgb = parseHexColor(fill);
   if (!rgb) return stroke;
   const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
-  if (luminance > 0.62) return mixHex(fill, stroke, 0.32);
-  if (luminance < 0.28) return mixHex(fill, "#ffffff", 0.42);
-  return mixHex(fill, stroke, 0.42);
+  if (luminance > 0.62) return mixHex(fill, "#ffffff", 0.82);
+  if (luminance < 0.28) return mixHex(fill, "#ffffff", 0.68);
+  return mixHex(fill, "#ffffff", 0.74);
 }
 
 function parseHexColor(color: string): { r: number; g: number; b: number } | undefined {
