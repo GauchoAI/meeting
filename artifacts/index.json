@@ -1,0 +1,23 @@
+{
+  "updatedAt": "2026-05-06T14:52:27.294Z",
+  "artifacts": [
+    {
+      "kind": "diagram",
+      "slug": "project-flow",
+      "title": "Meeting project flow",
+      "createdAt": "2026-05-06T07:04:45.691Z",
+      "updatedAt": "2026-05-06T07:13:00.485Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "meeting",
+        "diagram",
+        "workflow",
+        "smart-down"
+      ],
+      "summary": "Project flow artifact updated to use Excalidron naming",
+      "path": "artifacts/dt=2026-05-06/hour=04/diagram-project-flow/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=04/diagram-project-flow",
+      "mtime": "2026-05-06T14:47:07.397Z"
+    }
+  ]
+}

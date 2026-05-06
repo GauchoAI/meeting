@@ -6,14 +6,18 @@ const root = process.cwd();
 const artifactsRoot = resolve(root, "artifacts");
 const command = process.argv[2];
 const args = parseArgs(process.argv.slice(3));
+const knownKinds = new Set(["diagram", "plan", "implementation", "status", "note", "spec", "decision"]);
 
 if (command === "write") await writeArtifact();
 else if (command === "list") await listArtifacts();
+else if (command === "find") await findArtifacts();
+else if (command === "index") await indexArtifacts();
 else if (command === "url") await artifactUrl();
 else usage(1);
 
 async function writeArtifact() {
-  const kind = requireArg("kind");
+  const kind = slugify(requireArg("kind"));
+  if (!knownKinds.has(kind) && args.strict) throw new Error(`Unknown kind '${kind}'. Known: ${[...knownKinds].join(", ")}`);
   const slug = slugify(requireArg("slug"));
   const title = args.title || titleize(slug);
   const now = new Date();
@@ -28,7 +32,7 @@ async function writeArtifact() {
   let existing = {};
   try { existing = JSON.parse(await readFile(manifestPath, "utf8")); } catch {}
   const createdAt = existing.createdAt || now.toISOString();
-  const manifest = {
+  const manifest = normalizeManifest({
     kind,
     slug,
     title,
@@ -37,19 +41,42 @@ async function writeArtifact() {
     artifact: "artifact.smart.md",
     tags: parseTags(args.tags || existing.tags || []),
     summary: args.summary || existing.summary || "",
-  };
+  }, manifestPath);
   await writeFile(artifactPath, body.endsWith("\n") ? body : `${body}\n`);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await indexArtifacts({ quiet: true });
   console.log(relative(root, artifactPath));
 }
 
 async function listArtifacts() {
-  const manifests = await findFiles(artifactsRoot, "manifest.json");
-  for (const manifestPath of manifests.sort()) {
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    const artifactPath = join(dirname(manifestPath), manifest.artifact || "artifact.smart.md");
-    console.log(`${relative(root, artifactPath)}\t${manifest.kind}\t${manifest.title}\t${(manifest.tags || []).join(",")}`);
+  const records = await artifactRecords();
+  for (const record of records.sort(byUpdatedDesc)) {
+    console.log(`${record.path}\t${record.kind}\t${record.slug}\t${record.title}\t${record.tags.join(",")}`);
   }
+}
+
+async function findArtifacts() {
+  const query = String(args.q || args.query || process.argv[3] || "").toLowerCase();
+  const kind = args.kind ? slugify(args.kind) : "";
+  const tag = args.tag ? slugify(args.tag) : "";
+  const records = await artifactRecords();
+  const matches = records.filter((record) => {
+    if (kind && record.kind !== kind) return false;
+    if (tag && !record.tags.includes(tag)) return false;
+    if (!query) return true;
+    return [record.slug, record.title, record.summary, record.kind, record.path, ...record.tags].join(" ").toLowerCase().includes(query);
+  });
+  for (const record of matches.sort(byUpdatedDesc)) {
+    console.log(`${record.path}\t${record.kind}\t${record.slug}\t${record.title}`);
+  }
+}
+
+async function indexArtifacts(options = {}) {
+  const records = (await artifactRecords()).sort(byUpdatedDesc);
+  const indexPath = join(artifactsRoot, "index.json");
+  await mkdir(artifactsRoot, { recursive: true });
+  await writeFile(indexPath, `${JSON.stringify({ updatedAt: new Date().toISOString(), artifacts: records }, null, 2)}\n`);
+  if (!options.quiet) console.log(relative(root, indexPath));
 }
 
 async function artifactUrl() {
@@ -58,6 +85,25 @@ async function artifactUrl() {
   const markdown = await readFile(resolve(root, file), "utf8");
   const encoded = Buffer.from(markdown, "utf8").toString("base64url");
   console.log(`http://localhost:5174/?md64=${encoded}`);
+}
+
+async function artifactRecords() {
+  const manifests = await findFiles(artifactsRoot, "manifest.json");
+  const records = [];
+  for (const manifestPath of manifests) {
+    try {
+      const manifest = normalizeManifest(JSON.parse(await readFile(manifestPath, "utf8")), manifestPath);
+      const artifactPath = join(dirname(manifestPath), manifest.artifact || "artifact.smart.md");
+      const info = await stat(artifactPath);
+      records.push({
+        ...manifest,
+        path: relative(root, artifactPath),
+        dir: relative(root, dirname(manifestPath)),
+        mtime: info.mtime.toISOString(),
+      });
+    } catch {}
+  }
+  return records;
 }
 
 async function findOrCreateArtifactDir(kind, slug, now) {
@@ -95,6 +141,27 @@ async function findFiles(dir, name) {
   return out;
 }
 
+function normalizeManifest(manifest, manifestPath) {
+  const dir = dirname(manifestPath);
+  const folder = dir.split(/[\\/]/).pop() || "artifact";
+  const inferredKind = folder.includes("-") ? folder.split("-")[0] : "note";
+  const inferredSlug = folder.includes("-") ? folder.split("-").slice(1).join("-") : folder;
+  return {
+    kind: slugify(manifest.kind || inferredKind),
+    slug: slugify(manifest.slug || inferredSlug),
+    title: manifest.title || titleize(manifest.slug || inferredSlug),
+    createdAt: manifest.createdAt || manifest.updatedAt || new Date(0).toISOString(),
+    updatedAt: manifest.updatedAt || manifest.createdAt || new Date(0).toISOString(),
+    artifact: manifest.artifact || "artifact.smart.md",
+    tags: parseTags(manifest.tags || []),
+    summary: manifest.summary || "",
+  };
+}
+
+function byUpdatedDesc(a, b) {
+  return String(b.updatedAt).localeCompare(String(a.updatedAt));
+}
+
 function parseArgs(argv) {
   const parsed = {};
   for (let i = 0; i < argv.length; i++) {
@@ -113,8 +180,8 @@ function requireArg(name) {
 }
 
 function parseTags(value) {
-  if (Array.isArray(value)) return value;
-  return String(value || "").split(",").map((tag) => tag.trim()).filter(Boolean);
+  if (Array.isArray(value)) return value.map(slugify).filter(Boolean);
+  return String(value || "").split(",").map((tag) => slugify(tag.trim())).filter(Boolean);
 }
 
 function slugify(value) {
@@ -129,6 +196,8 @@ function usage(code = 0) {
   console.error(`Usage:
   node scripts/smart-artifact.mjs write --kind <kind> --slug <slug> --title <title> [--tags a,b] [--summary text] (--file path | --body markdown)
   node scripts/smart-artifact.mjs list
+  node scripts/smart-artifact.mjs find [query] [--kind kind] [--tag tag]
+  node scripts/smart-artifact.mjs index
   node scripts/smart-artifact.mjs url <artifact.smart.md>`);
   process.exit(code);
 }

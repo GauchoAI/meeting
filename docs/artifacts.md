@@ -4,7 +4,7 @@ Smart-down artifacts are durable Markdown artifacts that can be edited in place,
 
 ## Layout
 
-Artifacts live under a partitioned directory:
+Artifacts live under a partitioned directory, inspired by lakehouse/parquet-style partitions:
 
 ```txt
 artifacts/
@@ -27,10 +27,13 @@ artifacts/dt=2026-05-06/hour=03/status-meeting-ui/artifact.smart.md
 
 - One folder is one evolving idea.
 - `artifact.smart.md` is edited in place.
+- Git history is the version log for rollback, comparison, and iteration.
+- Partition folders make browsing cheap by date/hour.
+- The `<kind>-<slug>` folder makes related ideas cluster lexically.
 - The Meeting extension watches artifact files and renders the latest file automatically as it changes.
-- Git provides versioning, rollback, and diffs.
 - The watcher commits artifact file changes using the host utterance as the commit message.
 - `manifest.json` makes artifacts discoverable without parsing the Markdown body.
+- `artifacts/index.json` is a generated search/index file and can be regenerated any time.
 
 ## Manifest
 
@@ -46,6 +49,30 @@ artifacts/dt=2026-05-06/hour=03/status-meeting-ui/artifact.smart.md
   "summary": "ScaliDRAW-style overview of the Meeting project loop."
 }
 ```
+
+## Naming conventions
+
+Kinds should be broad and stable:
+
+- `diagram`
+- `plan`
+- `implementation`
+- `status`
+- `note`
+- `spec`
+- `decision`
+
+Slugs should be concise, lowercase, dash-separated, and idea-oriented:
+
+```txt
+diagram-project-flow
+plan-native-diagram-renderer
+implementation-meeting-artifact-router
+status-latency-investigation
+decision-smart-down-layout
+```
+
+Create a new folder only for a new idea. Keep iterating in place for the same idea; use Git for versions.
 
 ## Commands
 
@@ -65,6 +92,19 @@ List artifacts:
 
 ```bash
 node scripts/smart-artifact.mjs list
+```
+
+Search artifacts:
+
+```bash
+node scripts/smart-artifact.mjs find latency
+node scripts/smart-artifact.mjs find --kind diagram --tag meeting
+```
+
+Regenerate the index:
+
+```bash
+node scripts/smart-artifact.mjs index
 ```
 
 Render an artifact in the Meeting canvas:
