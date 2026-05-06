@@ -372,7 +372,7 @@ function MarkdownDocument({
   const rootRef = useRef<HTMLElement | null>(null);
   const parts = useMemo(() => splitExcalidrawBlocks(text), [text]);
   useEffect(() => {
-    const timers = [120, 420, 900].map((delay) => window.setTimeout(() => focusInspectionTarget(rootRef.current, query), delay));
+    const timers = [120, 420, 900, 1800, 3000].map((delay) => window.setTimeout(() => focusInspectionTarget(rootRef.current, query), delay));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [parts]);
   let diagramIndex = 0;
@@ -457,7 +457,19 @@ function focusInspectionTarget(root: HTMLElement | null, params: URLSearchParams
   if (!target) return;
 
   target.classList.add("inspectFocus");
-  target.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+  const block = parseFocusBlock(params.get("focusBlock") || params.get("align"));
+  target.scrollIntoView({ block, inline: "center", behavior: "instant" });
+
+  const offset = Number.parseFloat(params.get("focusOffset") || params.get("offset") || "0");
+  if (Number.isFinite(offset) && offset !== 0) {
+    const scroller = target.closest<HTMLElement>(".canvas") || document.scrollingElement;
+    if (scroller) scroller.scrollTop += offset;
+  }
+}
+
+function parseFocusBlock(value: string | null): ScrollLogicalPosition {
+  if (value === "start" || value === "center" || value === "end" || value === "nearest") return value;
+  return "center";
 }
 
 function resolveInspectionTarget(root: HTMLElement, params: URLSearchParams): HTMLElement | undefined {
@@ -707,8 +719,14 @@ function layoutConciseNodes(count: number, _edges: Array<{ from: number; to: num
 
 function NativeDiagramSvg({ scene, index }: { scene: DiagramScene; index: number }) {
   const measured = useMemo(() => syncIndexedConnectors(applyDiagramMargins(measureDiagramElements(scene.elements))), [scene]);
+  const containerIndexes = useMemo(() => findContainerFrameIndexes(measured), [measured]);
   const bounds = diagramBounds(measured);
   const viewBox = `${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`;
+  const orderedElements = [
+    ...measured.map((element, index) => ({ element, index })).filter(({ index }) => containerIndexes.has(index)),
+    ...measured.map((element, index) => ({ element, index })).filter(({ element }) => isConnectorElement(element)),
+    ...measured.map((element, index) => ({ element, index })).filter(({ element, index }) => !isConnectorElement(element) && !containerIndexes.has(index))
+  ];
   return (
     <div className="nativeDiagramEmbed" data-inspect-diagram={index}>
       <svg viewBox={viewBox} role="img" aria-label="Generated diagram">
@@ -717,12 +735,7 @@ function NativeDiagramSvg({ scene, index }: { scene: DiagramScene; index: number
             <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
           </marker>
         </defs>
-        {measured.map((element, index) => ({ element, index }))
-          .filter(({ element }) => isConnectorElement(element))
-          .map(({ element, index }) => renderNativeElement(element, index, measured))}
-        {measured.map((element, index) => ({ element, index }))
-          .filter(({ element }) => !isConnectorElement(element))
-          .map(({ element, index }) => renderNativeElement(element, index, measured))}
+        {orderedElements.map(({ element, index }) => renderNativeElement(element, index, measured))}
       </svg>
     </div>
   );
@@ -746,7 +759,12 @@ function measureDiagramElements(elements: DiagramElement[]): MeasuredDiagramElem
 
 function applyDiagramMargins(elements: MeasuredDiagramElement[], minGap = 72): MeasuredDiagramElement[] {
   const adjusted = elements.map((element) => ({ ...element }));
-  const shapes = adjusted.filter((element) => !isConnectorElement(element));
+  const containerIndexes = findContainerFrameIndexes(adjusted);
+  if (containerIndexes.size) return adjusted;
+  const shapes = adjusted
+    .map((element, index) => ({ element, index }))
+    .filter(({ element, index }) => !isConnectorElement(element) && !containerIndexes.has(index))
+    .map(({ element }) => element);
   for (let pass = 0; pass < 4; pass++) {
     for (const upper of shapes) {
       for (const lower of shapes) {
@@ -811,14 +829,59 @@ function isConnectorElement(element: DiagramElement): boolean {
   return type === "arrow" || type === "line";
 }
 
+function findContainerFrameIndexes(elements: MeasuredDiagramElement[]): Set<number> {
+  const shapes = elements
+    .map((element, index) => ({ element, index, bounds: toShapeBounds(element) }))
+    .filter(({ element, bounds }) => !isConnectorElement(element) && bounds.type === "rectangle");
+
+  const allShapeBounds = elements
+    .map((element, index) => ({ element, index, bounds: toShapeBounds(element) }))
+    .filter(({ element }) => !isConnectorElement(element));
+
+  const frameIndexes = new Set<number>();
+  for (const candidate of shapes) {
+    const candidateArea = candidate.bounds.width * candidate.bounds.height;
+    if (candidateArea < 120_000) continue;
+
+    const contained = allShapeBounds.filter((other) => {
+      if (other.index === candidate.index) return false;
+      const otherArea = other.bounds.width * other.bounds.height;
+      if (candidateArea < otherArea * 2.75) return false;
+      return pointInRect(centerX(other.bounds), centerY(other.bounds), candidate.bounds);
+    });
+    if (contained.length >= 3) frameIndexes.add(candidate.index);
+  }
+  return frameIndexes;
+}
+
+function connectorObstacleElements(elements: MeasuredDiagramElement[], excludedIndexes = new Set<number>()): Array<{ element: MeasuredDiagramElement; index: number }> {
+  const containerIndexes = findContainerFrameIndexes(elements);
+  return elements
+    .map((element, index) => ({ element, index }))
+    .filter(({ element, index }) => !isConnectorElement(element) && !containerIndexes.has(index) && !excludedIndexes.has(index));
+}
+
+function connectorObstacleRects(elements: MeasuredDiagramElement[], padding = 0, excludedIndexes = new Set<number>()) {
+  return connectorObstacleElements(elements, excludedIndexes).map(({ element }) => ({
+    x: numberOr(element.x, 0) - padding,
+    y: numberOr(element.y, 0) - padding,
+    width: numberOr(element.width, 0) + padding * 2,
+    height: numberOr(element.height, 0) + padding * 2
+  }));
+}
+
+function indexExclusions(...indexes: Array<number | undefined>): Set<number> {
+  return new Set(indexes.filter((index): index is number => typeof index === "number"));
+}
+
 function renderNativeElement(element: MeasuredDiagramElement, index: number, elements: MeasuredDiagramElement[]) {
   const type = String(element.type || "rectangle");
   if (isConnectorElement(element)) return renderNativeArrow(element, index, elements);
   if (type === "text") return renderNativeText(element, index);
-  return renderNativeShape(element, index, type);
+  return renderNativeShape(element, index, type, findContainerFrameIndexes(elements).has(index));
 }
 
-function renderNativeShape(element: MeasuredDiagramElement, index: number, type: string) {
+function renderNativeShape(element: MeasuredDiagramElement, index: number, type: string, isContainerFrame = false) {
   const x = numberOr(element.x, 0);
   const y = numberOr(element.y, 0);
   const width = Math.max(1, numberOr(element.width, 160));
@@ -830,7 +893,9 @@ function renderNativeShape(element: MeasuredDiagramElement, index: number, type:
   return (
     <g key={index} opacity={opacity}>
       {renderRoughShape(type, x, y, width, height, stroke, fill, hachureColor, index, element)}
-      {element.measuredLabel && renderLabel(element.measuredLabel, x + width / 2, y + height / 2, index)}
+      {element.measuredLabel && (isContainerFrame
+        ? renderLabel(element.measuredLabel, x + width / 2, y - element.measuredLabel.height / 2 - 10, index)
+        : renderLabel(element.measuredLabel, x + width / 2, y + height / 2, index))}
     </g>
   );
 }
@@ -947,7 +1012,7 @@ function renderNativeArrow(element: MeasuredDiagramElement, index: number, eleme
 }
 
 function trimConnectorToShapes(x1: number, y1: number, x2: number, y2: number, elements: MeasuredDiagramElement[]) {
-  const shapes = elements.filter((shape) => !isConnectorElement(shape)).map(toShapeBounds);
+  const shapes = connectorObstacleElements(elements).map(({ element }) => toShapeBounds(element));
   const dx = x2 - x1;
   const dy = y2 - y1;
   const length = Math.hypot(dx, dy) || 1;
@@ -998,6 +1063,14 @@ function toShapeBounds(shape: MeasuredDiagramElement): ShapeBounds {
     width: numberOr(shape.width, 0),
     height: numberOr(shape.height, 0)
   };
+}
+
+function centerX(shape: ShapeBounds): number {
+  return shape.x + shape.width / 2;
+}
+
+function centerY(shape: ShapeBounds): number {
+  return shape.y + shape.height / 2;
 }
 
 function pointInRect(x: number, y: number, rect: { x: number; y: number; width: number; height: number }): boolean {
@@ -1096,9 +1169,7 @@ function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: n
       .sort((a, b) => a.score - b.score)[0].control;
     return { points: [{ x: x1, y: y1 }, best, { x: x2, y: y2 }], label: { x: best.x, y: best.y + best.labelDy }, curve: true };
   }
-  const obstacle = elements
-    .filter((shape) => !isConnectorElement(shape))
-    .map((shape) => ({ x: numberOr(shape.x, 0) - 16, y: numberOr(shape.y, 0) - 16, width: numberOr(shape.width, 0) + 32, height: numberOr(shape.height, 0) + 32 }))
+  const obstacle = connectorObstacleRects(elements, 16, indexExclusions(fromIndex, toIndex))
     .find((rect) => !pointInRect(x1, y1, rect) && !pointInRect(x2, y2, rect) && segmentIntersectsRect(x1, y1, x2, y2, rect));
   if (obstacle) {
     const above = Math.min(y1, y2, obstacle.y) - 38;
@@ -1142,9 +1213,7 @@ function routeNormal(points: Array<{ x: number; y: number }>, t: number, curve: 
 
 function labelCollisionScore(candidate: { x: number; y: number }, width: number, height: number, elements: MeasuredDiagramElement[]): number {
   const box = { x: candidate.x - width / 2, y: candidate.y - height, width, height };
-  return elements
-    .filter((shape) => !isConnectorElement(shape))
-    .map((shape) => ({ x: numberOr(shape.x, 0) - 8, y: numberOr(shape.y, 0) - 8, width: numberOr(shape.width, 0) + 16, height: numberOr(shape.height, 0) + 16 }))
+  return connectorObstacleRects(elements, 8)
     .reduce((score, rect) => score + (rectsOverlap(box, rect) ? 1_000 : 0), 0);
 }
 
@@ -1153,10 +1222,7 @@ function rectsOverlap(a: { x: number; y: number; width: number; height: number }
 }
 
 function routeCollisionScore(points: Array<{ x: number; y: number }>, elements: MeasuredDiagramElement[], curve: boolean, fromIndex?: number, toIndex?: number): number {
-  const obstacles = elements
-    .map((shape, index) => ({ shape, index }))
-    .filter(({ shape, index }) => !isConnectorElement(shape) && index !== fromIndex && index !== toIndex)
-    .map(({ shape }) => ({ x: numberOr(shape.x, 0) - 34, y: numberOr(shape.y, 0) - 34, width: numberOr(shape.width, 0) + 68, height: numberOr(shape.height, 0) + 68 }));
+  const obstacles = connectorObstacleRects(elements, 34, indexExclusions(fromIndex, toIndex));
   let score = 0;
   const samples = 36;
   for (let index = 1; index < samples - 1; index++) {
