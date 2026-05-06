@@ -59,7 +59,7 @@ labels:
   4: "Task-driven assistant loop"
   5: "Plan next concrete action"
   6: "Select output surface"
-  7: "divisium"
+  7: "excalidron"
   8: "Concise Markdown artifact"
   9: "Generated interactive UI"
   10: "Meeting canvas renderer"
