@@ -1,5 +1,3 @@
-# Meeting project flow
-
 ```diagram
 nodes: 14
 

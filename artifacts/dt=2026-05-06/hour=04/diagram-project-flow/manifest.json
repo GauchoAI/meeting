@@ -3,7 +3,7 @@
   "slug": "project-flow",
   "title": "Meeting project flow",
   "createdAt": "2026-05-06T07:04:45.691Z",
-  "updatedAt": "2026-05-06T07:07:34.361Z",
+  "updatedAt": "2026-05-06T07:09:53.945Z",
   "artifact": "artifact.smart.md",
   "tags": [
     "meeting",
@@ -11,5 +11,5 @@
     "workflow",
     "smart-down"
   ],
-  "summary": "ScaliDRAW-style overview with explicit positions for iterative layout refinement"
+  "summary": "ScaliDRAW-style overview with explicit positions; title removed for cleaner canvas rendering"
 }
