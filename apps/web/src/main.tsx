@@ -766,72 +766,126 @@ function renderNativeArrow(element: MeasuredDiagramElement, index: number, eleme
 }
 
 function trimConnectorToShapes(x1: number, y1: number, x2: number, y2: number, elements: MeasuredDiagramElement[]) {
-  const rects = elements.filter((shape) => !isConnectorElement(shape)).map((shape) => ({
-    x: numberOr(shape.x, 0),
-    y: numberOr(shape.y, 0),
-    width: numberOr(shape.width, 0),
-    height: numberOr(shape.height, 0)
-  }));
+  const shapes = elements.filter((shape) => !isConnectorElement(shape)).map(toShapeBounds);
   const dx = x2 - x1;
   const dy = y2 - y1;
   const length = Math.hypot(dx, dy) || 1;
-  const farX = x1 + (dx / length) * 10_000;
-  const farY = y1 + (dy / length) * 10_000;
+  const ux = dx / length;
+  const uy = dy / length;
+  const farX = x1 + ux * 10_000;
+  const farY = y1 + uy * 10_000;
   let start = { x: x1, y: y1 };
   let end = { x: x2, y: y2 };
-  let startRect: typeof rects[number] | undefined;
+  let startShape: ShapeBounds | undefined;
 
-  for (const rect of rects) {
-    if (pointInRect(start.x, start.y, rect)) {
-      startRect = rect;
-      start = intersectRectRay(rect, start.x, start.y, farX, farY) || start;
+  for (const shape of shapes) {
+    if (pointInRect(start.x, start.y, shape)) {
+      startShape = shape;
+      start = intersectShapeRay(shape, start.x, start.y, farX, farY) || start;
     }
   }
 
-  const endRect = rects.find((rect) => pointInRect(end.x, end.y, rect));
-  if (endRect) {
-    end = intersectRectRay(endRect, end.x, end.y, x1, y1) || end;
+  const endShape = shapes.find((shape) => pointInRect(end.x, end.y, shape));
+  if (endShape) {
+    end = intersectShapeRay(endShape, end.x, end.y, x1, y1) || end;
   } else {
-    const nextHit = rects
-      .filter((rect) => rect !== startRect)
-      .map((rect) => intersectRectRayWithT(rect, start.x, start.y, farX, farY))
+    const nextHit = shapes
+      .filter((shape) => shape !== startShape)
+      .map((shape) => intersectShapeRayWithT(shape, start.x, start.y, farX, farY))
       .filter((hit): hit is { t: number; x: number; y: number } => hit !== undefined && hit.t > 0.001)
       .sort((a, b) => a.t - b.t)[0];
     if (nextHit) end = { x: nextHit.x, y: nextHit.y };
   }
 
+  // Keep rough strokes and arrowheads outside filled shapes. This avoids the
+  // visual bug where a correctly trimmed connector is later covered by the
+  // target box or appears to run inside a diamond/ellipse.
+  const startGap = 10;
+  const endGap = 18;
+  start = { x: start.x + ux * startGap, y: start.y + uy * startGap };
+  end = { x: end.x - ux * endGap, y: end.y - uy * endGap };
   return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
+}
+
+type ShapeBounds = { type: string; x: number; y: number; width: number; height: number };
+
+function toShapeBounds(shape: MeasuredDiagramElement): ShapeBounds {
+  return {
+    type: String(shape.type || "rectangle"),
+    x: numberOr(shape.x, 0),
+    y: numberOr(shape.y, 0),
+    width: numberOr(shape.width, 0),
+    height: numberOr(shape.height, 0)
+  };
 }
 
 function pointInRect(x: number, y: number, rect: { x: number; y: number; width: number; height: number }): boolean {
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 }
 
-function intersectRectRay(rect: { x: number; y: number; width: number; height: number }, x1: number, y1: number, x2: number, y2: number): { x: number; y: number } | undefined {
-  const hit = intersectRectRayWithT(rect, x1, y1, x2, y2);
+function intersectShapeRay(shape: ShapeBounds, x1: number, y1: number, x2: number, y2: number): { x: number; y: number } | undefined {
+  const hit = intersectShapeRayWithT(shape, x1, y1, x2, y2);
   return hit ? { x: hit.x, y: hit.y } : undefined;
 }
 
+function intersectShapeRayWithT(shape: ShapeBounds, x1: number, y1: number, x2: number, y2: number): { t: number; x: number; y: number } | undefined {
+  if (shape.type === "diamond") return intersectPolygonRayWithT(diamondPoints(shape), x1, y1, x2, y2);
+  if (shape.type === "ellipse") return intersectEllipseRayWithT(shape, x1, y1, x2, y2);
+  return intersectRectRayWithT(shape, x1, y1, x2, y2);
+}
+
 function intersectRectRayWithT(rect: { x: number; y: number; width: number; height: number }, x1: number, y1: number, x2: number, y2: number): { t: number; x: number; y: number } | undefined {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
+  return intersectPolygonRayWithT([[rect.x, rect.y], [rect.x + rect.width, rect.y], [rect.x + rect.width, rect.y + rect.height], [rect.x, rect.y + rect.height]], x1, y1, x2, y2);
+}
+
+function diamondPoints(shape: ShapeBounds): Array<[number, number]> {
+  return [[shape.x + shape.width / 2, shape.y], [shape.x + shape.width, shape.y + shape.height / 2], [shape.x + shape.width / 2, shape.y + shape.height], [shape.x, shape.y + shape.height / 2]];
+}
+
+function intersectPolygonRayWithT(points: Array<[number, number]>, x1: number, y1: number, x2: number, y2: number): { t: number; x: number; y: number } | undefined {
   const candidates: Array<{ t: number; x: number; y: number }> = [];
-  if (dx !== 0) {
-    for (const x of [rect.x, rect.x + rect.width]) {
-      const t = (x - x1) / dx;
-      const y = y1 + t * dy;
-      if (t > 0 && y >= rect.y && y <= rect.y + rect.height) candidates.push({ t, x, y });
-    }
-  }
-  if (dy !== 0) {
-    for (const y of [rect.y, rect.y + rect.height]) {
-      const t = (y - y1) / dy;
-      const x = x1 + t * dx;
-      if (t > 0 && x >= rect.x && x <= rect.x + rect.width) candidates.push({ t, x, y });
-    }
+  for (let index = 0; index < points.length; index++) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    const hit = intersectSegments(x1, y1, x2, y2, a[0], a[1], b[0], b[1]);
+    if (hit && hit.t > 0) candidates.push(hit);
   }
   candidates.sort((a, b) => a.t - b.t);
   return candidates[0];
+}
+
+function intersectSegments(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number): { t: number; x: number; y: number } | undefined {
+  const rX = x2 - x1;
+  const rY = y2 - y1;
+  const sX = x4 - x3;
+  const sY = y4 - y3;
+  const denominator = rX * sY - rY * sX;
+  if (Math.abs(denominator) < 0.0001) return undefined;
+  const qpx = x3 - x1;
+  const qpy = y3 - y1;
+  const t = (qpx * sY - qpy * sX) / denominator;
+  const u = (qpx * rY - qpy * rX) / denominator;
+  if (t < 0 || u < 0 || u > 1) return undefined;
+  return { t, x: x1 + t * rX, y: y1 + t * rY };
+}
+
+function intersectEllipseRayWithT(shape: ShapeBounds, x1: number, y1: number, x2: number, y2: number): { t: number; x: number; y: number } | undefined {
+  const cx = shape.x + shape.width / 2;
+  const cy = shape.y + shape.height / 2;
+  const rx = Math.max(1, shape.width / 2);
+  const ry = Math.max(1, shape.height / 2);
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const ox = x1 - cx;
+  const oy = y1 - cy;
+  const a = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+  const b = 2 * ((ox * dx) / (rx * rx) + (oy * dy) / (ry * ry));
+  const c = (ox * ox) / (rx * rx) + (oy * oy) / (ry * ry) - 1;
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant < 0 || a === 0) return undefined;
+  const roots = [(-b - Math.sqrt(discriminant)) / (2 * a), (-b + Math.sqrt(discriminant)) / (2 * a)].filter((t) => t > 0).sort((aRoot, bRoot) => aRoot - bRoot);
+  const t = roots[0];
+  return t === undefined ? undefined : { t, x: x1 + t * dx, y: y1 + t * dy };
 }
 
 function routeConnector(x1: number, y1: number, x2: number, y2: number, rawX1: number, rawY1: number, rawX2: number, rawY2: number, elements: MeasuredDiagramElement[]) {
