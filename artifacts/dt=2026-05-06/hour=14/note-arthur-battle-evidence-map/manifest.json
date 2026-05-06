@@ -1,0 +1,15 @@
+{
+  "kind": "note",
+  "slug": "arthur-battle-evidence-map",
+  "title": "Arthur: Mount Badon & Camlann Evidence Map",
+  "createdAt": "2026-05-06T17:11:45.460Z",
+  "updatedAt": "2026-05-06T17:11:45.460Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "arthur",
+    "battle",
+    "history",
+    "evidence"
+  ],
+  "summary": "A source chain and confidence map comparing Mount Badon and Camlann with primary, chronicle, and literary layers."
+}
