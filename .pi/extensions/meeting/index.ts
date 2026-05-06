@@ -42,6 +42,7 @@ export default function (pi: ExtensionAPI) {
 	let currentLatency: { utteranceId?: string; utteranceCreatedAt?: number; extensionReceivedAt?: number; agentStartedAt?: number } = {};
 	let artifactWatcher: FSWatcher | undefined;
 	let lastHostUtterance = "Update smart-down artifact";
+	let suppressMeetingAssistantResponse = false;
 	const artifactDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 	const seen = new Set<string>();
 
@@ -77,7 +78,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("message_update", async (event) => {
-		if (pendingMeetingResponses <= 0) return;
+		if (pendingMeetingResponses <= 0 || suppressMeetingAssistantResponse) return;
 		const now = Date.now();
 		if (now - lastStreamPost < 350) return;
 		const markdown = extractText(event.message.content).trim();
@@ -97,6 +98,13 @@ export default function (pi: ExtensionAPI) {
 
 		const markdown = extractText(event.message.content).trim();
 		if (!markdown) return;
+		if (suppressMeetingAssistantResponse) {
+			await postTrace("message", `suppressed assistant response: ${markdown}`);
+			pendingMeetingResponses = Math.max(0, pendingMeetingResponses - 1);
+			currentMeetingMessageId = undefined;
+			suppressMeetingAssistantResponse = false;
+			return;
+		}
 
 		await postTrace("message", markdown);
 		await postTrace("latency", "assistant.final", { ...currentLatency, finalAt: Date.now(), chars: markdown.length });
@@ -212,6 +220,7 @@ export default function (pi: ExtensionAPI) {
 		const diffState = await execGit(ctx.cwd, ["diff", "--cached", "--quiet"]).then(() => "clean", () => "dirty");
 		if (diffState === "clean") return;
 		await execGit(ctx.cwd, ["commit", "-m", message.trim() || "Update smart-down artifact"]);
+		await execGit(ctx.cwd, ["push"]).catch((error) => postTrace("error", `artifact watcher push failed: ${errorMessage(error)}`, { artifactPath }));
 	}
 
 	async function initialiseCursor(ctx: ExtensionContext) {
@@ -290,6 +299,7 @@ export default function (pi: ExtensionAPI) {
 		const text = event.text.trim();
 		if (!text || isIgnorableTranscript(text)) return;
 		lastHostUtterance = text;
+		suppressMeetingAssistantResponse = isArtifactSurfaceRequest(text);
 		const extensionReceivedAt = Date.now();
 		const utteranceCreatedAt = Date.parse(event.createdAt);
 		currentLatency = { utteranceId: event.id, utteranceCreatedAt: Number.isFinite(utteranceCreatedAt) ? utteranceCreatedAt : undefined, extensionReceivedAt };
@@ -310,7 +320,7 @@ export default function (pi: ExtensionAPI) {
 			"",
 			"Decide whether this is a work request or a conversational request.",
 			"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, or create/update an artifact/file: perform only the necessary work now with tools and continue until complete.",
-			"For smart-down artifact edits, edit only the artifact file in place and stop; do not render screenshots or rewrite the artifact. The artifact watcher will publish and commit the file with the host utterance as the commit message.",
+			"For smart-down artifact edits, edit only the artifact file in place, then stop without a final Markdown status. The artifact watcher will publish, commit with the host utterance as the commit message, and push.",
 			"For code implementation work, validate when appropriate and commit only when explicitly requested or when the repo workflow clearly requires it.",
 			"If it only asks for explanation or brainstorming: answer the host directly with concise Markdown.",
 			"Do not merely acknowledge actionable work requests.",
@@ -394,6 +404,16 @@ function newEventId(prefix: string): string {
 
 function nowIso(): string {
 	return new Date().toISOString();
+}
+
+function isArtifactSurfaceRequest(text: string): boolean {
+	const normalized = text.toLowerCase();
+	return normalized.includes("hot-reload")
+		|| normalized.includes("hot reload")
+		|| normalized.includes("file watcher")
+		|| normalized.includes("filewatcher")
+		|| /open\s+(?:the\s+)?diagram/.test(normalized)
+		|| /instead of .+\b(?:say|write|label|word)\b/.test(normalized);
 }
 
 function execGit(cwd: string, args: string[]): Promise<string> {
