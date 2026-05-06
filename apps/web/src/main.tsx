@@ -708,10 +708,11 @@ function renderNativeShape(element: MeasuredDiagramElement, index: number, type:
   const height = Math.max(1, numberOr(element.height, 80));
   const stroke = typeof element.strokeColor === "string" ? element.strokeColor : "currentColor";
   const fill = typeof element.backgroundColor === "string" && element.backgroundColor !== "transparent" ? element.backgroundColor : "var(--canvas)";
+  const hachureColor = adjustColorForHachure(fill, stroke);
   const opacity = typeof element.opacity === "number" ? element.opacity : undefined;
   return (
     <g key={index} opacity={opacity}>
-      {renderRoughShape(type, x, y, width, height, stroke, fill, index, element)}
+      {renderRoughShape(type, x, y, width, height, stroke, fill, hachureColor, index, element)}
       {element.measuredLabel && renderLabel(element.measuredLabel, x + width / 2, y + height / 2, index)}
     </g>
   );
@@ -722,13 +723,15 @@ function roundedRectPath(x: number, y: number, width: number, height: number, ra
   return `M ${x + r} ${y} L ${x + width - r} ${y} Q ${x + width} ${y} ${x + width} ${y + r} L ${x + width} ${y + height - r} Q ${x + width} ${y + height} ${x + width - r} ${y + height} L ${x + r} ${y + height} Q ${x} ${y + height} ${x} ${y + height - r} L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} Z`;
 }
 
-function renderRoughShape(type: string, x: number, y: number, width: number, height: number, stroke: string, fill: string, seed: number, element: MeasuredDiagramElement) {
+function renderRoughShape(type: string, x: number, y: number, width: number, height: number, stroke: string, fill: string, hachureColor: string, seed: number, element: MeasuredDiagramElement) {
   const options = {
     stroke,
     fill,
     fillStyle: typeof element.fillStyle === "string" ? element.fillStyle : fill === "var(--canvas)" ? "solid" : "hachure",
+    fillWeight: 1.1,
     hachureGap: 8,
     hachureAngle: -45,
+    hachureColor,
     strokeWidth: typeof element.strokeWidth === "number" ? element.strokeWidth : 2.1,
     seed: seed + 1,
     roughness: typeof element.roughness === "number" ? element.roughness : 1.35,
@@ -740,7 +743,33 @@ function renderRoughShape(type: string, x: number, y: number, width: number, hei
     : type === "diamond"
       ? roughGenerator.polygon([[x + width / 2, y], [x + width, y + height / 2], [x + width / 2, y + height], [x, y + height / 2]], options)
       : roughGenerator.path(roundedRectPath(x, y, width, height, Math.min(24, width / 8, height / 3)), options);
-  return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || "none"} />)}</g>;
+  return <g className="nativeSketch">{roughGenerator.toPaths(drawable).map((path, pathIndex) => <path key={pathIndex} d={path.d} stroke={path.stroke} strokeWidth={path.strokeWidth} fill={path.fill || "none"} opacity={path.fill && path.stroke === hachureColor ? 0.42 : undefined} />)}</g>;
+}
+
+function adjustColorForHachure(fill: string, stroke: string): string {
+  if (fill === "var(--canvas)" || fill === "transparent") return stroke;
+  const rgb = parseHexColor(fill);
+  if (!rgb) return stroke;
+  const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+  if (luminance > 0.62) return mixHex(fill, stroke, 0.32);
+  if (luminance < 0.28) return mixHex(fill, "#ffffff", 0.42);
+  return mixHex(fill, stroke, 0.42);
+}
+
+function parseHexColor(color: string): { r: number; g: number; b: number } | undefined {
+  const normalized = color.trim();
+  const match = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!match) return undefined;
+  const hex = match[1].length === 3 ? match[1].split("").map((char) => char + char).join("") : match[1];
+  return { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16) };
+}
+
+function mixHex(a: string, b: string, amount: number): string {
+  const ca = parseHexColor(a);
+  const cb = parseHexColor(b);
+  if (!ca || !cb) return b;
+  const mix = (from: number, to: number) => Math.round(from + (to - from) * amount).toString(16).padStart(2, "0");
+  return `#${mix(ca.r, cb.r)}${mix(ca.g, cb.g)}${mix(ca.b, cb.b)}`;
 }
 
 function renderLabel(label: NonNullable<MeasuredDiagramElement["measuredLabel"]>, cx: number, cy: number, key: number) {

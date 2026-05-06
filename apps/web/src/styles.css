@@ -625,9 +625,13 @@ article.partial { opacity: 0.65; }
   fill: var(--ink);
   font-family: Virgil, "Comic Sans MS", ui-sans-serif, system-ui;
   paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.25);
+  stroke: color-mix(in srgb, var(--canvas), transparent 12%);
   stroke-width: 3px;
   stroke-linejoin: round;
+}
+:root[data-mode="light"] .nativeLabel,
+:root[data-mode="light"] .nativeArrowLabel {
+  stroke: rgba(255, 255, 255, 0.82);
 }
 .nativeArrow line {
   opacity: 0.82;
