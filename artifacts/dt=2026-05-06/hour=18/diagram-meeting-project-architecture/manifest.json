@@ -1,0 +1,16 @@
+{
+  "kind": "diagram",
+  "slug": "meeting-project-architecture",
+  "title": "Meeting Project Architecture",
+  "createdAt": "2026-05-06T21:44:18.099Z",
+  "updatedAt": "2026-05-06T21:44:18.099Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "meeting",
+    "architecture",
+    "project",
+    "diagrams",
+    "local-first"
+  ],
+  "summary": "A rendered architecture overview of the local-first Meeting project: browser UI, API event bus, transcript pipeline, agents, MCP tools, artifacts, and wiki retrieval."
+}
