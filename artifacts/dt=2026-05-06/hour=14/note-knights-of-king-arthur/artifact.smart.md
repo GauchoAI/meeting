@@ -63,3 +63,81 @@ flowchart LR
 ![Arthurian constellation diagram](./artifact.smart.section-6.diagram-0.image-fix.png)
 
 <!-- generated-diagram-image: section=6 diagram=0 prompt=./artifact.smart.section-6.diagram-0.image-fix.prompt.md source=./artifact.smart.section-6.diagram-0.image-fix.source.md -->
+
+## 7) Britain in the Arthurian age: regions and dynamics
+
+A simplified map of the political landscape often associated with the post-Roman, early Arthurian setting: fragmented Brittonic kingdoms, expanding Anglo-Saxon settlements, northern powers, and older Roman infrastructure still shaping movement and defense.
+
+```mermaid
+flowchart TB
+  subgraph North[North Britain]
+    P[Picts beyond the Forth]
+    D[Dal Riata / Scotti]
+    R[Rheged]
+    G[Gododdin]
+  end
+
+  subgraph West[Western Brittonic kingdoms]
+    W[Gwynedd]
+    PW[Powys]
+    DY[Dyfed]
+    DU[Dumnonia]
+  end
+
+  subgraph Midlands[Central frontier]
+    E[Elmet]
+    VR[Old Roman roads & forts]
+    CH[Christian monasteries / bishops]
+  end
+
+  subgraph EastSouth[East and south coastal zones]
+    K[Kent]
+    SX[Sussex]
+    WS[West Saxons]
+    AN[Anglian settlements]
+  end
+
+  subgraph Sea[Sea routes]
+    IR[Irish Sea exchange]
+    ARM[Armorica / Brittany]
+    GA[Gaulish trade links]
+  end
+
+  P -->|pressure / raids| R
+  D -->|sea links| IR
+  IR <--> W
+  IR <--> DY
+  DU <--> ARM
+  ARM <--> GA
+
+  R -->|alliances & rivalries| G
+  W <--> PW
+  PW <--> E
+  E -->|frontier defense| AN
+  DU -->|western strongholds| WS
+
+  K -->|settlement expansion| SX
+  SX -->|pressure inland| WS
+  WS -->|conflict zones| DU
+  AN -->|pressure westward| E
+
+  VR -.-> R
+  VR -.-> E
+  VR -.-> DU
+  CH -.-> W
+  CH -.-> PW
+  CH -.-> DU
+
+  classDef brit fill:#dbeafe,stroke:#1d4ed8,color:#0f172a;
+  classDef saxon fill:#fee2e2,stroke:#b91c1c,color:#0f172a;
+  classDef north fill:#dcfce7,stroke:#166534,color:#0f172a;
+  classDef infra fill:#fef3c7,stroke:#92400e,color:#0f172a;
+  classDef sea fill:#e0e7ff,stroke:#3730a3,color:#0f172a;
+
+  class W,PW,DY,DU,E brit;
+  class K,SX,WS,AN saxon;
+  class P,D,R,G north;
+  class VR,CH infra;
+  class IR,ARM,GA sea;
+```
+
