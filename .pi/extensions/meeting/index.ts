@@ -261,9 +261,10 @@ export default function (pi: ExtensionAPI) {
 			"",
 			`> ${text}`,
 			"",
-			"If the host asks for explanation, answer directly with concise Markdown.",
-			"If the host asks to fix, iterate, implement, inspect, validate, or use screenshots/screen source, start the coding work immediately and continue until the requested objective is complete; do not only acknowledge.",
-			"Avoid implementation details in the final meeting-facing answer unless asked, but do perform the implementation when requested.",
+			"Decide whether this is a work request or a conversational request.",
+			"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, commit, create/update an artifact/file, or use a screenshot/screen source: perform the work now with tools, continue until complete, validate it, commit when appropriate, then give a concise final status.",
+			"If it only asks for explanation or brainstorming: answer the host directly with concise Markdown.",
+			"Do not merely acknowledge actionable work requests.",
 		].join("\n");
 
 		if (ctx.isIdle()) {

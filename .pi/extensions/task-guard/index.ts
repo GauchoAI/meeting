@@ -1,7 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const CONTINUATION_PROMPT = `Continue the current implementation now. Do not stop, summarize, ask for confirmation, or hand control back until the objective is complete. Execute the next concrete coding step immediately, validate it, then continue with the next step.`;
-
 const TASK_GUARD_INSTRUCTIONS = `
 Task completion guard:
 - Treat implementation requests as objective-driven, not turn-driven.
@@ -21,35 +19,4 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
-  pi.on("agent_end", async (event, ctx) => {
-    const messages = Array.isArray((event as any).messages) ? (event as any).messages : [];
-    const assistantText = [...messages]
-      .reverse()
-      .map((message: any) => message?.content)
-      .map(contentToText)
-      .find((text: string) => text.trim().length > 0) || "";
-
-    if (!looksLikePrematureCheckpoint(assistantText)) return;
-
-    ctx.ui.notify("Task guard: possible premature checkpoint. Prefilled continuation prompt.", "warning");
-    ctx.ui.setEditorText(CONTINUATION_PROMPT);
-  });
-}
-
-function contentToText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.map((part: any) => {
-    if (typeof part === "string") return part;
-    if (part?.type === "text" && typeof part.text === "string") return part.text;
-    return "";
-  }).join("\n");
-}
-
-function looksLikePrematureCheckpoint(text: string): boolean {
-  const lower = text.toLowerCase();
-  const saysProceeding = /\b(proceeding|i'll start|i will start|next i'll|next i will)\b/.test(lower);
-  const saysPartial = /\b(first pass|phase 1|next step|next improvement|started|partial|initial)\b/.test(lower);
-  const noTerminalStatus = !/\b(completed|objective is complete|done)\b/.test(lower);
-  return noTerminalStatus && (saysProceeding || saysPartial);
 }
