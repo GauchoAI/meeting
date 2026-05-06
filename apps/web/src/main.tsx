@@ -456,7 +456,7 @@ type RenderPart = { kind: "markdown" | "excalidraw"; source: string };
 
 function splitExcalidrawBlocks(text: string): RenderPart[] {
   const parts: RenderPart[] = [];
-  const pattern = /```(?:excalidraw|excalidraw-json|excalidraw\.json)\s*\n([\s\S]*?)```/gi;
+  const pattern = /```(?:excalidraw|excalidraw-json|excalidraw\.json|diagram|native-diagram)\s*\n([\s\S]*?)(?:```|$)/gi;
   let lastIndex = 0;
   for (const match of text.matchAll(pattern)) {
     if (match.index > lastIndex) parts.push({ kind: "markdown", source: text.slice(lastIndex, match.index) });
@@ -473,9 +473,96 @@ function parseNativeDiagram(source: string): { ok: true; scene: DiagramScene } |
     const scene = Array.isArray(parsed) ? { elements: parsed } : parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : undefined;
     if (!scene || !Array.isArray(scene.elements)) return { ok: false, error: "Expected a JSON object with an elements array." };
     return { ok: true, scene: { elements: scene.elements.filter((element): element is DiagramElement => Boolean(element) && typeof element === "object") } };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  } catch {
+    try {
+      return { ok: true, scene: parseConciseDiagram(source) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
+}
+
+function parseConciseDiagram(source: string): DiagramScene {
+  const lines = source.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
+  const elements: DiagramElement[] = [];
+  const labels = new Map<number, string>();
+  const shapes = new Map<number, string>();
+  const edges: Array<{ from: number; to: number; label?: string }> = [];
+  let count = 0;
+  let section: "edges" | "labels" | "shapes" | undefined;
+
+  for (const line of lines) {
+    const nodesMatch = line.match(/^nodes\s*:\s*(\d+)$/i);
+    if (nodesMatch) { count = Number(nodesMatch[1]); section = undefined; continue; }
+    const sectionMatch = line.match(/^(edges|labels|shapes)\s*:\s*$/i);
+    if (sectionMatch) { section = sectionMatch[1].toLowerCase() as typeof section; continue; }
+
+    const edgeText = line.replace(/^[-*]\s*/, "");
+    const edgeMatch = edgeText.match(/^(\d+)\s*->\s*(\d+)(?:\s+[\"“](.*)[\"”])?$/);
+    if (section === "edges" && edgeMatch) {
+      edges.push({ from: Number(edgeMatch[1]), to: Number(edgeMatch[2]), label: edgeMatch[3] });
+      count = Math.max(count, Number(edgeMatch[1]) + 1, Number(edgeMatch[2]) + 1);
+      continue;
+    }
+
+    const valueMatch = parseProgressiveKeyValue(edgeText);
+    if (valueMatch && section === "labels") { labels.set(valueMatch.index, valueMatch.value); continue; }
+    if (valueMatch && section === "shapes") { shapes.set(valueMatch.index, valueMatch.value.trim() || "rectangle"); continue; }
+  }
+
+  if (!count) count = Math.max(...Array.from(labels.keys()), ...Array.from(shapes.keys()), -1) + 1;
+  if (!count) throw new Error("Concise diagram requires `nodes: <count>` or at least one edge/label.");
+  const positions = layoutConciseNodes(count, edges);
+  for (let index = 0; index < count; index++) {
+    const position = positions[index];
+    elements.push({
+      type: shapes.get(index) || "rectangle",
+      x: position.x,
+      y: position.y,
+      width: 190,
+      height: 80,
+      strokeColor: "#94a3b8",
+      backgroundColor: "transparent",
+      label: { text: labels.get(index) || `Node ${index}`, fontSize: 22 }
+    });
+  }
+  for (const edge of edges) {
+    const from = positions[edge.from];
+    const to = positions[edge.to];
+    elements.push({
+      type: "arrow",
+      x: from.x + 95,
+      y: from.y + 40,
+      width: to.x + 95 - (from.x + 95),
+      height: to.y + 40 - (from.y + 40),
+      strokeColor: "#64748b",
+      endArrowhead: "arrow",
+      label: edge.label ? { text: edge.label, fontSize: 16 } : undefined
+    });
+  }
+  return { elements };
+}
+
+function parseProgressiveKeyValue(line: string): { index: number; value: string } | undefined {
+  const match = line.match(/^(\d+)\s*:\s*(.*)$/);
+  if (!match) return undefined;
+  let value = match[2].trim();
+  if ((value.startsWith('"') && !value.endsWith('"')) || (value.startsWith("“") && !value.endsWith("”"))) {
+    value = value.slice(1);
+  } else if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("“") && value.endsWith("”"))) {
+    value = value.slice(1, -1);
+  }
+  return { index: Number(match[1]), value };
+}
+
+function layoutConciseNodes(count: number, _edges: Array<{ from: number; to: number }>): Array<{ x: number; y: number }> {
+  // Progressive concise diagrams must stay stable while text and edges stream in.
+  // A bounded grid avoids runaway sizing from cycles/back-edges such as decision loops.
+  const columns = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
+  return Array.from({ length: count }, (_, index) => ({
+    x: 80 + (index % columns) * 360,
+    y: 80 + Math.floor(index / columns) * 230
+  }));
 }
 
 function NativeDiagramSvg({ scene }: { scene: DiagramScene }) {
@@ -1000,6 +1087,22 @@ flowchart LR
     { "type": "arrow", "x": 560, "y": 170, "width": 0, "height": 90, "strokeColor": "#475569", "endArrowhead": "arrow", "label": { "text": "layout repair", "fontSize": 16 } }
   ]
 }
+\`\`\``,
+  "concise-diagram-test": `# Concise progressive diagram test
+
+\`\`\`diagram
+nodes: 4
+
+edges:
+  0 -> 1 "audio blob"
+  1 -> 2 "events"
+  1 -> 3 "layout repair"
+
+labels:
+  0: "Stable shell owns microphone push to talk and never reloads"
+  1: "Editable generative canvas renders Markdown Mermaid and Excalidraw"
+  2: "Pi bridge streams assistant updates back into the meeting"
+  3: "Normalization layer measures labels wraps text and expands boxes before rendering"
 \`\`\``
 };
 
