@@ -33,6 +33,7 @@ export default function (pi: ExtensionAPI) {
 	const listen = process.env.MEETING_PI_LISTEN !== "false";
 
 	let cursor = 0;
+	let extensionStartedAt = Date.now();
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let streamAbort: AbortController | undefined;
 	let pendingMeetingResponses = 0;
@@ -47,6 +48,7 @@ export default function (pi: ExtensionAPI) {
 	const seen = new Set<string>();
 
 	pi.on("session_start", async (_event, ctx) => {
+		extensionStartedAt = Date.now();
 		ctx.ui.setStatus("meeting", "meeting: connecting");
 		await initialiseCursor(ctx);
 		startArtifactWatcher(ctx);
@@ -327,11 +329,19 @@ export default function (pi: ExtensionAPI) {
 	function handleUtterance(event: UtteranceFinalEvent, ctx: ExtensionContext) {
 		const text = event.text.trim();
 		if (!text || isIgnorableTranscript(text)) return;
+		const utteranceCreatedAt = Date.parse(event.createdAt);
+		if (!Number.isFinite(utteranceCreatedAt) || utteranceCreatedAt < extensionStartedAt - 5000 || Date.now() - utteranceCreatedAt > 120000) {
+			void postTrace("debug", "ignored stale meeting utterance", { id: event.id, createdAt: event.createdAt, textChars: text.length });
+			return;
+		}
+		if (!ctx.isIdle()) {
+			void postTrace("debug", "ignored meeting utterance while agent busy", { id: event.id, createdAt: event.createdAt, textChars: text.length });
+			return;
+		}
 		lastHostUtterance = text;
 		suppressMeetingAssistantResponse = isArtifactSurfaceRequest(text);
 		const extensionReceivedAt = Date.now();
-		const utteranceCreatedAt = Date.parse(event.createdAt);
-		currentLatency = { utteranceId: event.id, utteranceCreatedAt: Number.isFinite(utteranceCreatedAt) ? utteranceCreatedAt : undefined, extensionReceivedAt };
+		currentLatency = { utteranceId: event.id, utteranceCreatedAt, extensionReceivedAt };
 		void postTrace("latency", "pi.extension.received_utterance", { ...currentLatency, eventAgeMs: currentLatency.utteranceCreatedAt ? extensionReceivedAt - currentLatency.utteranceCreatedAt : undefined, textChars: text.length });
 		injectMeetingPrompt(text, event.speakerLabel || "Meeting speaker", ctx);
 	}
