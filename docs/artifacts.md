@@ -27,6 +27,8 @@ artifacts/dt=2026-05-06/hour=03/status-meeting-ui/artifact.smart.md
 
 - One folder is one evolving idea.
 - `artifact.smart.md` is edited in place.
+- Do not create `v2`, `final`, `new`, or copy files for normal iterations.
+- Improve the existing artifact file, commit the semantic change, and render/hot-reload it.
 - Git history is the version log for rollback, comparison, and iteration.
 - Partition folders make browsing cheap by date/hour.
 - The `<kind>-<slug>` folder makes related ideas cluster lexically.
@@ -72,7 +74,7 @@ status-latency-investigation
 decision-smart-down-layout
 ```
 
-Create a new folder only for a new idea. Keep iterating in place for the same idea; use Git for versions.
+Create a new folder only for a new idea. Keep iterating in place for the same idea; use Git for versions. A user request like “improve this”, “try this layout”, “revert that”, or “make this feedback” should modify the existing artifact, not create a second versioned artifact file.
 
 ## Commands
 
