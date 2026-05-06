@@ -1,5 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, extname, normalize, resolve, sep } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
 import { speechProviderStatus } from "./speech.js";
@@ -32,6 +32,9 @@ const server = createServer(async (req, res) => {
   }
   if (req.method === "GET" && url.pathname === "/events/stream") {
     return attachSse(req, res);
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/artifacts/")) {
+    return sendArtifactFile(url.pathname, res);
   }
   if (req.method === "POST" && url.pathname === "/events") {
     const event = await readJson<MeetingEvent>(req);
@@ -162,6 +165,33 @@ function sendJson(res: ServerResponse, payload: unknown, status = 200): void {
   sendCorsHeaders(res);
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+function sendArtifactFile(pathname: string, res: ServerResponse): void {
+  const artifactsRoot = resolveRepoPath("artifacts");
+  const rawRelative = decodeURIComponent(pathname.slice("/artifacts/".length));
+  const safeRelative = normalize(rawRelative).replace(/^(\.\.[\\/])+/, "");
+  const filePath = resolve(artifactsRoot, safeRelative);
+  if (filePath !== artifactsRoot && !filePath.startsWith(`${artifactsRoot}${sep}`)) {
+    return sendJson(res, { error: "invalid artifact path" }, 400);
+  }
+  if (!existsSync(filePath)) return sendJson(res, { error: "artifact file not found" }, 404);
+  sendCorsHeaders(res);
+  res.writeHead(200, { "Content-Type": contentType(filePath), "Cache-Control": "no-cache" });
+  createReadStream(filePath).pipe(res);
+}
+
+function contentType(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".png": return "image/png";
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".webp": return "image/webp";
+    case ".svg": return "image/svg+xml";
+    case ".md": return "text/markdown; charset=utf-8";
+    case ".json": return "application/json; charset=utf-8";
+    default: return "application/octet-stream";
+  }
 }
 
 function sendCors(res: ServerResponse, status: number): void {

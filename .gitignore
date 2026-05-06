@@ -7,5 +7,6 @@ models/
 *.log
 coverage/
 .meeting/
+.meeting-state/
 .pi/browser-profile/
 .pi/screenshots/

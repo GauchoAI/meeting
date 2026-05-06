@@ -62,7 +62,7 @@ function App() {
       .then((response) => response.json() as Promise<{ events: MeetingEvent[] }>)
       .then((snapshot) => {
         if (!alive) return;
-        setEvents([...snapshot.events].reverse().slice(0, 100));
+        setEvents([...snapshot.events.slice(-100)].reverse());
         transcript.applyAll(snapshot.events);
         source = new EventSource(`${api}/events/stream`);
         source.addEventListener("meeting", (message) => {
@@ -241,6 +241,7 @@ function App() {
               agentId={canvasDocument.agentId}
               text={canvasDocument.text}
               createdAt={canvasDocument.createdAt}
+              documentId={canvasDocument.documentId}
               expanded
               onRender={recordRenderSample}
             />
@@ -249,6 +250,7 @@ function App() {
               agentId={latestMessage.agentId}
               text={latestMessage.text}
               createdAt={latestMessage.createdAt}
+              documentId={latestMessage.documentId}
               expanded
               onRender={recordRenderSample}
             />
@@ -356,34 +358,50 @@ function MarkdownDocument({
   agentId,
   text,
   createdAt,
+  documentId,
   expanded = false,
   onRender
 }: {
   agentId: string;
   text: string;
   createdAt?: string;
+  documentId?: string;
   expanded?: boolean;
   onRender?: (sample: RenderSample) => void;
 }) {
+  const rootRef = useRef<HTMLElement | null>(null);
   const parts = useMemo(() => splitExcalidrawBlocks(text), [text]);
+  useEffect(() => {
+    const timers = [120, 420, 900].map((delay) => window.setTimeout(() => focusInspectionTarget(rootRef.current, query), delay));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [parts]);
+  let diagramIndex = 0;
+  let markdownIndex = 0;
   return (
-    <article className={expanded ? "generated expanded" : "generated"}>
+    <article ref={rootRef} className={expanded ? "generated expanded" : "generated"} data-inspect-root="artifact">
       <strong>{agentId}</strong>
-      {parts.map((part, index) => part.kind === "excalidraw" ? (
-        <ExcalidrawScene key={`${index}-excalidraw`} source={part.source} />
-      ) : (
-        <MarkdownHtml
-          key={`${index}-markdown`}
-          text={part.source}
-          createdAt={createdAt}
-          onRender={index === 0 ? onRender : undefined}
-        />
-      ))}
+      {parts.map((part, index) => {
+        if (part.kind === "excalidraw") {
+          const currentDiagram = diagramIndex++;
+          return <ExcalidrawScene key={`${index}-excalidraw`} source={part.source} index={currentDiagram} />;
+        }
+        const currentMarkdown = markdownIndex++;
+        return (
+          <MarkdownHtml
+            key={`${index}-markdown`}
+            text={part.source}
+            index={currentMarkdown}
+            createdAt={createdAt}
+            assetBase={resolveAssetBase(documentId, query)}
+            onRender={index === 0 ? onRender : undefined}
+          />
+        );
+      })}
     </article>
   );
 }
 
-function MarkdownHtml({ text, createdAt, onRender }: { text: string; createdAt?: string; onRender?: (sample: RenderSample) => void }) {
+function MarkdownHtml({ text, index, createdAt, assetBase, onRender }: { text: string; index: number; createdAt?: string; assetBase?: string; onRender?: (sample: RenderSample) => void }) {
   const [html, setHtml] = useState("");
   useEffect(() => {
     let alive = true;
@@ -391,7 +409,7 @@ function MarkdownHtml({ text, createdAt, onRender }: { text: string; createdAt?:
     markdownToHtml(text).then((value: string) => {
       if (!alive) return;
       const markdownMs = performance.now() - started;
-      setHtml(value);
+      setHtml(prepareMarkdownHtml(value, assetBase));
       onRender?.({
         markdownMs,
         eventToRenderMs: createdAt ? Date.now() - Date.parse(createdAt) : undefined,
@@ -399,13 +417,103 @@ function MarkdownHtml({ text, createdAt, onRender }: { text: string; createdAt?:
       });
     });
     return () => { alive = false; };
-  }, [text, createdAt, onRender]);
+  }, [text, createdAt, assetBase, onRender]);
   if (!text.trim()) return null;
-  return <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className="markdown" data-inspect-markdown={index} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function ExcalidrawScene({ source }: { source: string }) {
-  if (useNativeDiagramRenderer) return <NativeDiagram source={source} />;
+function resolveAssetBase(documentId: string | undefined, params: URLSearchParams): string | undefined {
+  const explicit = params.get("assetBase");
+  if (explicit) return explicit;
+  if (!documentId) return undefined;
+  const normalized = documentId.replace(/\\/g, "/");
+  const artifactIndex = normalized.indexOf("artifacts/");
+  if (artifactIndex < 0) return undefined;
+  const relative = normalized.slice(artifactIndex + "artifacts/".length);
+  const dir = relative.includes("/") ? relative.slice(0, relative.lastIndexOf("/") + 1) : "";
+  return `${api}/artifacts/${dir}`;
+}
+
+function prepareMarkdownHtml(html: string, assetBase: string | undefined): string {
+  if (!html.includes("<img")) return html;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  for (const [index, image] of Array.from(doc.querySelectorAll("img")).entries()) {
+    image.setAttribute("data-inspect-image", String(index));
+    const src = image.getAttribute("src") || "";
+    if (!assetBase) continue;
+    if (!src.startsWith("./") && !src.startsWith("../")) continue;
+    const resolved = new URL(src, assetBase.endsWith("/") ? assetBase : `${assetBase}/`);
+    image.setAttribute("src", resolved.toString());
+  }
+  return doc.body.innerHTML;
+}
+
+function focusInspectionTarget(root: HTMLElement | null, params: URLSearchParams): void {
+  if (!root) return;
+  root.querySelectorAll(".inspectFocus").forEach((element) => element.classList.remove("inspectFocus"));
+
+  const target = resolveInspectionTarget(root, params);
+  if (!target) return;
+
+  target.classList.add("inspectFocus");
+  target.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+}
+
+function resolveInspectionTarget(root: HTMLElement, params: URLSearchParams): HTMLElement | undefined {
+  const diagram = params.get("diagram");
+  if (diagram !== null) {
+    const index = Math.max(0, Number.parseInt(diagram, 10) || 0);
+    return root.querySelector<HTMLElement>(`[data-inspect-diagram="${index}"]`) || undefined;
+  }
+
+  const image = params.get("image");
+  if (image !== null) {
+    const index = Math.max(0, Number.parseInt(image, 10) || 0);
+    return root.querySelector<HTMLElement>(`[data-inspect-image="${index}"]`) || undefined;
+  }
+
+  const part = params.get("part") || params.get("focus");
+  if (part?.startsWith("diagram")) {
+    const index = Number.parseInt(part.replace(/^[^0-9]*/, ""), 10);
+    return root.querySelector<HTMLElement>(`[data-inspect-diagram="${Number.isFinite(index) ? index : 0}"]`) || undefined;
+  }
+  if (part?.startsWith("image")) {
+    const index = Number.parseInt(part.replace(/^[^0-9]*/, ""), 10);
+    return root.querySelector<HTMLElement>(`[data-inspect-image="${Number.isFinite(index) ? index : 0}"]`) || undefined;
+  }
+
+  const section = params.get("section") || params.get("heading");
+  if (section) return findHeading(root, section) || findTextTarget(root, section);
+
+  if (part && !["artifact", "document"].includes(part)) return findHeading(root, part) || findTextTarget(root, part);
+  return undefined;
+}
+
+function findHeading(root: HTMLElement, needle: string): HTMLElement | undefined {
+  const normalizedNeedle = normalizeQueryNeedle(needle);
+  const headings = Array.from(root.querySelectorAll<HTMLElement>(".markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6"));
+  const numeric = Number.parseInt(needle, 10);
+  if (Number.isFinite(numeric)) {
+    const numbered = headings.find((heading) => heading.textContent?.trim().startsWith(`${numeric}`));
+    if (numbered) return numbered;
+    return headings[numeric - 1];
+  }
+  return headings.find((heading) => normalizeQueryNeedle(heading.textContent || "").includes(normalizedNeedle));
+}
+
+function findTextTarget(root: HTMLElement, needle: string): HTMLElement | undefined {
+  const normalizedNeedle = normalizeQueryNeedle(needle);
+  const candidates = Array.from(root.querySelectorAll<HTMLElement>(".markdown p, .markdown li, .markdown pre, .markdown img, .markdown .md-card, .nativeDiagramEmbed, .excalidrawEmbed"));
+  return candidates.find((element) => normalizeQueryNeedle(element.textContent || element.getAttribute("alt") || "").includes(normalizedNeedle));
+}
+
+function normalizeQueryNeedle(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function ExcalidrawScene({ source, index }: { source: string; index: number }) {
+  if (useNativeDiagramRenderer) return <NativeDiagram source={source} index={index} />;
 
   const [parsed, setParsed] = useState<{ ok: true; data: Record<string, unknown>; height: number } | { ok: false; error: string } | undefined>();
   useEffect(() => {
@@ -418,7 +526,7 @@ function ExcalidrawScene({ source }: { source: string }) {
   if (!parsed) return <div className="excalidrawLoading">Preparing Excalidraw scene…</div>;
   if (!parsed.ok) return <pre className="diagram-error">Invalid Excalidraw block\n\n{parsed.error}</pre>;
   return (
-    <div className="excalidrawEmbed" style={{ height: parsed.height }}>
+    <div className="excalidrawEmbed" data-inspect-diagram={index} style={{ height: parsed.height }}>
       <React.Suspense fallback={<div className="excalidrawLoading">Loading Excalidraw…</div>}>
         <LazyExcalidraw
           initialData={parsed.data}
@@ -443,10 +551,10 @@ function ExcalidrawScene({ source }: { source: string }) {
   );
 }
 
-function NativeDiagram({ source }: { source: string }) {
+function NativeDiagram({ source, index }: { source: string; index: number }) {
   const parsed = useMemo(() => parseNativeDiagram(source), [source]);
   if (!parsed.ok) return <pre className="diagram-error">Invalid native diagram\n\n{parsed.error}</pre>;
-  return <NativeDiagramSvg scene={parsed.scene} />;
+  return <NativeDiagramSvg scene={parsed.scene} index={index} />;
 }
 
 type DiagramElement = Record<string, unknown>;
@@ -597,12 +705,12 @@ function layoutConciseNodes(count: number, _edges: Array<{ from: number; to: num
   }));
 }
 
-function NativeDiagramSvg({ scene }: { scene: DiagramScene }) {
+function NativeDiagramSvg({ scene, index }: { scene: DiagramScene; index: number }) {
   const measured = useMemo(() => syncIndexedConnectors(applyDiagramMargins(measureDiagramElements(scene.elements))), [scene]);
   const bounds = diagramBounds(measured);
   const viewBox = `${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`;
   return (
-    <div className="nativeDiagramEmbed">
+    <div className="nativeDiagramEmbed" data-inspect-diagram={index}>
       <svg viewBox={viewBox} role="img" aria-label="Generated diagram">
         <defs>
           <marker id="native-arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto-start-reverse">
@@ -1307,7 +1415,7 @@ function formatTerminalEvent(event: MeetingEvent): string {
 }
 
 function isCanvasMessage(event: AgentMessageEvent): boolean {
-  return (event.surface || "canvas") === "canvas";
+  return event.surface === "canvas";
 }
 
 interface RenderStats {
@@ -1362,6 +1470,7 @@ interface CanvasDocument {
   agentId: string;
   text: string;
   createdAt?: string;
+  documentId?: string;
 }
 
 const templates: Record<string, string> = {
@@ -1473,10 +1582,10 @@ labels:
 
 function resolveCanvasDocument(params: URLSearchParams, messages: AgentMessageEvent[]): CanvasDocument | undefined {
   const direct = params.get("md") || params.get("markdown");
-  if (direct) return { agentId: "query-markdown", text: direct };
+  if (direct) return { agentId: "query-markdown", text: direct, documentId: params.get("documentId") || undefined };
 
   const encoded = params.get("md64") || params.get("markdown64");
-  if (encoded) return { agentId: "query-markdown", text: decodeBase64Url(encoded) };
+  if (encoded) return { agentId: "query-markdown", text: decodeBase64Url(encoded), documentId: params.get("documentId") || undefined };
 
   const templateName = params.get("template") || params.get("tpl");
   if (templateName) {
@@ -1487,7 +1596,7 @@ function resolveCanvasDocument(params: URLSearchParams, messages: AgentMessageEv
   const id = params.get("id") || params.get("event");
   if (id) {
     const found = messages.find((message) => message.id === id || message.id.endsWith(id));
-    if (found) return { agentId: found.agentId, text: found.text };
+    if (found) return { agentId: found.agentId, text: found.text, createdAt: found.createdAt, documentId: found.documentId };
   }
 
   return undefined;

@@ -499,6 +499,14 @@ article.partial { opacity: 0.65; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   padding: 0.08em 0.28em;
 }
+.markdown img {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: block;
+  height: auto;
+  margin: 10px auto;
+  max-width: 100%;
+}
 .markdown pre code {
   background: transparent;
   border-radius: 0;
@@ -605,6 +613,17 @@ article.partial { opacity: 0.65; }
   min-height: 360px;
   overflow: hidden;
   width: 100%;
+}
+.inspectFocus {
+  outline: 3px solid color-mix(in srgb, var(--accent), transparent 12%);
+  outline-offset: 8px;
+  scroll-margin: 32px;
+}
+.nativeDiagramEmbed.inspectFocus,
+.excalidrawEmbed.inspectFocus,
+.markdown .inspectFocus {
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 8px rgba(var(--accent-rgb), 0.12);
 }
 .nativeDiagramEmbed svg {
   color: var(--ink);

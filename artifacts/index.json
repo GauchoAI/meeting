@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-06T17:11:45.471Z",
+  "updatedAt": "2026-05-06T19:51:57.812Z",
   "artifacts": [
     {
       "kind": "note",
@@ -70,7 +70,7 @@
       "summary": "A combined markdown note with both Excalidraw and Mermaid diagrams about the Knights of King Arthur.",
       "path": "artifacts/dt=2026-05-06/hour=14/note-knights-of-king-arthur/artifact.smart.md",
       "dir": "artifacts/dt=2026-05-06/hour=14/note-knights-of-king-arthur",
-      "mtime": "2026-05-06T17:03:24.121Z"
+      "mtime": "2026-05-06T19:51:47.517Z"
     },
     {
       "kind": "diagram",
