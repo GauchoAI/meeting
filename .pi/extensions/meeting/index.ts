@@ -347,11 +347,11 @@ export default function (pi: ExtensionAPI) {
 			"",
 			`> ${text}`,
 			"",
-			"Decide whether this is a work request or a conversational request.",
-			"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, or create/update an artifact/file: perform only the necessary work now with tools and continue until complete.",
-			"To open an existing smart-down artifact in the Meeting UI, use meeting_open_artifact; do not read and paste the file yourself.",
-			"For smart-down artifact edits, edit only the artifact file in place, then stop without a final Markdown status. The artifact watcher will stream the file line by line, commit with the host utterance as the commit message, and push."
-			"For code implementation work, validate when appropriate and commit only when explicitly requested or when the repo workflow clearly requires it.",
+				"Decide whether this is a work request or a conversational request.",
+				"If it asks to fix, change, implement, improve, iterate, inspect, validate, render, or create/update an artifact/file: perform only the necessary work now with tools and continue until complete.",
+				"To open an existing smart-down artifact in the Meeting UI, use meeting_open_artifact; do not read and paste the file yourself.",
+				"For smart-down artifact edits, edit only the artifact file in place, then stop without a final Markdown status. The artifact watcher will stream the file line by line, commit with the host utterance as the commit message, and push.",
+				"For code implementation work, validate when appropriate and commit only when explicitly requested or when the repo workflow clearly requires it.",
 			"If it only asks for explanation or brainstorming: answer the host directly with concise Markdown.",
 			"Do not merely acknowledge actionable work requests.",
 		].join("\n");
