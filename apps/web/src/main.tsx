@@ -40,7 +40,11 @@ interface RenderSample {
 const realtimeAgentId = "realtime-codex";
 const realtimeLiveCanvasDocumentId = "realtime-live-canvas";
 const availableRealtimeTools = [
+  "read_meeting_context: read the current live canvas, transcript, tasks, and raised hands",
   "read_repo_guide: read the curated repo guide with key scripts, paths, and examples",
+  "list_artifacts: list or search durable smart artifacts without shell exploration",
+  "read_artifact: open a specific durable artifact by path",
+  "create_smart_artifact: create or update durable notes, plans, specs, or diagrams directly",
   "raise_meeting_hand: signal that the agent has a proposal without speaking yet",
   "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI, including the living canvas document",
   "publish_task_result: publish a polished completed-task result on the main canvas before review",
@@ -534,8 +538,11 @@ function App() {
           "You are in silent background-listener mode.",
           "Analyze the recent conversation turns.",
           "Do not speak audio.",
+          "The current canvas is first-class context, not a side artifact.",
+          "If you need to understand the current plan, notes, or on-screen state, call read_meeting_context first.",
+          "If you need durable artifacts, use list_artifacts, read_artifact, or create_smart_artifact rather than exploratory repo work.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
-          "If you have something useful, prefer silent actions: raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, run_shell_command, or run_codex_task.",
+          "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, or run_codex_task.",
           `Maintain a living meeting artifact on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
           "Use the canvas artifact for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",

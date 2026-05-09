@@ -322,11 +322,72 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
     tools: [
       {
         type: "function",
+        name: "read_meeting_context",
+        description: "Read the current meeting context directly from the live event stream, including the current main canvas document, recent transcript, active tasks, and raised hands. Use this instead of exploring the repo when you need current on-screen context.",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        }
+      },
+      {
+        type: "function",
         name: "read_repo_guide",
         description: "Read the curated repository guide for this project. Use this first when you need to know which scripts exist, where they are, and how to use them.",
         parameters: {
           type: "object",
           properties: {},
+          additionalProperties: false
+        }
+      },
+      {
+        type: "function",
+        name: "list_artifacts",
+        description: "List recent smart artifacts or search them by query, kind, or tag without exploratory shell work.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            kind: { type: "string" },
+            tag: { type: "string" },
+            limit: { type: "number" }
+          },
+          additionalProperties: false
+        }
+      },
+      {
+        type: "function",
+        name: "read_artifact",
+        description: "Read a specific smart artifact markdown body and manifest by artifact path.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" }
+          },
+          required: ["path"],
+          additionalProperties: false
+        }
+      },
+      {
+        type: "function",
+        name: "create_smart_artifact",
+        description: "Create or update a durable smart artifact directly with the project artifact workflow. Prefer this over exploratory shell work for notes, plans, specs, decisions, implementations, diagrams, or status artifacts.",
+        parameters: {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            slug: { type: "string" },
+            title: { type: "string" },
+            summary: { type: "string" },
+            body: { type: "string" },
+            tags: {
+              anyOf: [
+                { type: "string" },
+                { type: "array", items: { type: "string" } }
+              ]
+            }
+          },
+          required: ["kind", "slug", "body"],
           additionalProperties: false
         }
       },
@@ -481,13 +542,42 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
 async function runRealtimeTool(name: string, input: unknown, res: ServerResponse): Promise<void> {
   try {
     let output: unknown;
-    if (name === "read_repo_guide") {
+    if (name === "read_meeting_context") {
+      output = readMeetingContext();
+    } else if (name === "read_repo_guide") {
       output = {
         ok: true,
         repoRoot,
         workspaceRoot,
         guide: repoGuideText()
       };
+    } else if (name === "list_artifacts") {
+      const args = asObject(input);
+      output = listArtifacts({
+        query: optionalString(args.query),
+        kind: optionalString(args.kind),
+        tag: optionalString(args.tag),
+        limit: typeof args.limit === "number" ? args.limit : undefined
+      });
+    } else if (name === "read_artifact") {
+      const args = asObject(input);
+      const artifactPath = String(args.path || "").trim();
+      if (!artifactPath) throw new Error("path is required");
+      output = readArtifact(artifactPath);
+    } else if (name === "create_smart_artifact") {
+      const args = asObject(input);
+      const kind = String(args.kind || "").trim();
+      const slug = String(args.slug || "").trim();
+      const body = String(args.body || "");
+      if (!kind) throw new Error("kind is required");
+      if (!slug) throw new Error("slug is required");
+      if (!body.trim()) throw new Error("body is required");
+      const title = optionalString(args.title);
+      const summary = optionalString(args.summary);
+      const tags = Array.isArray(args.tags)
+        ? args.tags.map((item) => String(item).trim()).filter(Boolean).join(",")
+        : optionalString(args.tags);
+      output = await createSmartArtifact({ kind, slug, title, summary, body, tags });
     } else if (name === "raise_meeting_hand") {
       const args = asObject(input);
       const requestedMode = asRequestedMode(args.requestedMode);
@@ -645,11 +735,16 @@ function buildRealtimeInstructions(): string {
     "You are a live coding meeting agent inside a browser-based voice call.",
     "Most of the time you are a silent background listener, not an always-speaking chatbot.",
     "Speak naturally and keep spoken answers concise when explicitly granted the floor.",
-    "You have nine tools and should accurately describe them when asked.",
-    "Available tools: read_repo_guide, raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
+    "The current meeting canvas and transcript are first-class context, not something to rediscover.",
+    "You have thirteen tools and should accurately describe them when asked.",
+    "Available tools: read_meeting_context, read_repo_guide, list_artifacts, read_artifact, create_smart_artifact, raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
+    "When you need to know what is currently on screen, what the current plan says, or what the humans are discussing, call read_meeting_context first instead of exploring the repo.",
     "When you need to understand this repository's scripts, artifact workflow, or file layout, call read_repo_guide before guessing.",
-    "In background listening mode, prefer silent actions: raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, run_shell_command, and run_codex_task.",
+    "When you need older or parallel durable artifacts, use list_artifacts and read_artifact instead of exploratory shell work.",
+    "When you want to create or update a durable artifact, prefer create_smart_artifact instead of shelling around for the script.",
+    "In background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, and run_codex_task.",
     "Do not speak automatically while in silent background mode unless the client explicitly grants you the floor.",
+    "Do not say you need to go look up the current project plan if a current canvas document already exists. Read meeting context and work from that.",
     "run_codex_task is your primary tool for interacting with local Codex and doing real coding work in the repository.",
     "run_shell_command is for quick inspection and lightweight terminal tasks.",
     "Maintain a stable living canvas document with post_meeting_markdown using documentId=realtime-live-canvas.",
@@ -726,6 +821,7 @@ function repoGuideText(): string {
     "- Each artifact folder contains artifact.smart.md and manifest.json.",
     "- One folder is one evolving idea. Update in place for the same idea; do not make v2 copies unless explicitly asked.",
     "- artifacts/index.json is the generated artifact index.",
+    "- Prefer list_artifacts, read_artifact, and create_smart_artifact before shell exploration for artifact work.",
     "",
     "Key script: smart artifacts",
     "- Script path: scripts/smart-artifact.mjs",
@@ -753,6 +849,147 @@ function repoGuideText(): string {
     "- Do not claim a script is unavailable until you have either read_repo_guide or inspected scripts/ with run_shell_command.",
     "- If the user asks whether you can use a script, answer based on the guide or direct inspection rather than guesswork."
   ].join("\n");
+}
+
+function readMeetingContext(): unknown {
+  const canvasMessages = events.filter((event): event is Extract<MeetingEvent, { type: "agent.message" }> => event.type === "agent.message" && event.surface === "canvas");
+  const liveCanvas = canvasMessages.find((event) => event.documentId === "realtime-live-canvas") || canvasMessages[canvasMessages.length - 1];
+  const transcript = events
+    .filter((event): event is Extract<MeetingEvent, { type: "utterance.final" | "utterance.partial" }> => event.type === "utterance.final" || event.type === "utterance.partial")
+    .slice(-14)
+    .map((event) => ({ type: event.type, speakerLabel: event.speakerLabel, text: event.text }));
+  const tasks = dedupeTaskEvents(events.filter((event): event is Extract<MeetingEvent, { type: "agent.task" }> => event.type === "agent.task" && event.agentId === "realtime-codex"))
+    .slice(0, 12)
+    .map((event) => ({
+      taskKey: event.taskKey,
+      title: event.title,
+      status: event.status,
+      taskClass: event.taskClass,
+      details: event.details,
+      previewUrl: event.previewUrl
+    }));
+  const raisedHands = events
+    .filter((event): event is Extract<MeetingEvent, { type: "agent.hand_raise" }> => event.type === "agent.hand_raise" && event.agentId === "realtime-codex")
+    .slice(-8)
+    .map((event) => ({ reason: event.reason, confidence: event.confidence, requestedMode: event.requestedMode }));
+  return {
+    ok: true,
+    guidance: [
+      "Treat currentCanvas as the source-of-truth project context already visible to the user.",
+      "If currentCanvas exists, do not claim you need to go look for the plan elsewhere before discussing it.",
+      "Use artifacts tools for durable notes and parallel documents. Use the live canvas for the current evolving conversation artifact."
+    ],
+    currentCanvas: liveCanvas ? {
+      documentId: liveCanvas.documentId,
+      createdAt: liveCanvas.createdAt,
+      text: liveCanvas.text
+    } : null,
+    canvasDocuments: dedupeCanvasDocuments(canvasMessages).slice(0, 12),
+    tasks,
+    raisedHands,
+    transcript
+  };
+}
+
+function dedupeCanvasDocuments(messages: Array<Extract<MeetingEvent, { type: "agent.message" }>>): Array<{ documentId?: string; createdAt: string; title: string; excerpt: string }> {
+  const latestByKey = new Map<string, Extract<MeetingEvent, { type: "agent.message" }>>();
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const event = messages[index];
+    const key = event.documentId || event.id;
+    if (!latestByKey.has(key)) latestByKey.set(key, event);
+  }
+  return [...latestByKey.values()]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .map((event) => ({
+      documentId: event.documentId,
+      createdAt: event.createdAt,
+      title: firstMarkdownHeading(event.text) || event.documentId || event.agentId,
+      excerpt: event.text.trim().replace(/\s+/g, " ").slice(0, 280)
+    }));
+}
+
+function dedupeTaskEvents(taskEvents: Array<Extract<MeetingEvent, { type: "agent.task" }>>): Array<Extract<MeetingEvent, { type: "agent.task" }>> {
+  const latestByKey = new Map<string, Extract<MeetingEvent, { type: "agent.task" }>>();
+  for (let index = taskEvents.length - 1; index >= 0; index -= 1) {
+    const event = taskEvents[index];
+    const key = event.taskKey || `${event.title}::${event.taskClass || ""}`;
+    if (!latestByKey.has(key)) latestByKey.set(key, event);
+  }
+  return [...latestByKey.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+function listArtifacts(options: { query?: string; kind?: string; tag?: string; limit?: number }): unknown {
+  const index = readArtifactsIndex();
+  const query = options.query?.toLowerCase();
+  const kind = options.kind?.toLowerCase();
+  const tag = options.tag?.toLowerCase();
+  const limit = Math.max(1, Math.min(50, options.limit || 12));
+  const records = index.artifacts.filter((record) => {
+    if (kind && String(record.kind || "").toLowerCase() !== kind) return false;
+    if (tag) {
+      const tags = Array.isArray(record.tags) ? record.tags.map(String).map((item) => item.toLowerCase()) : [];
+      if (!tags.includes(tag)) return false;
+    }
+    if (!query) return true;
+    return [
+      record.path,
+      record.dir,
+      record.kind,
+      record.slug,
+      record.title,
+      record.summary,
+      ...(Array.isArray(record.tags) ? record.tags.map(String) : [])
+    ].join(" ").toLowerCase().includes(query);
+  }).slice(0, limit);
+  return { ok: true, updatedAt: index.updatedAt, count: records.length, artifacts: records };
+}
+
+function readArtifact(artifactPath: string): unknown {
+  const safePath = normalize(artifactPath).replace(/^(\.\.[\\/])+/, "");
+  const filePath = resolve(repoRoot, safePath);
+  const artifactsRoot = resolveRepoPath("artifacts");
+  if (filePath !== artifactsRoot && !filePath.startsWith(`${artifactsRoot}${sep}`)) {
+    throw new Error("artifact path is outside artifacts root");
+  }
+  if (!existsSync(filePath)) throw new Error("artifact file not found");
+  const manifestPath = resolve(dirname(filePath), "manifest.json");
+  return {
+    ok: true,
+    path: safePath,
+    markdown: readFileSync(filePath, "utf8"),
+    manifest: existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : null
+  };
+}
+
+async function createSmartArtifact(input: { kind: string; slug: string; title?: string; summary?: string; body: string; tags?: string }): Promise<unknown> {
+  const args = ["scripts/smart-artifact.mjs", "write", "--kind", input.kind, "--slug", input.slug, "--body", input.body];
+  if (input.title) args.push("--title", input.title);
+  if (input.summary) args.push("--summary", input.summary);
+  if (input.tags) args.push("--tags", input.tags);
+  const result = await runProcess("node", { cwd: repoRoot, args, timeoutMs: 20_000 });
+  const path = String((result as { stdout?: string }).stdout || "").trim().split("\n").pop() || "";
+  return {
+    ok: true,
+    path,
+    artifact: path ? readArtifact(path) : null,
+    result
+  };
+}
+
+function readArtifactsIndex(): { updatedAt?: string; artifacts: Array<Record<string, unknown>> } {
+  const indexPath = resolveRepoPath("artifacts/index.json");
+  if (!existsSync(indexPath)) return { artifacts: [] };
+  try {
+    const parsed = JSON.parse(readFileSync(indexPath, "utf8")) as { updatedAt?: string; artifacts?: Array<Record<string, unknown>> };
+    return { updatedAt: parsed.updatedAt, artifacts: Array.isArray(parsed.artifacts) ? parsed.artifacts : [] };
+  } catch {
+    return { artifacts: [] };
+  }
+}
+
+function firstMarkdownHeading(text: string): string | undefined {
+  const match = text.match(/^#\s+(.+)$/m);
+  return match?.[1]?.trim();
 }
 
 function asObject(value: unknown): Record<string, unknown> {
