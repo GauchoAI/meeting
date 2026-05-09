@@ -42,18 +42,15 @@ const realtimeAgentId = "realtime-codex";
 const realtimeLiveCanvasDocumentId = "realtime-live-canvas";
 const availableRealtimeTools = [
   "read_meeting_context: read the current live canvas, transcript, tasks, and raised hands",
-  "read_repo_guide: read the curated repo guide with key scripts, paths, and examples",
-  "list_artifacts: list or search durable smart artifacts without shell exploration",
-  "read_artifact: open a specific durable artifact by path",
-  "create_smart_artifact: create or update durable notes, plans, specs, or diagrams directly",
+  "read_repo_guide: read the curated repo guide for app layout and pi-agent delegation",
   "raise_meeting_hand: signal that the agent has a proposal without speaking yet",
   "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI, including the living canvas document",
   "publish_task_result: publish a polished completed-task result on the main canvas before review",
   "create_meeting_task: create visible task cards for proposed work",
   "run_codex_task: queue implementation work through pi-agent, which invokes local Codex",
   "run_shell_command: run short terminal commands in the allowed workspace",
-  "read_rendered_html: read the isolated preview artifact if needed",
-  "write_rendered_html: update the isolated preview artifact if explicitly requested"
+  "read_rendered_html: read the isolated preview HTML if needed",
+  "write_rendered_html: update the isolated preview HTML if explicitly requested"
 ];
 
 function App() {
@@ -567,16 +564,17 @@ function App() {
           "You are in silent background-listener mode.",
           "Analyze the recent conversation turns.",
           "Do not speak audio.",
-          "The current canvas is first-class context, not a side artifact.",
+          "The current canvas is first-class context, not a side document.",
           "There are two streams here: conversation and implementation.",
           "Conversation is the true branch for human discussion, notes, plans, diagrams, and hand raises.",
           "Implementation is the Codex execution branch with task lifecycle and result review.",
           "If you need to understand the current plan, notes, or on-screen state, call read_meeting_context first.",
-          "If you need durable artifacts, use list_artifacts, read_artifact, or create_smart_artifact rather than exploratory repo work.",
+          "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
+          "If durable artifact work is needed, queue it for pi-agent with run_codex_task or create_meeting_task stream=implementation.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
-          "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, or run_codex_task.",
-          `Maintain a living meeting artifact on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
-          "Use the canvas artifact for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
+          "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
+          `Maintain a living meeting document on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
+          "Use the canvas document for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
           "Use create_meeting_task with stream=conversation for planning-side tasks.",
           "Use create_meeting_task with stream=implementation for Codex work or execution lifecycle.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",

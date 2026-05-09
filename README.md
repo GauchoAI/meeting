@@ -96,7 +96,9 @@ Behavior:
 - after speaking, the agent returns to silent listening mode.
 
 This is the preferred path for project-planning meetings where the agent should
-mostly listen, think, prepare artifacts, and only speak when invited.
+mostly listen, think, update the live canvas, declare tasks, and only speak when
+invited. Durable smart artifacts are owned by `pi-agent`, not the Realtime
+conversation agent.
 
 ## MCP
 

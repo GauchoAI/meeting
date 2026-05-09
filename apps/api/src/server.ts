@@ -356,61 +356,10 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "read_repo_guide",
-        description: "Read the curated repository guide for this project. Use this first when you need to know which scripts exist, where they are, and how to use them.",
+        description: "Read the curated repository guide for this project. Use this first when you need to know the app layout or how to delegate implementation work to pi-agent.",
         parameters: {
           type: "object",
           properties: {},
-          additionalProperties: false
-        }
-      },
-      {
-        type: "function",
-        name: "list_artifacts",
-        description: "List recent smart artifacts or search them by query, kind, or tag without exploratory shell work.",
-        parameters: {
-          type: "object",
-          properties: {
-            query: { type: "string" },
-            kind: { type: "string" },
-            tag: { type: "string" },
-            limit: { type: "number" }
-          },
-          additionalProperties: false
-        }
-      },
-      {
-        type: "function",
-        name: "read_artifact",
-        description: "Read a specific smart artifact markdown body and manifest by artifact path.",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string" }
-          },
-          required: ["path"],
-          additionalProperties: false
-        }
-      },
-      {
-        type: "function",
-        name: "create_smart_artifact",
-        description: "Create or update a durable smart artifact directly with the project artifact workflow. Prefer this over exploratory shell work for notes, plans, specs, decisions, implementations, diagrams, or status artifacts.",
-        parameters: {
-          type: "object",
-          properties: {
-            kind: { type: "string" },
-            slug: { type: "string" },
-            title: { type: "string" },
-            summary: { type: "string" },
-            body: { type: "string" },
-            tags: {
-              anyOf: [
-                { type: "string" },
-                { type: "array", items: { type: "string" } }
-              ]
-            }
-          },
-          required: ["kind", "slug", "body"],
           additionalProperties: false
         }
       },
@@ -432,7 +381,7 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "post_meeting_markdown",
-        description: "Post Markdown into the meeting UI silently. Use surface=status for short summaries and surface=canvas for diagrams or richer artifacts. Reuse a stable documentId to keep a living document updated in place conceptually.",
+        description: "Post Markdown into the meeting UI silently. Use surface=status for short summaries and surface=canvas for diagrams or richer live documents. Reuse a stable documentId to keep a living document updated in place conceptually.",
         parameters: {
           type: "object",
           properties: {
@@ -449,7 +398,7 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "publish_task_result",
-        description: "Publish a completed task result to the main meeting canvas as a polished artifact so the host can review it. Use this when a task reaches a meaningful milestone or is done.",
+        description: "Publish a completed task result to the main meeting canvas as a polished review document so the host can review it. Use this when a task reaches a meaningful milestone or is done.",
         parameters: {
           type: "object",
           properties: {
@@ -533,7 +482,7 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
             prompt: { type: "string" },
             title: { type: "string", description: "Short visible task title." },
             taskKey: { type: "string", description: "Optional stable task key for lifecycle updates." },
-            sourceDocumentId: { type: "string", description: "Optional current canvas or artifact document id that motivated the task." },
+            sourceDocumentId: { type: "string", description: "Optional current canvas document id that motivated the task." },
             cwd: { type: "string", description: "Optional path relative to the allowed workspace root." }
           },
           required: ["prompt"],
@@ -580,33 +529,8 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
         workspaceRoot,
         guide: repoGuideText()
       };
-    } else if (name === "list_artifacts") {
-      const args = asObject(input);
-      output = listArtifacts({
-        query: optionalString(args.query),
-        kind: optionalString(args.kind),
-        tag: optionalString(args.tag),
-        limit: typeof args.limit === "number" ? args.limit : undefined
-      });
-    } else if (name === "read_artifact") {
-      const args = asObject(input);
-      const artifactPath = String(args.path || "").trim();
-      if (!artifactPath) throw new Error("path is required");
-      output = readArtifact(artifactPath);
-    } else if (name === "create_smart_artifact") {
-      const args = asObject(input);
-      const kind = String(args.kind || "").trim();
-      const slug = String(args.slug || "").trim();
-      const body = String(args.body || "");
-      if (!kind) throw new Error("kind is required");
-      if (!slug) throw new Error("slug is required");
-      if (!body.trim()) throw new Error("body is required");
-      const title = optionalString(args.title);
-      const summary = optionalString(args.summary);
-      const tags = Array.isArray(args.tags)
-        ? args.tags.map((item) => String(item).trim()).filter(Boolean).join(",")
-        : optionalString(args.tags);
-      output = await createSmartArtifact({ kind, slug, title, summary, body, tags });
+    } else if (isRealtimeArtifactTool(name)) {
+      throw new Error("Durable artifact tools are reserved for pi-agent. Queue an implementation task with run_codex_task or create_meeting_task stream=implementation instead.");
     } else if (name === "raise_meeting_hand") {
       const args = asObject(input);
       const requestedMode = asRequestedMode(args.requestedMode);
@@ -804,13 +728,14 @@ function buildRealtimeInstructions(): string {
     "There are two streams in this system: conversation and implementation.",
     "Conversation is the true branch for human discussion, live notes, diagrams, planning, and hand raises.",
     "Implementation is the Codex execution branch with task lifecycle and result review.",
-    "You have thirteen tools and should accurately describe them when asked.",
-    "Available tools: read_meeting_context, read_repo_guide, list_artifacts, read_artifact, create_smart_artifact, raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
+    "You have ten tools and should accurately describe them when asked.",
+    "Available tools: read_meeting_context, read_repo_guide, raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
     "When you need to know what is currently on screen, what the current plan says, or what the humans are discussing, call read_meeting_context first instead of exploring the repo.",
-    "When you need to understand this repository's scripts, artifact workflow, or file layout, call read_repo_guide before guessing.",
-    "When you need older or parallel durable artifacts, use list_artifacts and read_artifact instead of exploratory shell work.",
-    "When you want to create or update a durable artifact, prefer create_smart_artifact instead of shelling around for the script.",
-    "In background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, and run_codex_task.",
+    "When you need to understand this repository's file layout or implementation delegation path, call read_repo_guide before guessing.",
+    "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
+    "If durable artifact work is needed, queue it for pi-agent with run_codex_task or create_meeting_task stream=implementation.",
+    "Do not use shell commands to run smart-artifact scripts yourself.",
+    "In background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, and run_codex_task.",
     "When you create a planning or capture task, use create_meeting_task with stream=conversation.",
     "When you start or update Codex execution work, use create_meeting_task with stream=implementation.",
     "run_codex_task queues implementation work for pi-agent; it does not run Codex inline inside your conversation turn.",
@@ -866,7 +791,7 @@ function defaultRealtimeHtml(): string {
     "  <main>",
     '    <div class="pill">Realtime agent canvas</div>',
     "    <h1>Say what to build.</h1>",
-    "    <p>The voice agent can inspect the repo, run Codex locally, and rewrite this <code>index.html</code> file live.</p>",
+    "    <p>The voice agent can inspect the repo, queue pi-agent implementation work, and rewrite this <code>index.html</code> file live.</p>",
     "  </main>",
     "</body>",
     "</html>"
@@ -884,41 +809,23 @@ function repoGuideText(): string {
     "- apps/web/src/styles.css: existing Meeting UI styles",
     "- apps/api/src/server.ts: local API, Realtime bridge, and tool handlers",
     "- scripts/: project scripts",
-    "- artifacts/: durable smart-down artifacts",
+    "- artifacts/: durable pi-agent-owned smart artifacts",
     "",
     "Primary strategy",
     "- If the user asks to improve the existing app or UI, prefer run_codex_task so pi-agent works against the real repository files and Vite hot reload updates the actual interface.",
     "- Use run_shell_command for quick inspection such as rg, ls, cat, git status, pnpm build, or running a script once you know the exact command.",
+    "- Do not use run_shell_command to create, list, or edit smart artifacts; durable artifact responsibility belongs to pi-agent.",
     "- Use read_rendered_html/write_rendered_html only for the isolated preview file, not as the default path for app improvements.",
     "",
     "Artifact workflow",
-    "- Smart artifacts live under artifacts/dt=YYYY-MM-DD/hour=HH/<kind>-<slug>/",
-    "- Each artifact folder contains artifact.smart.md and manifest.json.",
-    "- One folder is one evolving idea. Update in place for the same idea; do not make v2 copies unless explicitly asked.",
-    "- artifacts/index.json is the generated artifact index.",
-    "- Prefer list_artifacts, read_artifact, and create_smart_artifact before shell exploration for artifact work.",
-    "",
-    "Key script: smart artifacts",
-    "- Script path: scripts/smart-artifact.mjs",
-    "- Create or update an artifact:",
-    "  node scripts/smart-artifact.mjs write --kind note --slug napoleon-army-uniforms --title \"Napoleon's Army Uniforms\" --summary \"Brief summary\" --body \"# Napoleon's Army Uniforms\"",
-    "- List artifacts:",
-    "  node scripts/smart-artifact.mjs list",
-    "- Search artifacts:",
-    "  node scripts/smart-artifact.mjs find napoleon",
-    "- Rebuild the index:",
-    "  node scripts/smart-artifact.mjs index",
-    "",
-    "Behavior of smart-artifact.mjs",
-    "- write creates or updates artifact.smart.md and manifest.json",
-    "- write also regenerates artifacts/index.json automatically",
-    "- known kinds include diagram, plan, implementation, status, note, spec, decision",
+    "- Durable smart artifacts are created, read, and updated by pi-agent/Codex, not by the Realtime agent.",
+    "- If the meeting needs a durable artifact, create an implementation task or call run_codex_task with a precise prompt for pi-agent.",
+    "- Realtime should keep only the current living notes/diagram on the meeting canvas with post_meeting_markdown.",
     "",
     "Useful inspection commands",
     "- rg --files scripts",
-    "- rg -n \"smart-artifact|artifact\" scripts docs apps -S",
-    "- sed -n '1,220p' docs/artifacts.md",
-    "- sed -n '1,220p' scripts/smart-artifact.mjs",
+    "- rg -n \"realtime|agent-worker|pipeline|implementation\" apps packages scripts -S",
+    "- sed -n '1,220p' apps/agent-worker/src/worker.ts",
     "",
     "Rule of thumb",
     "- Do not claim a script is unavailable until you have either read_repo_guide or inspected scripts/ with run_shell_command.",
@@ -952,7 +859,7 @@ function readMeetingContext(): unknown {
     guidance: [
       "Treat currentCanvas as the source-of-truth project context already visible to the user.",
       "If currentCanvas exists, do not claim you need to go look for the plan elsewhere before discussing it.",
-      "Use artifacts tools for durable notes and parallel documents. Use the live canvas for the current evolving conversation artifact."
+      "Durable artifacts belong to pi-agent. Use the live canvas for the current evolving conversation document and queue implementation tasks for durable artifact work."
     ],
     currentCanvas: liveCanvas ? {
       documentId: liveCanvas.documentId,
@@ -994,32 +901,6 @@ function dedupeTaskEvents(taskEvents: Array<Extract<MeetingEvent, { type: "agent
   return [...latestByKey.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
-function listArtifacts(options: { query?: string; kind?: string; tag?: string; limit?: number }): unknown {
-  const index = readArtifactsIndex();
-  const query = options.query?.toLowerCase();
-  const kind = options.kind?.toLowerCase();
-  const tag = options.tag?.toLowerCase();
-  const limit = Math.max(1, Math.min(50, options.limit || 12));
-  const records = index.artifacts.filter((record) => {
-    if (kind && String(record.kind || "").toLowerCase() !== kind) return false;
-    if (tag) {
-      const tags = Array.isArray(record.tags) ? record.tags.map(String).map((item) => item.toLowerCase()) : [];
-      if (!tags.includes(tag)) return false;
-    }
-    if (!query) return true;
-    return [
-      record.path,
-      record.dir,
-      record.kind,
-      record.slug,
-      record.title,
-      record.summary,
-      ...(Array.isArray(record.tags) ? record.tags.map(String) : [])
-    ].join(" ").toLowerCase().includes(query);
-  }).slice(0, limit);
-  return { ok: true, updatedAt: index.updatedAt, count: records.length, artifacts: records };
-}
-
 function readArtifact(artifactPath: string): unknown {
   const safePath = normalize(artifactPath).replace(/^(\.\.[\\/])+/, "");
   const filePath = resolve(repoRoot, safePath);
@@ -1050,17 +931,6 @@ async function createSmartArtifact(input: { kind: string; slug: string; title?: 
     artifact: path ? readArtifact(path) : null,
     result
   };
-}
-
-function readArtifactsIndex(): { updatedAt?: string; artifacts: Array<Record<string, unknown>> } {
-  const indexPath = resolveRepoPath("artifacts/index.json");
-  if (!existsSync(indexPath)) return { artifacts: [] };
-  try {
-    const parsed = JSON.parse(readFileSync(indexPath, "utf8")) as { updatedAt?: string; artifacts?: Array<Record<string, unknown>> };
-    return { updatedAt: parsed.updatedAt, artifacts: Array.isArray(parsed.artifacts) ? parsed.artifacts : [] };
-  } catch {
-    return { artifacts: [] };
-  }
 }
 
 function firstMarkdownHeading(text: string): string | undefined {
@@ -1374,6 +1244,10 @@ function listTaskDirs(root: string): string[] {
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function isRealtimeArtifactTool(name: string): boolean {
+  return name === "list_artifacts" || name === "read_artifact" || name === "create_smart_artifact";
 }
 
 function optionalString(value: unknown): string | undefined {
