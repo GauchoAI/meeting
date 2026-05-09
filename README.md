@@ -27,6 +27,12 @@ bash scripts/install-mcp-clients.sh
 
 Open `http://localhost:5173`.
 
+For the Realtime voice-to-Codex demo added in this repo, open
+`http://localhost:5173/realtime.html` after setting `OPENAI_API_KEY` in `.env`.
+That path creates a browser WebRTC session to OpenAI Realtime, exposes local
+tools for shell/Codex work, and lets the agent rewrite a live
+`.meeting/realtime/index.html` preview rendered in an iframe.
+
 The app expects real local audio. There is no mock transcript loop in the
 default product path.
 
@@ -46,6 +52,47 @@ pnpm dev
 
 In the UI, click **Start Whisper** to send short microphone chunks to the local
 API. The API converts browser audio with `ffmpeg` and invokes `whisper-cli`.
+
+## Realtime Codex Demo
+
+The default Meeting product path remains local-first Whisper plus meeting
+events. There is also a separate experimental demo entrypoint for a direct
+OpenAI Realtime voice session:
+
+```bash
+pnpm dev
+open http://localhost:5173/realtime.html
+```
+
+What it does:
+
+- opens a WebRTC audio call to `gpt-realtime-2`;
+- keeps your local camera visible in the page, but does not send video to the model;
+- exposes browser-triggered tools that can run short shell commands in the
+  workspace, invoke local `codex exec`, and rewrite `.meeting/realtime/index.html`;
+- reloads the iframe preview whenever the agent publishes new HTML.
+
+This is intended as a local demo. The shell bridge has basic blocking for
+obviously destructive commands, but it should still be treated as a trusted
+developer tool, not a production-safe remote execution surface.
+
+## Realtime Listener Mode
+
+The main Meeting UI at `http://localhost:5173/` now supports a Realtime agent
+in the existing layout.
+
+Behavior:
+
+- the Realtime agent connects as a **silent background listener** by default;
+- room speech is transcribed and persisted into `.meeting/events.jsonl` and
+  `.meeting/session.md`;
+- the agent can silently react by raising a hand, posting Markdown, creating
+  task cards, inspecting the repo, or invoking local Codex;
+- the host can explicitly grant the floor with **Let agent speak**;
+- after speaking, the agent returns to silent listening mode.
+
+This is the preferred path for project-planning meetings where the agent should
+mostly listen, think, prepare artifacts, and only speak when invited.
 
 ## MCP
 

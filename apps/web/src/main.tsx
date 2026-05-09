@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Mic, Phone, Play, Radio } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 import { TranscriptBuffer } from "@meeting/transcript";
-import type { AgentMessageEvent, MeetingEvent } from "@meeting/protocol";
+import { newEventId, nowIso, type AgentHandRaiseEvent, type AgentMessageEvent, type AgentTaskEvent, type MeetingEvent, type PartialUtteranceEvent, type UtteranceEvent } from "@meeting/protocol";
 import { layoutWithLines, prepareWithSegments, measureLineStats } from "@chenglou/pretext";
 import { RoughGenerator } from "roughjs/bin/generator";
 // markdown2.html.js is intentionally a runtime JS translator file.
@@ -28,12 +28,26 @@ type Mode = "dark" | "light";
 type Design = "material" | "codex" | "chatgpt" | "studio" | "terminal";
 type Palette = "lime" | "blue" | "violet" | "amber" | "rose";
 type FontSize = "small" | "medium" | "large" | "xlarge";
+type RealtimeState = "idle" | "connecting" | "connected";
+type RealtimeResponseMode = "silent" | "speak";
 
 interface RenderSample {
   markdownMs: number;
   eventToRenderMs?: number;
   at: number;
 }
+
+const realtimeAgentId = "realtime-codex";
+const availableRealtimeTools = [
+  "read_repo_guide: read the curated repo guide with key scripts, paths, and examples",
+  "raise_meeting_hand: signal that the agent has a proposal without speaking yet",
+  "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI",
+  "create_meeting_task: create visible task cards for proposed work",
+  "run_codex_task: inspect or modify the actual app/repo with local Codex",
+  "run_shell_command: run short terminal commands in the allowed workspace",
+  "read_rendered_html: read the isolated preview artifact if needed",
+  "write_rendered_html: update the isolated preview artifact if explicitly requested"
+];
 
 function App() {
   const transcript = useMemo(() => new TranscriptBuffer(), []);
@@ -50,6 +64,20 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [renderSamples, setRenderSamples] = useState<RenderSample[]>([]);
+  const [realtimeState, setRealtimeState] = useState<RealtimeState>("idle");
+  const [realtimeResponseMode, setRealtimeResponseMode] = useState<RealtimeResponseMode>("silent");
+  const [realtimePrompt, setRealtimePrompt] = useState("");
+  const [realtimeDraftText, setRealtimeDraftText] = useState("");
+  const [dismissedHandIds, setDismissedHandIds] = useState<string[]>([]);
+  const realtimePeerRef = useRef<RTCPeerConnection | null>(null);
+  const realtimeChannelRef = useRef<RTCDataChannel | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const assistantDraftRef = useRef("");
+  const pendingResponseModeRef = useRef<RealtimeResponseMode>("silent");
+  const analysisTimeoutRef = useRef<number | null>(null);
+  const lastAnalysisAtRef = useRef(0);
+  const transcriptDraftIdsRef = useRef(new Map<string, string>());
+  const transcriptDraftTextRef = useRef(new Map<string, string>());
   const recordRenderSample = useCallback((sample: RenderSample) => {
     setRenderSamples((current) => [...current.slice(-49), sample]);
   }, []);
@@ -120,6 +148,10 @@ function App() {
   }, []);
 
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
+  const handRaiseEvents = events.filter((event): event is AgentHandRaiseEvent => event.type === "agent.hand_raise" && event.agentId === realtimeAgentId);
+  const activeHandRaises = handRaiseEvents.filter((event) => !dismissedHandIds.includes(event.id)).slice(0, 6);
+  const taskEvents = dedupeTasks(events.filter((event): event is AgentTaskEvent => event.type === "agent.task" && event.agentId === realtimeAgentId)).slice(0, 6);
+  const transcriptEvents = events.filter((event): event is UtteranceEvent | PartialUtteranceEvent => event.type === "utterance.final" || event.type === "utterance.partial").slice(0, 12);
   const canvasMessages = messages.filter(isCanvasMessage);
   const statusMessages = messages.filter((event) => !isCanvasMessage(event));
   const canvasDocument = resolveCanvasDocument(query, canvasMessages);
@@ -127,6 +159,13 @@ function App() {
   const latestStatusMessage = statusMessages[0];
   const renderStats = summarizeRenderSamples(renderSamples);
   const terminalLines = [formatRenderStats(renderStats), ...events.slice(0, 80).reverse().map(formatTerminalEvent)];
+  const displayedStatus = realtimeDraftText.trim()
+    ? {
+        agentId: realtimeAgentId,
+        text: realtimeDraftText,
+        createdAt: nowIso()
+      }
+    : latestStatusMessage;
 
   async function joinMeeting() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -138,10 +177,380 @@ function App() {
 
   function leaveMeeting() {
     sessionStorage.removeItem(autoJoinKey);
+    disconnectRealtimeAgent();
     stopWhisperCapture();
     localStream?.getTracks().forEach((track) => track.stop());
     setLocalStream(null);
     setConnected(false);
+  }
+
+  async function connectRealtimeAgent() {
+    if (realtimeState !== "idle") return;
+    setRealtimeState("connecting");
+    setRealtimeResponseMode("silent");
+    assistantDraftRef.current = "";
+    setRealtimeDraftText("");
+    try {
+      const stream = localStream || await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      if (!localStream) {
+        sessionStorage.setItem(autoJoinKey, "true");
+        setLocalStream(stream);
+        setConnected(true);
+      }
+      stopWhisperCapture();
+
+      const peer = new RTCPeerConnection();
+      realtimePeerRef.current = peer;
+      peer.ontrack = (event) => {
+        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = event.streams[0];
+      };
+
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) peer.addTrack(audioTrack, stream);
+
+      const channel = peer.createDataChannel("oai-events");
+      realtimeChannelRef.current = channel;
+      channel.addEventListener("open", () => {
+        setRealtimeState("connected");
+        configureRealtimeSession();
+        void postMeetingEvent({
+          id: newEventId("msg"),
+          type: "agent.message",
+          meetingId: "local-demo",
+          createdAt: nowIso(),
+          agentId: realtimeAgentId,
+          format: "markdown",
+          surface: "status",
+          text: [
+            "Realtime agent connected.",
+            "",
+            "Mode: **silent background listener**",
+            "",
+            "**Available tools**",
+            "",
+            ...availableRealtimeTools.map((tool) => `- ${tool}`)
+          ].join("\n")
+        });
+      });
+      channel.addEventListener("message", (event) => {
+        void handleRealtimeEvent(String(event.data));
+      });
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+
+      const response = await fetch(`${api}/realtime/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sdp: offer.sdp })
+      });
+      const answerSdp = await response.text();
+      if (!response.ok) throw new Error(answerSdp || `Realtime call failed with ${response.status}`);
+      await peer.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    } catch (error) {
+      disconnectRealtimeAgent();
+      setRealtimeState("idle");
+      await postMeetingEvent({
+        id: newEventId("trace"),
+        type: "agent.trace",
+        meetingId: "local-demo",
+        createdAt: nowIso(),
+        agentId: realtimeAgentId,
+        channel: "error",
+        text: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  function disconnectRealtimeAgent() {
+    if (analysisTimeoutRef.current !== null) {
+      window.clearTimeout(analysisTimeoutRef.current);
+      analysisTimeoutRef.current = null;
+    }
+    realtimeChannelRef.current?.close();
+    realtimeChannelRef.current = null;
+    realtimePeerRef.current?.close();
+    realtimePeerRef.current = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    assistantDraftRef.current = "";
+    pendingResponseModeRef.current = "silent";
+    transcriptDraftIdsRef.current.clear();
+    transcriptDraftTextRef.current.clear();
+    setRealtimeDraftText("");
+    setRealtimeResponseMode("silent");
+    setRealtimeState("idle");
+    setDismissedHandIds([]);
+  }
+
+  function configureRealtimeSession() {
+    sendRealtimeEvent({
+      type: "session.update",
+      session: {
+        audio: {
+          input: {
+            transcription: {
+              model: "gpt-4o-mini-transcribe",
+              language: "en"
+            },
+            turn_detection: {
+              type: "server_vad",
+              create_response: false,
+              interrupt_response: false,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 900
+            }
+          }
+        }
+      }
+    });
+  }
+
+  async function handleRealtimeEvent(raw: string) {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      await postRealtimeTrace("error", "Invalid Realtime event payload", { raw });
+      return;
+    }
+    const type = String(event.type || "");
+    if (type === "session.created" || type === "session.updated") {
+      await postRealtimeTrace("debug", type, event);
+      return;
+    }
+    if (type === "conversation.item.input_audio_transcription.delta") {
+      await persistRealtimeTranscriptDelta(event);
+      return;
+    }
+    if (type === "conversation.item.input_audio_transcription.completed") {
+      await persistRealtimeTranscriptCompleted(event);
+      scheduleSilentAnalysis("user_turn_completed");
+      return;
+    }
+    if ((type === "response.output_text.delta" && pendingResponseModeRef.current === "silent")
+      || (type === "response.output_audio_transcript.delta" && pendingResponseModeRef.current === "speak")) {
+      assistantDraftRef.current += String(event.delta || "");
+      setRealtimeDraftText(assistantDraftRef.current);
+      return;
+    }
+    if ((type === "response.output_text.done" && pendingResponseModeRef.current === "silent")
+      || (type === "response.output_audio_transcript.done" && pendingResponseModeRef.current === "speak")) {
+      if (assistantDraftRef.current.trim()) {
+        const text = assistantDraftRef.current.trim();
+        if (text !== "NO_ACTION") {
+          await postMeetingEvent({
+            id: newEventId("msg"),
+            type: "agent.message",
+            meetingId: "local-demo",
+            createdAt: nowIso(),
+            agentId: realtimeAgentId,
+            format: "markdown",
+            surface: "status",
+            text
+          });
+        }
+      }
+      assistantDraftRef.current = "";
+      setRealtimeDraftText("");
+      return;
+    }
+    if (type === "response.function_call_arguments.done") {
+      const name = String(event.name || "");
+      const argsText = String(event.arguments || "{}");
+      const callId = String(event.call_id || "");
+      await postRealtimeTrace("tool", `Tool requested: ${name}`, argsText);
+      let parsedArgs: unknown = {};
+      try {
+        parsedArgs = JSON.parse(argsText);
+      } catch {
+        parsedArgs = { raw: argsText };
+      }
+      const toolResponse = await fetch(`${api}/realtime/tool`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, arguments: parsedArgs })
+      }).then((res) => res.json() as Promise<Record<string, unknown>>);
+      await postRealtimeTrace(toolResponse.ok ? "tool" : "error", `Tool result: ${name}`, toolResponse);
+      sendRealtimeEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify(toolResponse)
+        }
+      });
+      sendFollowupResponse();
+      return;
+    }
+    if (type === "error") {
+      await postRealtimeTrace("error", "Realtime error", event);
+      return;
+    }
+    if (type === "response.done") {
+      if (pendingResponseModeRef.current === "speak") {
+        setRealtimeResponseMode("silent");
+        pendingResponseModeRef.current = "silent";
+      }
+      return;
+    }
+  }
+
+  function sendRealtimeEvent(event: unknown) {
+    const channel = realtimeChannelRef.current;
+    if (!channel || channel.readyState !== "open") return;
+    channel.send(JSON.stringify(event));
+  }
+
+  function sendRealtimePrompt() {
+    const text = realtimePrompt.trim();
+    if (!text || realtimeState !== "connected") return;
+    sendRealtimeEvent({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text }]
+      }
+    });
+    pendingResponseModeRef.current = "silent";
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: ["text"]
+      }
+    });
+    setRealtimePrompt("");
+    void postRealtimeTrace("input", "Prompt sent to Realtime agent", { text });
+  }
+
+  function requestAgentFloor(reason?: string) {
+    if (realtimeState !== "connected") return;
+    if (analysisTimeoutRef.current !== null) {
+      window.clearTimeout(analysisTimeoutRef.current);
+      analysisTimeoutRef.current = null;
+    }
+    assistantDraftRef.current = "";
+    setRealtimeDraftText("");
+    setRealtimeResponseMode("speak");
+    pendingResponseModeRef.current = "speak";
+    void postMeetingEvent({
+      id: newEventId("floor"),
+      type: "agent.floor",
+      meetingId: "local-demo",
+      createdAt: nowIso(),
+      agentId: realtimeAgentId,
+      granted: true,
+      mode: "speak",
+      note: reason
+    });
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: ["audio", "text"],
+        instructions: [
+          "The host granted you the floor.",
+          reason ? `Your current raised-hand reason is: ${reason}` : "Speak about the most useful proposal or issue you detected recently.",
+          "Speak concisely and only about your current proposal or the most useful thing you noticed in the recent conversation.",
+          "If you have no meaningful contribution, say so briefly."
+        ].join("\n")
+      }
+    });
+    void postRealtimeTrace("agent", "Floor granted to Realtime agent", undefined);
+  }
+
+  function scheduleSilentAnalysis(trigger: string) {
+    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    if (analysisTimeoutRef.current !== null) window.clearTimeout(analysisTimeoutRef.current);
+    analysisTimeoutRef.current = window.setTimeout(() => {
+      analysisTimeoutRef.current = null;
+      void requestSilentAnalysis(trigger);
+    }, 1800);
+  }
+
+  async function requestSilentAnalysis(trigger: string) {
+    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    const now = Date.now();
+    if (now - lastAnalysisAtRef.current < 6000) return;
+    lastAnalysisAtRef.current = now;
+    pendingResponseModeRef.current = "silent";
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: ["text"],
+        instructions: [
+          "You are in silent background-listener mode.",
+          "Analyze the recent conversation turns.",
+          "Do not speak audio.",
+          "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
+          "If you have something useful, prefer silent actions: raise_meeting_hand, post_meeting_markdown, create_meeting_task, run_shell_command, or run_codex_task.",
+          "Use run_codex_task when the conversation implies real project planning or concrete coding follow-up.",
+          "Keep any text response short."
+        ].join("\n")
+      }
+    });
+    await postRealtimeTrace("agent", "Silent analysis requested", { trigger });
+  }
+
+  function sendFollowupResponse() {
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: pendingResponseModeRef.current === "speak" ? ["audio", "text"] : ["text"]
+      }
+    });
+  }
+
+  async function persistRealtimeTranscriptDelta(event: Record<string, unknown>) {
+    const itemId = String(event.item_id || "");
+    const delta = String(event.delta || "");
+    if (!itemId || !delta) return;
+    const nextText = `${transcriptDraftTextRef.current.get(itemId) || ""}${delta}`;
+    transcriptDraftTextRef.current.set(itemId, nextText);
+    const draftId = transcriptDraftIdsRef.current.get(itemId) || newEventId("utp");
+    transcriptDraftIdsRef.current.set(itemId, draftId);
+    await postMeetingEvent({
+      id: draftId,
+      type: "utterance.partial",
+      meetingId: "local-demo",
+      createdAt: nowIso(),
+      speakerId: "room",
+      speakerLabel: "Room (Realtime)",
+      text: nextText,
+      startMs: Date.now() % 3_600_000
+    });
+  }
+
+  async function persistRealtimeTranscriptCompleted(event: Record<string, unknown>) {
+    const itemId = String(event.item_id || "");
+    const transcriptText = String(event.transcript || transcriptDraftTextRef.current.get(itemId) || "").trim();
+    if (!transcriptText) return;
+    transcriptDraftIdsRef.current.delete(itemId);
+    transcriptDraftTextRef.current.delete(itemId);
+    const now = Date.now();
+    await postMeetingEvent({
+      id: newEventId("utt"),
+      type: "utterance.final",
+      meetingId: "local-demo",
+      createdAt: nowIso(),
+      speakerId: "room",
+      speakerLabel: "Room (Realtime)",
+      text: transcriptText,
+      startMs: now % 3_600_000,
+      endMs: (now % 3_600_000) + 1
+    });
+  }
+
+  async function postRealtimeTrace(channel: "input" | "tool" | "error" | "agent" | "debug", text: string, details?: unknown) {
+    await postMeetingEvent({
+      id: newEventId("trace"),
+      type: "agent.trace",
+      meetingId: "local-demo",
+      createdAt: nowIso(),
+      agentId: realtimeAgentId,
+      channel,
+      text,
+      details
+    });
   }
 
   function startWhisperCapture(sourceStream: MediaStream) {
@@ -205,6 +614,7 @@ function App() {
 
   return (
     <main className="shell">
+      <audio ref={remoteAudioRef} autoPlay />
       <div className="floatingButtons" aria-label="Meeting controls">
         <button className={menuOpen ? "active" : ""} onClick={() => setMenuOpen((value) => !value)}>Menu</button>
         <button className={terminalOpen ? "active" : ""} onClick={() => setTerminalOpen((value) => !value)}>Raw</button>
@@ -223,6 +633,29 @@ function App() {
           ) : (
             <button onClick={leaveMeeting}><Phone size={16} /> Leave meeting</button>
           ))}
+          {!isEmbedded && (
+            <>
+              <div className={`status realtimeStatus realtime-${realtimeState}`}>
+                <Radio size={16} /> {realtimeState === "connected" ? `Realtime agent connected (${realtimeResponseMode})` : realtimeState === "connecting" ? "Realtime agent connecting" : "Realtime agent idle"}
+              </div>
+              {realtimeState === "idle" ? (
+                <button onClick={() => void connectRealtimeAgent()}>Connect Realtime agent</button>
+              ) : (
+                <button onClick={disconnectRealtimeAgent}>Disconnect Realtime agent</button>
+              )}
+              {realtimeState === "connected" && (
+                <button onClick={() => requestAgentFloor(activeHandRaises[0]?.reason)}>Let agent speak</button>
+              )}
+              <div className="realtimePromptBox">
+                <textarea
+                  value={realtimePrompt}
+                  onChange={(event) => setRealtimePrompt(event.target.value)}
+                  placeholder="Ask the voice agent to inspect or improve the existing app with Codex."
+                />
+                <button onClick={sendRealtimePrompt} disabled={realtimeState !== "connected"}>Send prompt</button>
+              </div>
+            </>
+          )}
         </aside>
       )}
 
@@ -265,13 +698,85 @@ function App() {
         </div>
       </section>
 
-      {latestStatusMessage && (
+      {(activeHandRaises.length > 0 || taskEvents.length > 0 || transcriptEvents.length > 0) && (
+        <aside className="opsPanel" aria-live="polite">
+          {activeHandRaises.length > 0 && (
+            <section className="opsSection">
+              <div className="opsHeader">
+                <strong>Raised Hands</strong>
+                <span>{activeHandRaises.length} active</span>
+              </div>
+              <div className="opsList">
+                {activeHandRaises.map((event) => (
+                  <article key={event.id} className="opsCard handCard">
+                    <div className="opsMeta">
+                      <span>{event.requestedMode}</span>
+                      <span>{Math.round(event.confidence * 100)}%</span>
+                    </div>
+                    <p>{event.reason}</p>
+                    <div className="opsActions">
+                      <button onClick={() => {
+                        setDismissedHandIds((current) => [...current, event.id]);
+                        requestAgentFloor(event.reason);
+                      }}>Let speak</button>
+                      <button className="secondary" onClick={() => setDismissedHandIds((current) => [...current, event.id])}>Dismiss</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {taskEvents.length > 0 && (
+            <section className="opsSection">
+              <div className="opsHeader">
+                <strong>Agent Tasks</strong>
+                <span>{taskEvents.length}</span>
+              </div>
+              <div className="opsList">
+                {taskEvents.map((event) => (
+                  <article key={event.id} className="opsCard taskCard">
+                    <div className="opsMeta">
+                      <span>{event.status}</span>
+                      <span>{event.taskClass || "conversation"}</span>
+                    </div>
+                    <p>{event.title}</p>
+                    {event.details && <pre>{event.details}</pre>}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {transcriptEvents.length > 0 && (
+            <section className="opsSection">
+              <div className="opsHeader">
+                <strong>Live Transcript</strong>
+                <span>persisted</span>
+              </div>
+              <div className="opsList transcriptList">
+                {transcriptEvents.map((event) => (
+                  <article key={event.id} className={`opsCard transcriptCard${event.type === "utterance.partial" ? " partial" : ""}`}>
+                    <div className="opsMeta">
+                      <span>{event.speakerLabel}</span>
+                      <span>{event.type === "utterance.partial" ? "partial" : "final"}</span>
+                    </div>
+                    <p>{event.text}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
+      )}
+
+      {displayedStatus && (
         <aside className="conversationPanel" aria-live="polite">
           <MarkdownDocument
-            agentId={latestStatusMessage.agentId}
-            text={latestStatusMessage.text}
-            createdAt={latestStatusMessage.createdAt}
-            documentId={latestStatusMessage.documentId}
+            agentId={displayedStatus.agentId}
+            text={displayedStatus.text}
+            createdAt={displayedStatus.createdAt}
+            documentId={"documentId" in displayedStatus ? displayedStatus.documentId : undefined}
             expanded
           />
         </aside>
@@ -1471,6 +1976,26 @@ function upsertEvent(events: MeetingEvent[], event: MeetingEvent): MeetingEvent[
   const next = [...events];
   next[index] = event;
   return next;
+}
+
+async function postMeetingEvent(event: MeetingEvent): Promise<void> {
+  await fetch(`${api}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event)
+  });
+}
+
+function dedupeTasks(events: AgentTaskEvent[]): AgentTaskEvent[] {
+  const seen = new Set<string>();
+  const unique: AgentTaskEvent[] = [];
+  for (const event of events) {
+    const key = `${event.title}::${event.taskClass || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(event);
+  }
+  return unique;
 }
 
 function formatTerminalEvent(event: MeetingEvent): string {

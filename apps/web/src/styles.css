@@ -73,7 +73,7 @@ body {
   overflow: hidden;
   transition: background-color 420ms ease, color 420ms ease;
 }
-button, input, select {
+button, input, select, textarea {
   border: 1px solid var(--line);
   border-radius: var(--control-radius);
   background: var(--panel2);
@@ -93,7 +93,8 @@ button:hover, select:hover {
   border-color: rgba(var(--accent-rgb), 0.65);
   transform: translateY(-1px);
 }
-input { min-width: 0; width: 100%; }
+input, textarea { min-width: 0; width: 100%; }
+textarea { resize: vertical; min-height: 92px; }
 .shell {
   height: 100%;
   min-height: 0;
@@ -220,6 +221,19 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   gap: 8px;
   padding: 8px 12px;
 }
+.realtimeStatus {
+  color: var(--accent2);
+}
+.realtime-connecting {
+  color: #fbbf24;
+}
+.realtime-connected {
+  color: var(--accent);
+}
+.realtimePromptBox {
+  display: grid;
+  gap: 10px;
+}
 .videoGrid, .workspaceGrid {
   display: grid;
   gap: 14px;
@@ -251,6 +265,94 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   right: 20px;
   width: min(460px, calc(100vw - 40px));
   z-index: 18;
+}
+.opsPanel {
+  display: grid;
+  gap: 14px;
+  left: 20px;
+  max-height: min(70vh, 780px);
+  overflow: auto;
+  position: fixed;
+  top: 72px;
+  width: min(420px, calc(100vw - 40px));
+  z-index: 17;
+}
+.opsSection {
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--line);
+  border-radius: min(var(--radius), 12px);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.opsHeader {
+  align-items: center;
+  background: color-mix(in srgb, var(--panel2) 80%, transparent);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+.opsHeader span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.opsList {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.opsCard {
+  background: color-mix(in srgb, var(--canvas) 86%, var(--panel2));
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+.opsCard p,
+.opsCard pre {
+  margin: 0;
+}
+.opsCard p {
+  color: var(--ink);
+  line-height: 1.45;
+}
+.opsCard pre {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.opsMeta {
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  text-transform: uppercase;
+}
+.opsActions {
+  display: flex;
+  gap: 8px;
+}
+.opsActions button {
+  flex: 1;
+  justify-content: center;
+}
+.handCard {
+  border-color: color-mix(in srgb, var(--accent2) 48%, var(--line));
+}
+.taskCard {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+}
+.transcriptList {
+  max-height: 260px;
+  overflow: auto;
+}
+.transcriptCard.partial {
+  opacity: 0.78;
 }
 .conversationPanel .generated {
   max-width: 100%;
@@ -771,6 +873,14 @@ article.partial { opacity: 0.65; }
   .topActions { justify-content: flex-start; }
   .appearanceControls { flex-wrap: wrap; }
   .canvas { padding: 18px; }
+  .opsPanel {
+    left: 14px;
+    right: 14px;
+    top: auto;
+    bottom: 14px;
+    width: auto;
+    max-height: 40vh;
+  }
   .markdown .md-grid.cols-2,
   .markdown .md-grid.cols-3,
   .markdown .md-grid.cols-4 { grid-template-columns: 1fr; }
