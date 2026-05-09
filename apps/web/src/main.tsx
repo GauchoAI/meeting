@@ -38,10 +38,12 @@ interface RenderSample {
 }
 
 const realtimeAgentId = "realtime-codex";
+const realtimeLiveCanvasDocumentId = "realtime-live-canvas";
 const availableRealtimeTools = [
   "read_repo_guide: read the curated repo guide with key scripts, paths, and examples",
   "raise_meeting_hand: signal that the agent has a proposal without speaking yet",
-  "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI",
+  "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI, including the living canvas document",
+  "publish_task_result: publish a polished completed-task result on the main canvas before review",
   "create_meeting_task: create visible task cards for proposed work",
   "run_codex_task: inspect or modify the actual app/repo with local Codex",
   "run_shell_command: run short terminal commands in the allowed workspace",
@@ -64,6 +66,7 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [controlCenterOpen, setControlCenterOpen] = useState(false);
+  const [selectedCanvasDocumentId, setSelectedCanvasDocumentId] = useState<string | null>(null);
   const [renderSamples, setRenderSamples] = useState<RenderSample[]>([]);
   const [realtimeState, setRealtimeState] = useState<RealtimeState>("idle");
   const [realtimeResponseMode, setRealtimeResponseMode] = useState<RealtimeResponseMode>("silent");
@@ -78,6 +81,7 @@ function App() {
   const assistantDraftFlushTimeoutRef = useRef<number | null>(null);
   const pendingResponseModeRef = useRef<RealtimeResponseMode>("silent");
   const analysisTimeoutRef = useRef<number | null>(null);
+  const liveAnalysisTimeoutRef = useRef<number | null>(null);
   const lastAnalysisAtRef = useRef(0);
   const transcriptDraftIdsRef = useRef(new Map<string, string>());
   const transcriptDraftTextRef = useRef(new Map<string, string>());
@@ -162,8 +166,12 @@ function App() {
   const transcriptEvents = events.filter((event): event is UtteranceEvent | PartialUtteranceEvent => event.type === "utterance.final" || event.type === "utterance.partial").slice(0, 12);
   const canvasMessages = messages.filter(isCanvasMessage);
   const statusMessages = messages.filter((event) => !isCanvasMessage(event));
-  const canvasDocument = resolveCanvasDocument(query, canvasMessages);
-  const latestMessage = canvasMessages[0];
+  const explicitCanvasDocument = resolveCanvasDocument(query, canvasMessages);
+  const selectedCanvasMessage = selectedCanvasDocumentId ? canvasMessages.find((event) => event.documentId === selectedCanvasDocumentId) : undefined;
+  const liveCanvasMessage = canvasMessages.find((event) => event.documentId === realtimeLiveCanvasDocumentId) || canvasMessages[0];
+  const canvasDocument = explicitCanvasDocument || (selectedCanvasMessage
+    ? { agentId: selectedCanvasMessage.agentId, text: selectedCanvasMessage.text, createdAt: selectedCanvasMessage.createdAt, documentId: selectedCanvasMessage.documentId }
+    : undefined);
   const latestStatusMessage = statusMessages[0];
   const renderStats = summarizeRenderSamples(renderSamples);
   const terminalLines = [formatRenderStats(renderStats), ...events.slice(0, 80).reverse().map(formatTerminalEvent)];
@@ -449,6 +457,10 @@ function App() {
       window.clearTimeout(analysisTimeoutRef.current);
       analysisTimeoutRef.current = null;
     }
+    if (liveAnalysisTimeoutRef.current !== null) {
+      window.clearTimeout(liveAnalysisTimeoutRef.current);
+      liveAnalysisTimeoutRef.current = null;
+    }
     assistantDraftRef.current = "";
     setRealtimeDraftText("");
     setRealtimeResponseMode("speak");
@@ -487,6 +499,15 @@ function App() {
     }, 1800);
   }
 
+  function scheduleLiveSilentAnalysis(trigger: string) {
+    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    if (liveAnalysisTimeoutRef.current !== null) return;
+    liveAnalysisTimeoutRef.current = window.setTimeout(() => {
+      liveAnalysisTimeoutRef.current = null;
+      void requestSilentAnalysis(trigger);
+    }, 2600);
+  }
+
   async function requestSilentAnalysis(trigger: string) {
     if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
     const now = Date.now();
@@ -502,10 +523,11 @@ function App() {
           "Analyze the recent conversation turns.",
           "Do not speak audio.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
-          "If you have something useful, prefer silent actions: raise_meeting_hand, post_meeting_markdown, create_meeting_task, run_shell_command, or run_codex_task.",
-          "Maintain a living meeting artifact on the main canvas with post_meeting_markdown using surface=canvas.",
+          "If you have something useful, prefer silent actions: raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, run_shell_command, or run_codex_task.",
+          `Maintain a living meeting artifact on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
           "Use the canvas artifact for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",
+          "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
           "Use run_codex_task when the conversation implies real project planning or concrete coding follow-up.",
           "Keep any text response short."
@@ -568,6 +590,7 @@ function App() {
       text: nextText,
       startMs: Date.now() % 3_600_000
     });
+    if (nextText.trim().length >= 120) scheduleLiveSilentAnalysis("user_turn_live");
   }
 
   async function persistRealtimeTranscriptCompleted(event: Record<string, unknown>) {
@@ -730,12 +753,12 @@ function App() {
               expanded
               onRender={recordRenderSample}
             />
-          ) : latestMessage ? (
+          ) : liveCanvasMessage ? (
             <MarkdownDocument
-              agentId={latestMessage.agentId}
-              text={latestMessage.text}
-              createdAt={latestMessage.createdAt}
-              documentId={latestMessage.documentId}
+              agentId={liveCanvasMessage.agentId}
+              text={liveCanvasMessage.text}
+              createdAt={liveCanvasMessage.createdAt}
+              documentId={liveCanvasMessage.documentId}
               expanded
               onRender={recordRenderSample}
             />
@@ -764,7 +787,11 @@ function App() {
               <strong>Realtime Agent</strong>
               <p>{realtimeState === "connected" ? `Background listener · ${realtimeResponseMode}` : "Disconnected"}</p>
             </div>
-            <button className="secondary" onClick={() => setControlCenterOpen(false)}>Close</button>
+            <div className="opsActions">
+              <button className="secondary" onClick={() => setSelectedCanvasDocumentId(realtimeLiveCanvasDocumentId)}>Live notes</button>
+              <button className="secondary" onClick={() => setSelectedCanvasDocumentId(null)}>Auto</button>
+              <button className="secondary" onClick={() => setControlCenterOpen(false)}>Close</button>
+            </div>
           </div>
 
           {activeHandRaises.length > 0 && (
@@ -812,6 +839,17 @@ function App() {
                         </div>
                         <p>{event.title}</p>
                         {event.details && <pre>{event.details}</pre>}
+                        <div className="opsActions">
+                          {event.taskKey && (event.status === "done" || event.status === "failed") && (
+                            <button onClick={() => setSelectedCanvasDocumentId(`task-result:${event.taskKey}`)}>Show result</button>
+                          )}
+                          {event.previewUrl && (
+                            <a className="secondary buttonLink" href={event.previewUrl} target="_blank" rel="noreferrer">Open preview</a>
+                          )}
+                          {event.status !== "done" && event.status !== "failed" && (
+                            <button className="secondary" onClick={() => setSelectedCanvasDocumentId(realtimeLiveCanvasDocumentId)}>Show live notes</button>
+                          )}
+                        </div>
                       </article>
                     )) : <article className="opsCard emptyTaskCard"><p>No items</p></article>}
                   </div>

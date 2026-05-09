@@ -348,16 +348,35 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "post_meeting_markdown",
-        description: "Post Markdown into the meeting UI silently. Use surface=status for short summaries and surface=canvas for diagrams or richer artifacts.",
+        description: "Post Markdown into the meeting UI silently. Use surface=status for short summaries and surface=canvas for diagrams or richer artifacts. Reuse a stable documentId to keep a living document updated in place conceptually.",
         parameters: {
           type: "object",
           properties: {
             markdown: { type: "string" },
             title: { type: "string" },
             surface: { type: "string", enum: ["status", "canvas"] },
-            lifecycle: { type: "string", enum: ["draft", "final"] }
+            lifecycle: { type: "string", enum: ["draft", "final"] },
+            documentId: { type: "string" }
           },
           required: ["markdown"],
+          additionalProperties: false
+        }
+      },
+      {
+        type: "function",
+        name: "publish_task_result",
+        description: "Publish a completed task result to the main meeting canvas as a polished artifact so the host can review it. Use this when a task reaches a meaningful milestone or is done.",
+        parameters: {
+          type: "object",
+          properties: {
+            taskKey: { type: "string" },
+            title: { type: "string" },
+            markdown: { type: "string" },
+            previewUrl: { type: "string" },
+            details: { type: "string" },
+            handoffNote: { type: "string" }
+          },
+          required: ["taskKey", "title", "markdown"],
           additionalProperties: false
         }
       },
@@ -493,6 +512,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       const title = optionalString(args.title);
       const surface = asSurface(args.surface);
       const lifecycle = asLifecycle(args.lifecycle);
+      const documentId = optionalString(args.documentId) || (surface === "canvas" ? "realtime-live-canvas" : undefined);
       appendEvent({
         id: newEventId("msg"),
         type: "agent.message",
@@ -502,9 +522,44 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
         format: "markdown",
         surface,
         lifecycle,
+        documentId,
         text: title ? `# ${title}\n\n${markdown}` : markdown
       } as MeetingEvent);
-      output = { ok: true, surface, lifecycle };
+      output = { ok: true, surface, lifecycle, documentId };
+    } else if (name === "publish_task_result") {
+      const args = asObject(input);
+      const taskKey = String(args.taskKey || "").trim();
+      const title = String(args.title || "").trim();
+      const markdown = String(args.markdown || "").trim();
+      if (!taskKey) throw new Error("taskKey is required");
+      if (!title) throw new Error("title is required");
+      if (!markdown) throw new Error("markdown is required");
+      const previewUrl = optionalString(args.previewUrl);
+      const details = optionalString(args.details);
+      const handoffNote = optionalString(args.handoffNote);
+      appendEvent({
+        id: newEventId("msg"),
+        type: "agent.message",
+        meetingId,
+        createdAt: nowIso(),
+        agentId: "realtime-codex",
+        format: "markdown",
+        surface: "canvas",
+        lifecycle: "final",
+        documentId: `task-result:${taskKey}`,
+        text: `# ${title}\n\n${markdown}${previewUrl ? `\n\n[Open preview](${previewUrl})` : ""}${details ? `\n\n## Delivery notes\n\n${details}` : ""}`
+      } as MeetingEvent);
+      appendEvent({
+        id: newEventId("hand"),
+        type: "agent.hand_raise",
+        meetingId,
+        createdAt: nowIso(),
+        agentId: "realtime-codex",
+        reason: handoffNote || `I published the latest result for "${title}" on the main canvas and can walk through it.`,
+        confidence: 0.95,
+        requestedMode: "show"
+      } as MeetingEvent);
+      output = { ok: true, taskKey, documentId: `task-result:${taskKey}` };
     } else if (name === "create_meeting_task") {
       const args = asObject(input);
       const title = String(args.title || "").trim();
@@ -590,13 +645,15 @@ function buildRealtimeInstructions(): string {
     "You are a live coding meeting agent inside a browser-based voice call.",
     "Most of the time you are a silent background listener, not an always-speaking chatbot.",
     "Speak naturally and keep spoken answers concise when explicitly granted the floor.",
-    "You have eight tools and should accurately describe them when asked.",
-    "Available tools: read_repo_guide, raise_meeting_hand, post_meeting_markdown, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
+    "You have nine tools and should accurately describe them when asked.",
+    "Available tools: read_repo_guide, raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
     "When you need to understand this repository's scripts, artifact workflow, or file layout, call read_repo_guide before guessing.",
-    "In background listening mode, prefer silent actions: raise_meeting_hand, post_meeting_markdown, create_meeting_task, run_shell_command, and run_codex_task.",
+    "In background listening mode, prefer silent actions: raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, run_shell_command, and run_codex_task.",
     "Do not speak automatically while in silent background mode unless the client explicitly grants you the floor.",
     "run_codex_task is your primary tool for interacting with local Codex and doing real coding work in the repository.",
     "run_shell_command is for quick inspection and lightweight terminal tasks.",
+    "Maintain a stable living canvas document with post_meeting_markdown using documentId=realtime-live-canvas.",
+    "For completed or milestone work, use publish_task_result to put a polished result on the main canvas before or while raising your hand.",
     "read_rendered_html and write_rendered_html are specifically for the isolated browser preview file and are not the main path for improving the app.",
     "You have tool access to inspect the local workspace, run Codex, and write a complete index.html preview that renders on screen.",
     "Before overwriting HTML, read the current HTML first unless you are creating it from scratch.",

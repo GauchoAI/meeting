@@ -405,9 +405,27 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   display: flex;
   gap: 8px;
 }
-.opsActions button {
+.opsActions button,
+.opsActions .buttonLink {
   flex: 1;
   justify-content: center;
+}
+.buttonLink {
+  align-items: center;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  color: var(--ink);
+  display: inline-flex;
+  font-size: var(--font-ui);
+  justify-content: center;
+  padding: 10px 12px;
+  text-decoration: none;
+  transition: background-color 260ms ease, border-color 260ms ease, color 260ms ease, box-shadow 260ms ease, transform 180ms ease;
+}
+.buttonLink:hover {
+  border-color: rgba(var(--accent-rgb), 0.65);
+  transform: translateY(-1px);
 }
 .handCard {
   border-color: color-mix(in srgb, var(--accent2) 48%, var(--line));
