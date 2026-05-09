@@ -73,6 +73,8 @@ function App() {
   const realtimeChannelRef = useRef<RTCDataChannel | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const assistantDraftRef = useRef("");
+  const assistantDraftMessageIdRef = useRef<string | null>(null);
+  const assistantDraftFlushTimeoutRef = useRef<number | null>(null);
   const pendingResponseModeRef = useRef<RealtimeResponseMode>("silent");
   const analysisTimeoutRef = useRef<number | null>(null);
   const lastAnalysisAtRef = useRef(0);
@@ -267,6 +269,10 @@ function App() {
       window.clearTimeout(analysisTimeoutRef.current);
       analysisTimeoutRef.current = null;
     }
+    if (assistantDraftFlushTimeoutRef.current !== null) {
+      window.clearTimeout(assistantDraftFlushTimeoutRef.current);
+      assistantDraftFlushTimeoutRef.current = null;
+    }
     realtimeChannelRef.current?.close();
     realtimeChannelRef.current = null;
     realtimePeerRef.current?.close();
@@ -331,6 +337,7 @@ function App() {
       || (type === "response.output_audio_transcript.delta" && pendingResponseModeRef.current === "speak")) {
       assistantDraftRef.current += String(event.delta || "");
       setRealtimeDraftText(assistantDraftRef.current);
+      scheduleAssistantDraftPersist();
       return;
     }
     if ((type === "response.output_text.done" && pendingResponseModeRef.current === "silent")
@@ -339,16 +346,22 @@ function App() {
         const text = assistantDraftRef.current.trim();
         if (text !== "NO_ACTION") {
           await postMeetingEvent({
-            id: newEventId("msg"),
+            id: assistantDraftMessageIdRef.current || newEventId("msg"),
             type: "agent.message",
             meetingId: "local-demo",
             createdAt: nowIso(),
             agentId: realtimeAgentId,
             format: "markdown",
             surface: "status",
+            lifecycle: "final",
             text
           });
         }
+      }
+      assistantDraftMessageIdRef.current = null;
+      if (assistantDraftFlushTimeoutRef.current !== null) {
+        window.clearTimeout(assistantDraftFlushTimeoutRef.current);
+        assistantDraftFlushTimeoutRef.current = null;
       }
       assistantDraftRef.current = "";
       setRealtimeDraftText("");
@@ -497,6 +510,32 @@ function App() {
       response: {
         output_modalities: pendingResponseModeRef.current === "speak" ? ["audio", "text"] : ["text"]
       }
+    });
+  }
+
+  function scheduleAssistantDraftPersist() {
+    if (assistantDraftFlushTimeoutRef.current !== null) return;
+    assistantDraftFlushTimeoutRef.current = window.setTimeout(() => {
+      assistantDraftFlushTimeoutRef.current = null;
+      void persistAssistantDraft();
+    }, 450);
+  }
+
+  async function persistAssistantDraft() {
+    const text = assistantDraftRef.current.trim();
+    if (!text || text === "NO_ACTION") return;
+    if (!assistantDraftMessageIdRef.current) assistantDraftMessageIdRef.current = newEventId("msg");
+    await postMeetingEvent({
+      id: assistantDraftMessageIdRef.current,
+      type: "agent.message",
+      meetingId: "local-demo",
+      createdAt: nowIso(),
+      agentId: realtimeAgentId,
+      format: "markdown",
+      surface: "status",
+      lifecycle: "draft",
+      streaming: true,
+      text
     });
   }
 
