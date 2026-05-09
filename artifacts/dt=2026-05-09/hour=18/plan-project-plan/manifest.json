@@ -1,0 +1,14 @@
+{
+  "kind": "plan",
+  "slug": "project-plan",
+  "title": "Project Plan Notes (Draft)",
+  "createdAt": "2026-05-09T21:41:29.915Z",
+  "updatedAt": "2026-05-09T21:41:29.915Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "project",
+    "plan",
+    "draft"
+  ],
+  "summary": "Draft project plan captured from the current live canvas, including SaaS direction, AWS deployment intent, paid users, WhatsApp via Matrix integration, and open questions."
+}
