@@ -1,6 +1,7 @@
 export type MeetingId = string;
 export type AgentId = string;
 export type ParticipantId = string;
+export type MeetingStream = "conversation" | "implementation";
 export type MeetingTaskClass =
   | "artifact.render"
   | "artifact.edit"
@@ -28,6 +29,7 @@ export interface BaseEvent {
 
 export interface UtteranceEvent extends BaseEvent {
   type: "utterance.final";
+  stream?: MeetingStream;
   speakerId: ParticipantId;
   speakerLabel: string;
   text: string;
@@ -38,6 +40,7 @@ export interface UtteranceEvent extends BaseEvent {
 
 export interface PartialUtteranceEvent extends BaseEvent {
   type: "utterance.partial";
+  stream?: MeetingStream;
   speakerId: ParticipantId;
   speakerLabel: string;
   text: string;
@@ -46,6 +49,7 @@ export interface PartialUtteranceEvent extends BaseEvent {
 
 export interface AgentHandRaiseEvent extends BaseEvent {
   type: "agent.hand_raise";
+  stream?: MeetingStream;
   agentId: AgentId;
   reason: string;
   confidence: number;
@@ -54,6 +58,7 @@ export interface AgentHandRaiseEvent extends BaseEvent {
 
 export interface AgentFloorEvent extends BaseEvent {
   type: "agent.floor";
+  stream?: MeetingStream;
   agentId: AgentId;
   granted: boolean;
   mode: "speak" | "show" | "work" | "review";
@@ -62,6 +67,7 @@ export interface AgentFloorEvent extends BaseEvent {
 
 export interface AgentMessageEvent extends BaseEvent {
   type: "agent.message";
+  stream?: MeetingStream;
   agentId: AgentId;
   format: "markdown" | "plain";
   text: string;
@@ -73,6 +79,7 @@ export interface AgentMessageEvent extends BaseEvent {
 
 export interface AgentTraceEvent extends BaseEvent {
   type: "agent.trace";
+  stream?: MeetingStream;
   agentId: AgentId;
   channel: "input" | "agent" | "message" | "tool" | "error" | "debug";
   text: string;
@@ -81,6 +88,7 @@ export interface AgentTraceEvent extends BaseEvent {
 
 export interface AgentTaskEvent extends BaseEvent {
   type: "agent.task";
+  stream?: MeetingStream;
   agentId: AgentId;
   taskKey?: string;
   status: "queued" | "working" | "blocked" | "done" | "failed";

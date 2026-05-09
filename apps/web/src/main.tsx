@@ -30,6 +30,7 @@ type Palette = "lime" | "blue" | "violet" | "amber" | "rose";
 type FontSize = "small" | "medium" | "large" | "xlarge";
 type RealtimeState = "idle" | "connecting" | "connected";
 type RealtimeResponseMode = "silent" | "speak";
+type MeetingStream = "conversation" | "implementation";
 
 interface RenderSample {
   markdownMs: number;
@@ -161,25 +162,30 @@ function App() {
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
   const handRaiseEvents = events.filter((event): event is AgentHandRaiseEvent => event.type === "agent.hand_raise" && event.agentId === realtimeAgentId);
   const activeHandRaises = handRaiseEvents.filter((event) => !dismissedHandIds.includes(event.id)).slice(0, 6);
-  const taskEvents = dedupeTasks(events.filter((event): event is AgentTaskEvent => event.type === "agent.task" && event.agentId === realtimeAgentId)).slice(0, 8);
-  const taskColumns = {
-    queued: taskEvents.filter((event) => event.status === "queued" || event.status === "blocked"),
-    working: taskEvents.filter((event) => event.status === "working"),
-    done: taskEvents.filter((event) => event.status === "done" || event.status === "failed")
+  const taskEvents = dedupeTasks(events.filter((event): event is AgentTaskEvent => event.type === "agent.task" && event.agentId === realtimeAgentId)).slice(0, 12);
+  const implementationTasks = taskEvents.filter((event) => event.stream === "implementation");
+  const conversationTasks = taskEvents.filter((event) => (event.stream || "conversation") === "conversation");
+  const implementationTaskColumns = {
+    queued: implementationTasks.filter((event) => event.status === "queued" || event.status === "blocked"),
+    working: implementationTasks.filter((event) => event.status === "working"),
+    done: implementationTasks.filter((event) => event.status === "done" || event.status === "failed")
   };
-  const transcriptEvents = events.filter((event): event is UtteranceEvent | PartialUtteranceEvent => event.type === "utterance.final" || event.type === "utterance.partial").slice(0, 12);
-  const canvasMessages = messages.filter(isCanvasMessage);
+  const transcriptEvents = events.filter((event): event is UtteranceEvent | PartialUtteranceEvent => (event.type === "utterance.final" || event.type === "utterance.partial") && (event.stream || "conversation") === "conversation").slice(0, 16);
+  const canvasMessages = messages.filter((event) => isCanvasMessage(event) && (event.stream || "conversation") === "conversation");
+  const implementationCanvasMessages = messages.filter((event) => isCanvasMessage(event) && event.stream === "implementation");
   const statusMessages = messages.filter((event) => !isCanvasMessage(event));
+  const conversationStatusMessages = statusMessages.filter((event) => (event.stream || "conversation") === "conversation");
+  const implementationStatusMessages = statusMessages.filter((event) => event.stream === "implementation");
   const explicitCanvasDocument = resolveCanvasDocument(query, canvasMessages);
   const selectedCanvasMessage = selectedCanvasDocumentId ? canvasMessages.find((event) => event.documentId === selectedCanvasDocumentId) : undefined;
   const liveCanvasMessage = canvasMessages.find((event) => event.documentId === realtimeLiveCanvasDocumentId) || canvasMessages[0];
   const canvasDocument = explicitCanvasDocument || (selectedCanvasMessage
     ? { agentId: selectedCanvasMessage.agentId, text: selectedCanvasMessage.text, createdAt: selectedCanvasMessage.createdAt, documentId: selectedCanvasMessage.documentId }
     : undefined);
-  const latestStatusMessage = statusMessages[0];
+  const latestStatusMessage = conversationStatusMessages[0];
   const renderStats = summarizeRenderSamples(renderSamples);
   const terminalLines = [formatRenderStats(renderStats), ...events.slice(0, 80).reverse().map(formatTerminalEvent)];
-  const liveStatusMessages = statusMessages.slice(0, 8);
+  const liveStatusMessages = conversationStatusMessages.slice(0, 8);
   const displayedStatus = realtimeDraftText.trim()
     ? {
         agentId: realtimeAgentId,
@@ -249,6 +255,7 @@ function App() {
         void postMeetingEvent({
           id: newEventId("msg"),
           type: "agent.message",
+          stream: "conversation",
           meetingId: "local-demo",
           createdAt: nowIso(),
           agentId: realtimeAgentId,
@@ -286,6 +293,7 @@ function App() {
       await postMeetingEvent({
         id: newEventId("trace"),
         type: "agent.trace",
+        stream: "conversation",
         meetingId: "local-demo",
         createdAt: nowIso(),
         agentId: realtimeAgentId,
@@ -379,6 +387,7 @@ function App() {
           await postMeetingEvent({
             id: assistantDraftMessageIdRef.current || newEventId("msg"),
             type: "agent.message",
+            stream: pendingResponseModeRef.current === "speak" ? "conversation" : "conversation",
             meetingId: "local-demo",
             createdAt: nowIso(),
             agentId: realtimeAgentId,
@@ -402,7 +411,7 @@ function App() {
       const name = String(event.name || "");
       const argsText = String(event.arguments || "{}");
       const callId = String(event.call_id || "");
-      await postRealtimeTrace("tool", `Tool requested: ${name}`, argsText);
+      await postRealtimeTrace("tool", `Tool requested: ${name}`, argsText, implementationToolName(name) ? "implementation" : "conversation");
       let parsedArgs: unknown = {};
       try {
         parsedArgs = JSON.parse(argsText);
@@ -414,7 +423,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, arguments: parsedArgs })
       }).then((res) => res.json() as Promise<Record<string, unknown>>);
-      await postRealtimeTrace(toolResponse.ok ? "tool" : "error", `Tool result: ${name}`, toolResponse);
+      await postRealtimeTrace(toolResponse.ok ? "tool" : "error", `Tool result: ${name}`, toolResponse, implementationToolName(name) ? "implementation" : "conversation");
       sendRealtimeEvent({
         type: "conversation.item.create",
         item: {
@@ -484,6 +493,7 @@ function App() {
     void postMeetingEvent({
       id: newEventId("floor"),
       type: "agent.floor",
+      stream: "conversation",
       meetingId: "local-demo",
       createdAt: nowIso(),
       agentId: realtimeAgentId,
@@ -539,12 +549,17 @@ function App() {
           "Analyze the recent conversation turns.",
           "Do not speak audio.",
           "The current canvas is first-class context, not a side artifact.",
+          "There are two streams here: conversation and implementation.",
+          "Conversation is the true branch for human discussion, notes, plans, diagrams, and hand raises.",
+          "Implementation is the Codex execution branch with task lifecycle and result review.",
           "If you need to understand the current plan, notes, or on-screen state, call read_meeting_context first.",
           "If you need durable artifacts, use list_artifacts, read_artifact, or create_smart_artifact rather than exploratory repo work.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
           "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, or run_codex_task.",
           `Maintain a living meeting artifact on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
           "Use the canvas artifact for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
+          "Use create_meeting_task with stream=conversation for planning-side tasks.",
+          "Use create_meeting_task with stream=implementation for Codex work or execution lifecycle.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
@@ -580,6 +595,7 @@ function App() {
     await postMeetingEvent({
       id: assistantDraftMessageIdRef.current,
       type: "agent.message",
+      stream: "conversation",
       meetingId: "local-demo",
       createdAt: nowIso(),
       agentId: realtimeAgentId,
@@ -602,6 +618,7 @@ function App() {
     await postMeetingEvent({
       id: draftId,
       type: "utterance.partial",
+      stream: "conversation",
       meetingId: "local-demo",
       createdAt: nowIso(),
       speakerId: "room",
@@ -622,6 +639,7 @@ function App() {
     await postMeetingEvent({
       id: newEventId("utt"),
       type: "utterance.final",
+      stream: "conversation",
       meetingId: "local-demo",
       createdAt: nowIso(),
       speakerId: "room",
@@ -632,10 +650,11 @@ function App() {
     });
   }
 
-  async function postRealtimeTrace(channel: "input" | "tool" | "error" | "agent" | "debug", text: string, details?: unknown) {
+  async function postRealtimeTrace(channel: "input" | "tool" | "error" | "agent" | "debug", text: string, details?: unknown, stream: MeetingStream = "conversation") {
     await postMeetingEvent({
       id: newEventId("trace"),
       type: "agent.trace",
+      stream,
       meetingId: "local-demo",
       createdAt: nowIso(),
       agentId: realtimeAgentId,
@@ -796,7 +815,7 @@ function App() {
         aria-expanded={controlCenterOpen}
       >
         <span className="controlCenterTitle">{activeHandRaises.length ? "Agent wants to speak" : "Agent control center"}</span>
-        <span className="controlCenterCounts">{taskEvents.length} tasks · {transcriptEvents.length} transcript</span>
+        <span className="controlCenterCounts">{implementationTasks.length} impl tasks · {transcriptEvents.length} transcript</span>
       </button>
 
       {controlCenterOpen && (
@@ -842,15 +861,15 @@ function App() {
 
           <section className="opsSection">
             <div className="opsHeader">
-              <strong>Tasks</strong>
-              <span>{taskEvents.length}</span>
+              <strong>Implementation Queue</strong>
+              <span>{implementationTasks.length}</span>
             </div>
             <div className="taskColumns">
               {(["queued", "working", "done"] as const).map((column) => (
                 <div key={column} className="taskColumn">
                   <div className="taskColumnHeader">{column === "queued" ? "Queued" : column === "working" ? "Working" : "Ready / Done"}</div>
                   <div className="opsList compact">
-                    {taskColumns[column].length ? taskColumns[column].map((event) => (
+                    {implementationTaskColumns[column].length ? implementationTaskColumns[column].map((event) => (
                       <article key={event.id} className={`opsCard taskCard status-${event.status}`}>
                         <div className="opsMeta">
                           <span>{event.status}</span>
@@ -870,7 +889,7 @@ function App() {
                           )}
                         </div>
                       </article>
-                    )) : <article className="opsCard emptyTaskCard"><p>No items</p></article>}
+                    )) : <article className="opsCard emptyTaskCard"><p>No implementation items</p></article>}
                   </div>
                 </div>
               ))}
@@ -879,8 +898,27 @@ function App() {
 
           <section className="opsSection">
             <div className="opsHeader">
-              <strong>Agent Feed</strong>
-              <span>live</span>
+              <strong>Conversation Work</strong>
+              <span>{conversationTasks.length}</span>
+            </div>
+            <div className="opsList compact">
+              {conversationTasks.length ? conversationTasks.map((event) => (
+                <article key={event.id} className={`opsCard taskCard status-${event.status}`}>
+                  <div className="opsMeta">
+                    <span>{event.status}</span>
+                    <span>{event.taskClass || "conversation"}</span>
+                  </div>
+                  <p>{event.title}</p>
+                  {event.details && <pre>{event.details}</pre>}
+                </article>
+              )) : <article className="opsCard emptyTaskCard"><p>No conversation-side tasks</p></article>}
+            </div>
+          </section>
+
+          <section className="opsSection">
+            <div className="opsHeader">
+              <strong>Conversation Feed</strong>
+              <span>{liveStatusMessages.length} items</span>
             </div>
             <div className="opsList transcriptList">
               {displayedStatus && (
@@ -906,8 +944,38 @@ function App() {
 
           <section className="opsSection">
             <div className="opsHeader">
-              <strong>Transcript</strong>
-              <span>persisted</span>
+              <strong>Implementation Feed</strong>
+              <span>{implementationStatusMessages.length} items</span>
+            </div>
+            <div className="opsList transcriptList">
+              {implementationCanvasMessages.slice(0, 4).map((event) => (
+                <article key={event.id} className="opsCard statusCard">
+                  <div className="opsMeta">
+                    <span>{event.documentId || event.agentId}</span>
+                    <span>{event.lifecycle || "final"}</span>
+                  </div>
+                  <p>{firstLine(event.text)}</p>
+                </article>
+              ))}
+              {implementationStatusMessages.slice(0, 6).map((event) => (
+                <article key={event.id} className="opsCard statusCard">
+                  <div className="opsMeta">
+                    <span>{event.agentId}</span>
+                    <span>{event.lifecycle || "final"}</span>
+                  </div>
+                  <p>{event.text}</p>
+                </article>
+              ))}
+              {!implementationCanvasMessages.length && !implementationStatusMessages.length && (
+                <article className="opsCard emptyTaskCard"><p>No implementation activity yet</p></article>
+              )}
+            </div>
+          </section>
+
+          <section className="opsSection">
+            <div className="opsHeader">
+              <strong>Conversation Transcript</strong>
+              <span>persisted stream</span>
             </div>
             <div className="opsList transcriptList">
               {transcriptEvents.map((event) => (
@@ -2141,6 +2209,14 @@ function dedupeTasks(events: AgentTaskEvent[]): AgentTaskEvent[] {
   });
 }
 
+function implementationToolName(name: string): boolean {
+  return name === "run_codex_task" || name === "publish_task_result";
+}
+
+function firstLine(text: string): string {
+  return text.trim().split("\n").find((line) => line.trim()) || text.trim();
+}
+
 function statusRank(status: AgentTaskEvent["status"]): number {
   switch (status) {
     case "working": return 0;
@@ -2157,10 +2233,10 @@ function formatTerminalEvent(event: MeetingEvent): string {
   if (event.type === "agent.message") {
     const surface = event.surface || "canvas";
     const lifecycle = event.lifecycle || (event.streaming ? "draft" : "final");
-    return `[${time}] assistant/${event.agentId}/${surface}/${lifecycle}\n${event.text}`;
+    return `[${time}] assistant/${event.agentId}/${event.stream || "conversation"}/${surface}/${lifecycle}\n${event.text}`;
   }
   if (event.type === "utterance.final") {
-    return `[${time}] host/${event.speakerLabel}\n${event.text}`;
+    return `[${time}] host/${event.stream || "conversation"}/${event.speakerLabel}\n${event.text}`;
   }
   if (event.type === "system") {
     return `[${time}] system/${event.level}\n${event.text}`;
@@ -2168,7 +2244,7 @@ function formatTerminalEvent(event: MeetingEvent): string {
   if (event.type === "agent.trace") {
     const trace = event as MeetingEvent & { agentId?: string; channel?: string; text?: string; details?: unknown };
     const details = trace.details ? `\n${JSON.stringify(trace.details, null, 2)}` : "";
-    return `[${time}] trace/${trace.agentId || "agent"}/${trace.channel || "debug"}\n${trace.text || ""}${details}`;
+    return `[${time}] trace/${trace.agentId || "agent"}/${(trace as { stream?: MeetingStream }).stream || "conversation"}/${trace.channel || "debug"}\n${trace.text || ""}${details}`;
   }
   return `[${time}] ${event.type}\n${JSON.stringify(event, null, 2)}`;
 }

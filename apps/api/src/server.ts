@@ -78,6 +78,7 @@ const server = createServer(async (req, res) => {
         appendEvent({
           id: newEventId("utt"),
           type: "utterance.final",
+          stream: "conversation",
           meetingId,
           createdAt: nowIso(),
           speakerId: "host",
@@ -195,6 +196,7 @@ function eventBody(event: MeetingEvent): string {
   }
   if (event.type === "agent.message") {
     const meta = [
+      event.stream ? `stream: ${event.stream}` : undefined,
       event.surface ? `surface: ${event.surface}` : undefined,
       event.lifecycle ? `lifecycle: ${event.lifecycle}` : undefined,
       typeof event.streaming === "boolean" ? `streaming: ${event.streaming}` : undefined,
@@ -204,6 +206,7 @@ function eventBody(event: MeetingEvent): string {
   }
   if (event.type === "agent.trace") {
     const trace = [
+      event.stream ? `stream: ${event.stream}` : undefined,
       `channel: ${event.channel}`,
       "",
       fencedText(event.text),
@@ -213,6 +216,7 @@ function eventBody(event: MeetingEvent): string {
   }
   if (event.type === "agent.task") {
     return [
+      event.stream ? `stream: ${event.stream}` : undefined,
       `status: ${event.status}`,
       `title: ${event.title}`,
       event.taskClass ? `taskClass: ${event.taskClass}` : undefined,
@@ -220,10 +224,10 @@ function eventBody(event: MeetingEvent): string {
     ].filter(Boolean).join("\n");
   }
   if (event.type === "agent.hand_raise") {
-    return [`requestedMode: ${event.requestedMode}`, `confidence: ${event.confidence}`, fencedText(event.reason)].join("\n");
+    return [event.stream ? `stream: ${event.stream}` : undefined, `requestedMode: ${event.requestedMode}`, `confidence: ${event.confidence}`, fencedText(event.reason)].filter(Boolean).join("\n");
   }
   if (event.type === "agent.floor") {
-    return [`granted: ${event.granted}`, `mode: ${event.mode}`, event.note ? fencedText(event.note) : undefined].filter(Boolean).join("\n");
+    return [event.stream ? `stream: ${event.stream}` : undefined, `granted: ${event.granted}`, `mode: ${event.mode}`, event.note ? fencedText(event.note) : undefined].filter(Boolean).join("\n");
   }
   if (event.type === "repository.context") {
     return `\`\`\`json\n${safeJson(event.repository)}\n\`\`\``;
@@ -444,13 +448,14 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "create_meeting_task",
-        description: "Create or update a visible task card in the meeting UI for proposed work. Reuse the same taskKey when updating the lifecycle of an existing task.",
+        description: "Create or update a visible task card in the meeting UI for proposed work. Use stream=conversation for planning or capture work. Use stream=implementation for Codex execution lifecycle. Reuse the same taskKey when updating an existing task.",
         parameters: {
           type: "object",
           properties: {
             taskKey: { type: "string" },
             title: { type: "string" },
             status: { type: "string", enum: ["queued", "working", "blocked", "done", "failed"] },
+            stream: { type: "string", enum: ["conversation", "implementation"] },
             taskClass: { type: "string", enum: ["artifact.render", "artifact.edit", "code.change", "research.explore", "critique.review", "conversation"] },
             branch: { type: "string" },
             previewUrl: { type: "string" },
@@ -587,6 +592,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       appendEvent({
         id: newEventId("hand"),
         type: "agent.hand_raise",
+        stream: "conversation",
         meetingId,
         createdAt: nowIso(),
         agentId: "realtime-codex",
@@ -606,6 +612,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       appendEvent({
         id: newEventId("msg"),
         type: "agent.message",
+        stream: "conversation",
         meetingId,
         createdAt: nowIso(),
         agentId: "realtime-codex",
@@ -630,6 +637,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       appendEvent({
         id: newEventId("msg"),
         type: "agent.message",
+        stream: "implementation",
         meetingId,
         createdAt: nowIso(),
         agentId: "realtime-codex",
@@ -642,6 +650,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       appendEvent({
         id: newEventId("hand"),
         type: "agent.hand_raise",
+        stream: "implementation",
         meetingId,
         createdAt: nowIso(),
         agentId: "realtime-codex",
@@ -655,6 +664,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       const title = String(args.title || "").trim();
       if (!title) throw new Error("title is required");
       const status = asTaskStatus(args.status);
+      const stream = asMeetingStream(args.stream) || "conversation";
       const taskKey = optionalString(args.taskKey) || slugTaskKey(title);
       const taskClass = asTaskClass(args.taskClass);
       const previewUrl = optionalString(args.previewUrl);
@@ -663,6 +673,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       appendEvent({
         id: newEventId("task"),
         type: "agent.task",
+        stream,
         meetingId,
         createdAt: nowIso(),
         agentId: "realtime-codex",
@@ -678,6 +689,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
         appendEvent({
           id: newEventId("hand"),
           type: "agent.hand_raise",
+          stream,
           meetingId,
           createdAt: nowIso(),
           agentId: "realtime-codex",
@@ -736,6 +748,9 @@ function buildRealtimeInstructions(): string {
     "Most of the time you are a silent background listener, not an always-speaking chatbot.",
     "Speak naturally and keep spoken answers concise when explicitly granted the floor.",
     "The current meeting canvas and transcript are first-class context, not something to rediscover.",
+    "There are two streams in this system: conversation and implementation.",
+    "Conversation is the true branch for human discussion, live notes, diagrams, planning, and hand raises.",
+    "Implementation is the Codex execution branch with task lifecycle and result review.",
     "You have thirteen tools and should accurately describe them when asked.",
     "Available tools: read_meeting_context, read_repo_guide, list_artifacts, read_artifact, create_smart_artifact, raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
     "When you need to know what is currently on screen, what the current plan says, or what the humans are discussing, call read_meeting_context first instead of exploring the repo.",
@@ -743,6 +758,8 @@ function buildRealtimeInstructions(): string {
     "When you need older or parallel durable artifacts, use list_artifacts and read_artifact instead of exploratory shell work.",
     "When you want to create or update a durable artifact, prefer create_smart_artifact instead of shelling around for the script.",
     "In background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, and run_codex_task.",
+    "When you create a planning or capture task, use create_meeting_task with stream=conversation.",
+    "When you start or update Codex execution work, use create_meeting_task with stream=implementation.",
     "Do not speak automatically while in silent background mode unless the client explicitly grants you the floor.",
     "Do not say you need to go look up the current project plan if a current canvas document already exists. Read meeting context and work from that.",
     "run_codex_task is your primary tool for interacting with local Codex and doing real coding work in the repository.",
@@ -1011,6 +1028,10 @@ function asSurface(value: unknown): "status" | "canvas" {
 
 function asLifecycle(value: unknown): "draft" | "final" {
   return value === "draft" ? "draft" : "final";
+}
+
+function asMeetingStream(value: unknown): "conversation" | "implementation" | undefined {
+  return value === "conversation" || value === "implementation" ? value : undefined;
 }
 
 function asTaskStatus(value: unknown): "queued" | "working" | "blocked" | "done" | "failed" {
