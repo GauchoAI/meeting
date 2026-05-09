@@ -63,6 +63,7 @@ function App() {
   const [appearance, setAppearance] = useState(() => loadAppearance());
   const [menuOpen, setMenuOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [controlCenterOpen, setControlCenterOpen] = useState(false);
   const [renderSamples, setRenderSamples] = useState<RenderSample[]>([]);
   const [realtimeState, setRealtimeState] = useState<RealtimeState>("idle");
   const [realtimeResponseMode, setRealtimeResponseMode] = useState<RealtimeResponseMode>("silent");
@@ -161,6 +162,7 @@ function App() {
   const latestStatusMessage = statusMessages[0];
   const renderStats = summarizeRenderSamples(renderSamples);
   const terminalLines = [formatRenderStats(renderStats), ...events.slice(0, 80).reverse().map(formatTerminalEvent)];
+  const liveStatusMessages = statusMessages.slice(0, 8);
   const displayedStatus = realtimeDraftText.trim()
     ? {
         agentId: realtimeAgentId,
@@ -496,6 +498,10 @@ function App() {
           "Do not speak audio.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
           "If you have something useful, prefer silent actions: raise_meeting_hand, post_meeting_markdown, create_meeting_task, run_shell_command, or run_codex_task.",
+          "Maintain a living meeting artifact on the main canvas with post_meeting_markdown using surface=canvas.",
+          "Use the canvas artifact for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
+          "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",
+          "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
           "Use run_codex_task when the conversation implies real project planning or concrete coding follow-up.",
           "Keep any text response short."
         ].join("\n")
@@ -737,8 +743,25 @@ function App() {
         </div>
       </section>
 
-      {(activeHandRaises.length > 0 || taskEvents.length > 0 || transcriptEvents.length > 0) && (
-        <aside className="opsPanel" aria-live="polite">
+      <button
+        className={`controlCenterToggle${activeHandRaises.length ? " wantsAttention" : ""}${controlCenterOpen ? " open" : ""}`}
+        onClick={() => setControlCenterOpen((value) => !value)}
+        aria-expanded={controlCenterOpen}
+      >
+        <span className="controlCenterTitle">{activeHandRaises.length ? "Agent wants to speak" : "Agent control center"}</span>
+        <span className="controlCenterCounts">{taskEvents.length} tasks · {transcriptEvents.length} transcript</span>
+      </button>
+
+      {controlCenterOpen && (
+        <aside className="controlCenterPanel" aria-live="polite">
+          <div className="controlCenterHeader">
+            <div>
+              <strong>Realtime Agent</strong>
+              <p>{realtimeState === "connected" ? `Background listener · ${realtimeResponseMode}` : "Disconnected"}</p>
+            </div>
+            <button className="secondary" onClick={() => setControlCenterOpen(false)}>Close</button>
+          </div>
+
           {activeHandRaises.length > 0 && (
             <section className="opsSection">
               <div className="opsHeader">
@@ -766,58 +789,69 @@ function App() {
             </section>
           )}
 
-          {taskEvents.length > 0 && (
-            <section className="opsSection">
-              <div className="opsHeader">
-                <strong>Agent Tasks</strong>
-                <span>{taskEvents.length}</span>
-              </div>
-              <div className="opsList">
-                {taskEvents.map((event) => (
-                  <article key={event.id} className="opsCard taskCard">
-                    <div className="opsMeta">
-                      <span>{event.status}</span>
-                      <span>{event.taskClass || "conversation"}</span>
-                    </div>
-                    <p>{event.title}</p>
-                    {event.details && <pre>{event.details}</pre>}
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
+          <section className="opsSection">
+            <div className="opsHeader">
+              <strong>Tasks</strong>
+              <span>{taskEvents.length}</span>
+            </div>
+            <div className="opsList">
+              {taskEvents.length ? taskEvents.map((event) => (
+                <article key={event.id} className="opsCard taskCard">
+                  <div className="opsMeta">
+                    <span>{event.status}</span>
+                    <span>{event.taskClass || "conversation"}</span>
+                  </div>
+                  <p>{event.title}</p>
+                  {event.details && <pre>{event.details}</pre>}
+                </article>
+              )) : <article className="opsCard"><p>No declarative tasks yet.</p></article>}
+            </div>
+          </section>
 
-          {transcriptEvents.length > 0 && (
-            <section className="opsSection">
-              <div className="opsHeader">
-                <strong>Live Transcript</strong>
-                <span>persisted</span>
-              </div>
-              <div className="opsList transcriptList">
-                {transcriptEvents.map((event) => (
-                  <article key={event.id} className={`opsCard transcriptCard${event.type === "utterance.partial" ? " partial" : ""}`}>
-                    <div className="opsMeta">
-                      <span>{event.speakerLabel}</span>
-                      <span>{event.type === "utterance.partial" ? "partial" : "final"}</span>
-                    </div>
-                    <p>{event.text}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
-        </aside>
-      )}
+          <section className="opsSection">
+            <div className="opsHeader">
+              <strong>Agent Feed</strong>
+              <span>live</span>
+            </div>
+            <div className="opsList transcriptList">
+              {displayedStatus && (
+                <article className="opsCard statusCard">
+                  <div className="opsMeta">
+                    <span>{displayedStatus.agentId}</span>
+                    <span>{realtimeDraftText.trim() ? "draft" : "final"}</span>
+                  </div>
+                  <p>{displayedStatus.text}</p>
+                </article>
+              )}
+              {liveStatusMessages.map((event) => (
+                <article key={event.id} className="opsCard statusCard">
+                  <div className="opsMeta">
+                    <span>{event.agentId}</span>
+                    <span>{event.lifecycle || "final"}</span>
+                  </div>
+                  <p>{event.text}</p>
+                </article>
+              ))}
+            </div>
+          </section>
 
-      {displayedStatus && (
-        <aside className="conversationPanel" aria-live="polite">
-          <MarkdownDocument
-            agentId={displayedStatus.agentId}
-            text={displayedStatus.text}
-            createdAt={displayedStatus.createdAt}
-            documentId={"documentId" in displayedStatus ? displayedStatus.documentId : undefined}
-            expanded
-          />
+          <section className="opsSection">
+            <div className="opsHeader">
+              <strong>Transcript</strong>
+              <span>persisted</span>
+            </div>
+            <div className="opsList transcriptList">
+              {transcriptEvents.map((event) => (
+                <article key={event.id} className={`opsCard transcriptCard${event.type === "utterance.partial" ? " partial" : ""}`}>
+                  <div className="opsMeta">
+                    <span>{event.speakerLabel}</span>
+                    <span>{event.type === "utterance.partial" ? "partial" : "final"}</span>
+                  </div>
+                  <p>{event.text}</p>
+                </article>
+              ))}
+            </div>
+          </section>
         </aside>
       )}
 
