@@ -184,6 +184,18 @@ function App() {
       }
     : latestStatusMessage;
 
+  useEffect(() => {
+    if (activeHandRaises.length > 0) setControlCenterOpen(true);
+  }, [activeHandRaises.length]);
+
+  useEffect(() => {
+    const latestCanvasResult = canvasMessages.find((event) => event.documentId?.startsWith("task-result:"));
+    if (!latestCanvasResult) return;
+    if (selectedCanvasDocumentId === latestCanvasResult.documentId) return;
+    const matchingHandRaise = activeHandRaises.find((event) => event.requestedMode === "show");
+    if (matchingHandRaise) setSelectedCanvasDocumentId(latestCanvasResult.documentId || null);
+  }, [activeHandRaises, canvasMessages, selectedCanvasDocumentId]);
+
   async function joinMeeting() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     sessionStorage.setItem(autoJoinKey, "true");
