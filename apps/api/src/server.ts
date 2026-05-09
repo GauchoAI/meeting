@@ -526,11 +526,14 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "run_codex_task",
-        description: "Invoke the local Codex CLI to inspect, explain, or modify code in the allowed workspace. This is the main tool for multi-step coding work.",
+        description: "Queue an implementation task for pi-agent to run Codex in the allowed workspace. Use this for multi-step coding work that should keep the task lifecycle and hot-reload workflow.",
         parameters: {
           type: "object",
           properties: {
             prompt: { type: "string" },
+            title: { type: "string", description: "Short visible task title." },
+            taskKey: { type: "string", description: "Optional stable task key for lifecycle updates." },
+            sourceDocumentId: { type: "string", description: "Optional current canvas or artifact document id that motivated the task." },
             cwd: { type: "string", description: "Optional path relative to the allowed workspace root." }
           },
           required: ["prompt"],
@@ -756,8 +759,31 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       const args = asObject(input);
       const prompt = String(args.prompt || "");
       if (!prompt.trim()) throw new Error("prompt is required");
-      const cwd = resolveWorkspacePath(optionalString(args.cwd));
-      output = await runCodexTask(prompt, cwd);
+      const requestedCwd = optionalString(args.cwd);
+      const cwd = requestedCwd ? resolveWorkspacePath(requestedCwd) : repoRoot;
+      const title = optionalString(args.title) || implementationTitleFromPrompt(prompt);
+      const taskKey = optionalString(args.taskKey) || slugTaskKey(title);
+      const sourceDocumentId = optionalString(args.sourceDocumentId);
+      const implementationPrompt = [
+        `Requested working directory: ${cwd}`,
+        prompt.trim()
+      ].join("\n\n");
+      appendEvent({
+        id: newEventId("task"),
+        type: "agent.task",
+        stream: "implementation",
+        meetingId,
+        createdAt: nowIso(),
+        agentId: realtimeAgentId,
+        taskKey,
+        title,
+        status: "queued",
+        taskClass: "code.change",
+        details: summarizePromptForTask(prompt),
+        implementationPrompt,
+        sourceDocumentId
+      } as MeetingEvent);
+      output = { ok: true, delegatedTo: "pi-agent", taskKey, title, status: "queued" };
     } else {
       throw new Error(`unknown tool: ${name}`);
     }
@@ -787,24 +813,25 @@ function buildRealtimeInstructions(): string {
     "In background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, and run_codex_task.",
     "When you create a planning or capture task, use create_meeting_task with stream=conversation.",
     "When you start or update Codex execution work, use create_meeting_task with stream=implementation.",
-    "Prefer creating implementation tasks over calling run_codex_task directly from the conversation agent.",
-    "Use run_codex_task directly only when the user explicitly asks you to work immediately or when no queued implementation lifecycle is appropriate.",
+    "run_codex_task queues implementation work for pi-agent; it does not run Codex inline inside your conversation turn.",
+    "Prefer creating implementation tasks first; use run_codex_task only when the task is ready for pi-agent execution.",
     "Do not speak automatically while in silent background mode unless the client explicitly grants you the floor.",
     "Do not say you need to go look up the current project plan if a current canvas document already exists. Read meeting context and work from that.",
-    "run_codex_task is your primary tool for interacting with local Codex and doing real coding work in the repository.",
+    "pi-agent is the implementation brain that invokes local Codex and preserves hot reload/self-improvement behavior.",
+    "run_codex_task is your primary tool for delegating real coding work in the repository to pi-agent.",
     "run_shell_command is for quick inspection and lightweight terminal tasks.",
     "Maintain a stable living canvas document with post_meeting_markdown using documentId=realtime-live-canvas.",
     "For completed or milestone work, use publish_task_result to put a polished result on the main canvas before or while raising your hand.",
     "read_rendered_html and write_rendered_html are specifically for the isolated browser preview file and are not the main path for improving the app.",
-    "You have tool access to inspect the local workspace, run Codex, and write a complete index.html preview that renders on screen.",
+    "You have tool access to inspect the local workspace, queue Codex work through pi-agent, and write a complete index.html preview that renders on screen.",
     "Before overwriting HTML, read the current HTML first unless you are creating it from scratch.",
     "When asked to build or modify the live preview, prefer writing a full standalone HTML document with inline CSS and JS unless external assets are necessary.",
-    "When the user asks to improve the existing Meeting system or UI, prefer run_codex_task to edit the real app files so the dev server hot reloads the actual interface.",
+    "When the user asks to improve the existing Meeting system or UI, prefer run_codex_task so pi-agent edits the real app files and the dev server hot reloads the actual interface.",
     `The editable preview file is ${realtimeArtifactPath}.`,
     `The main application repository root is ${repoRoot}.`,
     `The allowed workspace root for shell and Codex work is ${workspaceRoot}.`,
-    "When the user asks whether you can work with Codex, answer yes and mention run_codex_task explicitly.",
-    "Use run_codex_task for larger code edits, codebase analysis, or multi-step repo work.",
+    "When the user asks whether you can work with Codex, answer yes and mention that run_codex_task queues work through pi-agent.",
+    "Use run_codex_task for larger code edits, codebase analysis, or multi-step repo work that should enter the implementation lifecycle.",
     "Startup context snapshot follows. Treat it as already-known context and only refresh it with read_meeting_context when needed.",
     startupContext,
     "If you change the preview, tell the user what changed and what to look at on screen."
@@ -860,7 +887,7 @@ function repoGuideText(): string {
     "- artifacts/: durable smart-down artifacts",
     "",
     "Primary strategy",
-    "- If the user asks to improve the existing app or UI, prefer run_codex_task against the real repository files so Vite hot reload updates the actual interface.",
+    "- If the user asks to improve the existing app or UI, prefer run_codex_task so pi-agent works against the real repository files and Vite hot reload updates the actual interface.",
     "- Use run_shell_command for quick inspection such as rg, ls, cat, git status, pnpm build, or running a script once you know the exact command.",
     "- Use read_rendered_html/write_rendered_html only for the isolated preview file, not as the default path for app improvements.",
     "",
@@ -1202,7 +1229,7 @@ async function processImplementationTask(taskKey: string, workingDir: string, ta
     stream: "implementation",
     meetingId,
     createdAt: nowIso(),
-        agentId: "pi-agent",
+    agentId: "pi-agent",
     taskKey,
     title,
     status: "working",
@@ -1351,6 +1378,16 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function implementationTitleFromPrompt(prompt: string): string {
+  const firstLine = prompt.split("\n").map((line) => line.trim()).find(Boolean) || "Codex implementation task";
+  return firstLine.replace(/^#+\s*/, "").slice(0, 90) || "Codex implementation task";
+}
+
+function summarizePromptForTask(prompt: string): string {
+  const trimmed = prompt.trim();
+  return trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}\n\n...` : trimmed;
 }
 
 function asRequestedMode(value: unknown): "speak" | "show" | "work" | "review" {

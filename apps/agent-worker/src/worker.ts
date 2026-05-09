@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { newEventId, nowIso, type AgentTaskEvent, type MeetingEvent } from "@meeting/protocol";
 
 const api = process.env.MEETING_API_URL || "http://localhost:4317";
-const root = resolve(process.cwd(), "../..");
+const root = resolveRepoRoot();
 const meetingId = process.env.MEETING_ID || "local-demo";
 const agentId = process.env.MEETING_AGENT_ID || "pi-agent";
 const backend = process.env.MEETING_AGENT_BACKEND || "codex";
@@ -230,4 +230,9 @@ function normalizeTaskClass(value: unknown): AgentTaskEvent["taskClass"] {
     || value === "conversation"
     ? value
     : undefined;
+}
+
+function resolveRepoRoot(): string {
+  const cwd = process.cwd();
+  return cwd.replace(/\\/g, "/").endsWith("/apps/agent-worker") ? resolve(cwd, "../..") : cwd;
 }

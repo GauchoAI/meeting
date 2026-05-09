@@ -69,7 +69,8 @@ What it does:
 - opens a WebRTC audio call to `gpt-realtime-2`;
 - keeps your local camera visible in the page, but does not send video to the model;
 - exposes browser-triggered tools that can run short shell commands in the
-  workspace, invoke local `codex exec`, and rewrite `.meeting/realtime/index.html`;
+  workspace, queue `pi-agent` implementation work, and rewrite
+  `.meeting/realtime/index.html`;
 - reloads the iframe preview whenever the agent publishes new HTML.
 
 This is intended as a local demo. The shell bridge has basic blocking for
@@ -87,7 +88,10 @@ Behavior:
 - room speech is transcribed and persisted into `.meeting/events.jsonl` and
   `.meeting/session.md`;
 - the agent can silently react by raising a hand, posting Markdown, creating
-  task cards, inspecting the repo, or invoking local Codex;
+  task cards, inspecting the repo, or queueing implementation work for
+  `pi-agent`;
+- `pi-agent` consumes `.meeting/pipeline/implementation/tasks/queued/*` and
+  invokes local Codex, keeping implementation work in a visible lifecycle;
 - the host can explicitly grant the floor with **Let agent speak**;
 - after speaking, the agent returns to silent listening mode.
 

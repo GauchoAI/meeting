@@ -50,7 +50,7 @@ const availableRealtimeTools = [
   "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI, including the living canvas document",
   "publish_task_result: publish a polished completed-task result on the main canvas before review",
   "create_meeting_task: create visible task cards for proposed work",
-  "run_codex_task: inspect or modify the actual app/repo with local Codex",
+  "run_codex_task: queue implementation work through pi-agent, which invokes local Codex",
   "run_shell_command: run short terminal commands in the allowed workspace",
   "read_rendered_html: read the isolated preview artifact if needed",
   "write_rendered_html: update the isolated preview artifact if explicitly requested"
@@ -580,10 +580,11 @@ function App() {
           "Use create_meeting_task with stream=conversation for planning-side tasks.",
           "Use create_meeting_task with stream=implementation for Codex work or execution lifecycle.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",
-          "Prefer implementation tasks over calling run_codex_task directly from the conversation agent.",
+          "run_codex_task queues implementation work through pi-agent; it does not run Codex inline inside this conversation turn.",
+          "Prefer implementation tasks first, and use run_codex_task only when a task is ready for pi-agent execution.",
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
-          "Use run_codex_task when the conversation implies real project planning or concrete coding follow-up.",
+          "Use run_codex_task when the conversation implies concrete coding follow-up that should enter the pi-agent implementation lifecycle.",
           "Keep any text response to at most one short sentence."
         ].join("\n")
       }
