@@ -153,7 +153,12 @@ function App() {
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
   const handRaiseEvents = events.filter((event): event is AgentHandRaiseEvent => event.type === "agent.hand_raise" && event.agentId === realtimeAgentId);
   const activeHandRaises = handRaiseEvents.filter((event) => !dismissedHandIds.includes(event.id)).slice(0, 6);
-  const taskEvents = dedupeTasks(events.filter((event): event is AgentTaskEvent => event.type === "agent.task" && event.agentId === realtimeAgentId)).slice(0, 6);
+  const taskEvents = dedupeTasks(events.filter((event): event is AgentTaskEvent => event.type === "agent.task" && event.agentId === realtimeAgentId)).slice(0, 8);
+  const taskColumns = {
+    queued: taskEvents.filter((event) => event.status === "queued" || event.status === "blocked"),
+    working: taskEvents.filter((event) => event.status === "working"),
+    done: taskEvents.filter((event) => event.status === "done" || event.status === "failed")
+  };
   const transcriptEvents = events.filter((event): event is UtteranceEvent | PartialUtteranceEvent => event.type === "utterance.final" || event.type === "utterance.partial").slice(0, 12);
   const canvasMessages = messages.filter(isCanvasMessage);
   const statusMessages = messages.filter((event) => !isCanvasMessage(event));
@@ -794,17 +799,24 @@ function App() {
               <strong>Tasks</strong>
               <span>{taskEvents.length}</span>
             </div>
-            <div className="opsList">
-              {taskEvents.length ? taskEvents.map((event) => (
-                <article key={event.id} className="opsCard taskCard">
-                  <div className="opsMeta">
-                    <span>{event.status}</span>
-                    <span>{event.taskClass || "conversation"}</span>
+            <div className="taskColumns">
+              {(["queued", "working", "done"] as const).map((column) => (
+                <div key={column} className="taskColumn">
+                  <div className="taskColumnHeader">{column === "queued" ? "Queued" : column === "working" ? "Working" : "Ready / Done"}</div>
+                  <div className="opsList compact">
+                    {taskColumns[column].length ? taskColumns[column].map((event) => (
+                      <article key={event.id} className={`opsCard taskCard status-${event.status}`}>
+                        <div className="opsMeta">
+                          <span>{event.status}</span>
+                          <span>{event.taskClass || "conversation"}</span>
+                        </div>
+                        <p>{event.title}</p>
+                        {event.details && <pre>{event.details}</pre>}
+                      </article>
+                    )) : <article className="opsCard emptyTaskCard"><p>No items</p></article>}
                   </div>
-                  <p>{event.title}</p>
-                  {event.details && <pre>{event.details}</pre>}
-                </article>
-              )) : <article className="opsCard"><p>No declarative tasks yet.</p></article>}
+                </div>
+              ))}
             </div>
           </section>
 
@@ -2060,15 +2072,27 @@ async function postMeetingEvent(event: MeetingEvent): Promise<void> {
 }
 
 function dedupeTasks(events: AgentTaskEvent[]): AgentTaskEvent[] {
-  const seen = new Set<string>();
-  const unique: AgentTaskEvent[] = [];
+  const latestByKey = new Map<string, AgentTaskEvent>();
   for (const event of events) {
-    const key = `${event.title}::${event.taskClass || ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(event);
+    const key = event.taskKey || `${event.title}::${event.taskClass || ""}`;
+    if (!latestByKey.has(key)) latestByKey.set(key, event);
   }
-  return unique;
+  return [...latestByKey.values()].sort((a, b) => {
+    const order = statusRank(a.status) - statusRank(b.status);
+    if (order !== 0) return order;
+    return Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  });
+}
+
+function statusRank(status: AgentTaskEvent["status"]): number {
+  switch (status) {
+    case "working": return 0;
+    case "queued": return 1;
+    case "blocked": return 2;
+    case "done": return 3;
+    case "failed": return 4;
+    default: return 10;
+  }
 }
 
 function formatTerminalEvent(event: MeetingEvent): string {

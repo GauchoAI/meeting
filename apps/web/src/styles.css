@@ -351,6 +351,25 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
   gap: 10px;
   padding: 12px;
 }
+.opsList.compact {
+  padding: 0;
+}
+.taskColumns {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+.taskColumn {
+  display: grid;
+  gap: 8px;
+}
+.taskColumnHeader {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .opsCard {
   background: color-mix(in srgb, var(--canvas) 86%, var(--panel2));
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
@@ -395,6 +414,16 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0; color: var(-
 }
 .taskCard {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+}
+.taskCard.status-done {
+  border-color: color-mix(in srgb, var(--accent2) 56%, var(--line));
+}
+.taskCard.status-failed,
+.taskCard.status-blocked {
+  border-color: color-mix(in srgb, var(--bad) 48%, var(--line));
+}
+.emptyTaskCard {
+  opacity: 0.7;
 }
 .transcriptList {
   max-height: 260px;

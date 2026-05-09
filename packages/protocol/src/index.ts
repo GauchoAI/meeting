@@ -82,6 +82,7 @@ export interface AgentTraceEvent extends BaseEvent {
 export interface AgentTaskEvent extends BaseEvent {
   type: "agent.task";
   agentId: AgentId;
+  taskKey?: string;
   status: "queued" | "working" | "blocked" | "done" | "failed";
   title: string;
   taskClass?: MeetingTaskClass;

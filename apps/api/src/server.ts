@@ -364,10 +364,11 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "create_meeting_task",
-        description: "Create or update a visible task card in the meeting UI for proposed work.",
+        description: "Create or update a visible task card in the meeting UI for proposed work. Reuse the same taskKey when updating the lifecycle of an existing task.",
         parameters: {
           type: "object",
           properties: {
+            taskKey: { type: "string" },
             title: { type: "string" },
             status: { type: "string", enum: ["queued", "working", "blocked", "done", "failed"] },
             taskClass: { type: "string", enum: ["artifact.render", "artifact.edit", "code.change", "research.explore", "critique.review", "conversation"] },
@@ -509,20 +510,40 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       const title = String(args.title || "").trim();
       if (!title) throw new Error("title is required");
       const status = asTaskStatus(args.status);
+      const taskKey = optionalString(args.taskKey) || slugTaskKey(title);
+      const taskClass = asTaskClass(args.taskClass);
+      const previewUrl = optionalString(args.previewUrl);
+      const details = optionalString(args.details);
+      const branch = optionalString(args.branch);
       appendEvent({
         id: newEventId("task"),
         type: "agent.task",
         meetingId,
         createdAt: nowIso(),
         agentId: "realtime-codex",
+        taskKey,
         title,
         status,
-        taskClass: asTaskClass(args.taskClass),
-        branch: optionalString(args.branch),
-        previewUrl: optionalString(args.previewUrl),
-        details: optionalString(args.details)
+        taskClass,
+        branch,
+        previewUrl,
+        details
       } as MeetingEvent);
-      output = { ok: true, title, status };
+      if (status === "done" || status === "failed") {
+        appendEvent({
+          id: newEventId("hand"),
+          type: "agent.hand_raise",
+          meetingId,
+          createdAt: nowIso(),
+          agentId: "realtime-codex",
+          reason: status === "done"
+            ? `I completed task "${title}" and can show the result${previewUrl ? ` at ${previewUrl}` : ""}.`
+            : `Task "${title}" failed or is blocked and needs review.`,
+          confidence: status === "done" ? 0.92 : 0.88,
+          requestedMode: status === "done" ? "show" : "review"
+        } as MeetingEvent);
+      }
+      output = { ok: true, taskKey, title, status };
     } else if (name === "read_rendered_html") {
       ensureRealtimeArtifact();
       output = {
@@ -711,6 +732,10 @@ function asTaskClass(value: unknown): "artifact.render" | "artifact.edit" | "cod
     || value === "conversation"
     ? value
     : undefined;
+}
+
+function slugTaskKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || newEventId("taskkey");
 }
 
 function resolveWorkspacePath(requested: string | undefined): string {
