@@ -1,5 +1,5 @@
-import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, extname, normalize, resolve, sep } from "node:path";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
 import { newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
@@ -16,13 +16,25 @@ const eventLogPath = resolveRepoPath(process.env.MEETING_EVENT_LOG || ".meeting/
 const sessionLogPath = resolveRepoPath(".meeting/session.md");
 const realtimeArtifactRoot = resolveRepoPath(".meeting/realtime");
 const realtimeArtifactPath = resolve(realtimeArtifactRoot, "index.html");
+const pipelineRoot = resolveRepoPath(".meeting/pipeline");
+const conversationPipelineRoot = resolve(pipelineRoot, "conversation");
+const implementationPipelineRoot = resolve(pipelineRoot, "implementation");
+const implementationTaskRoot = resolve(implementationPipelineRoot, "tasks");
+const implementationTaskQueuedRoot = resolve(implementationTaskRoot, "queued");
+const implementationTaskWorkingRoot = resolve(implementationTaskRoot, "working");
+const implementationTaskDoneRoot = resolve(implementationTaskRoot, "done");
+const implementationTaskFailedRoot = resolve(implementationTaskRoot, "failed");
 const repoRoot = resolveRepoPath(".");
 const workspaceRoot = resolveRepoPath(process.env.MEETING_WORKSPACE_ROOT || ".");
 const events: MeetingEvent[] = [];
 const sseClients = new Set<ServerResponse>();
+const realtimeAgentId = "realtime-codex";
+const implementationWorkerAgentId = "implementation-worker";
+let implementationWorkerBusy = false;
 
 loadEventLog();
 if (!events.length) seedSystemEvent();
+ensurePipelineLayout();
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -110,6 +122,10 @@ server.listen(port, () => {
   console.log(`[meeting-api] http://localhost:${port}`);
 });
 
+setInterval(() => {
+  void pumpImplementationQueue();
+}, 1500);
+
 function appendTrace(channel: string, text: string, details?: unknown): void {
   appendEvent({
     id: newEventId("trace"),
@@ -153,6 +169,7 @@ function persistEvent(event: MeetingEvent): void {
   mkdirSync(dirname(eventLogPath), { recursive: true });
   appendFileSync(eventLogPath, `${JSON.stringify(event)}\n`);
   appendSessionEvent(event);
+  mirrorEventToPipeline(event);
 }
 
 function appendSessionEvent(event: MeetingEvent): void {
@@ -459,7 +476,9 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
             taskClass: { type: "string", enum: ["artifact.render", "artifact.edit", "code.change", "research.explore", "critique.review", "conversation"] },
             branch: { type: "string" },
             previewUrl: { type: "string" },
-            details: { type: "string" }
+            details: { type: "string" },
+            implementationPrompt: { type: "string" },
+            sourceDocumentId: { type: "string" }
           },
           required: ["title"],
           additionalProperties: false
@@ -670,20 +689,24 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       const previewUrl = optionalString(args.previewUrl);
       const details = optionalString(args.details);
       const branch = optionalString(args.branch);
+      const implementationPrompt = optionalString(args.implementationPrompt);
+      const sourceDocumentId = optionalString(args.sourceDocumentId);
       appendEvent({
         id: newEventId("task"),
         type: "agent.task",
         stream,
         meetingId,
         createdAt: nowIso(),
-        agentId: "realtime-codex",
+        agentId: realtimeAgentId,
         taskKey,
         title,
         status,
         taskClass,
         branch,
         previewUrl,
-        details
+        details,
+        implementationPrompt,
+        sourceDocumentId
       } as MeetingEvent);
       if (status === "done" || status === "failed") {
         appendEvent({
@@ -760,6 +783,8 @@ function buildRealtimeInstructions(): string {
     "In background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, create_smart_artifact, raise_meeting_hand, run_shell_command, and run_codex_task.",
     "When you create a planning or capture task, use create_meeting_task with stream=conversation.",
     "When you start or update Codex execution work, use create_meeting_task with stream=implementation.",
+    "Prefer creating implementation tasks over calling run_codex_task directly from the conversation agent.",
+    "Use run_codex_task directly only when the user explicitly asks you to work immediately or when no queued implementation lifecycle is appropriate.",
     "Do not speak automatically while in silent background mode unless the client explicitly grants you the floor.",
     "Do not say you need to go look up the current project plan if a current canvas document already exists. Read meeting context and work from that.",
     "run_codex_task is your primary tool for interacting with local Codex and doing real coding work in the repository.",
@@ -903,6 +928,7 @@ function readMeetingContext(): unknown {
     } : null,
     canvasDocuments: dedupeCanvasDocuments(canvasMessages).slice(0, 12),
     tasks,
+    implementationQueue: readImplementationQueueState(),
     raisedHands,
     transcript
   };
@@ -1007,6 +1033,284 @@ function readArtifactsIndex(): { updatedAt?: string; artifacts: Array<Record<str
 function firstMarkdownHeading(text: string): string | undefined {
   const match = text.match(/^#\s+(.+)$/m);
   return match?.[1]?.trim();
+}
+
+function ensurePipelineLayout(): void {
+  for (const dir of [
+    conversationPipelineRoot,
+    implementationPipelineRoot,
+    resolve(conversationPipelineRoot, "notes"),
+    resolve(conversationPipelineRoot, "transcript"),
+    resolve(conversationPipelineRoot, "hands"),
+    implementationTaskQueuedRoot,
+    implementationTaskWorkingRoot,
+    implementationTaskDoneRoot,
+    implementationTaskFailedRoot,
+    resolve(implementationPipelineRoot, "results")
+  ]) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function mirrorEventToPipeline(event: MeetingEvent): void {
+  ensurePipelineLayout();
+  const stream = "stream" in event && event.stream ? event.stream : inferEventStream(event);
+  if (event.type === "utterance.final" || event.type === "utterance.partial") {
+    const transcriptLog = resolve(conversationPipelineRoot, "transcript", "conversation.jsonl");
+    appendFileSync(transcriptLog, `${JSON.stringify(event)}\n`);
+    if (event.type === "utterance.final") {
+      appendFileSync(resolve(conversationPipelineRoot, "transcript", "conversation.md"), `- ${event.speakerLabel}: ${event.text}\n`);
+    }
+    return;
+  }
+  if (event.type === "agent.message" && stream === "conversation") {
+    appendFileSync(resolve(conversationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
+    if (event.surface === "canvas") {
+      const documentId = event.documentId || "live-canvas";
+      const notePath = resolve(conversationPipelineRoot, "notes", `${safeFileComponent(documentId)}.md`);
+      writeFileSync(notePath, event.text.endsWith("\n") ? event.text : `${event.text}\n`, "utf8");
+      if (documentId === "realtime-live-canvas") {
+        writeFileSync(resolve(conversationPipelineRoot, "notes", "current.md"), event.text.endsWith("\n") ? event.text : `${event.text}\n`, "utf8");
+      }
+    }
+    return;
+  }
+  if (event.type === "agent.hand_raise" && stream === "conversation") {
+    appendFileSync(resolve(conversationPipelineRoot, "hands", "raised.jsonl"), `${JSON.stringify(event)}\n`);
+    return;
+  }
+  if (event.type === "agent.task") {
+    syncTaskEventToSpool(event as MeetingEvent & { taskKey?: string; title: string; status: string; stream?: string });
+    return;
+  }
+  if ((event.type === "agent.message" || event.type === "agent.trace" || event.type === "agent.hand_raise") && stream === "implementation") {
+    appendFileSync(resolve(implementationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
+  }
+}
+
+function syncTaskEventToSpool(event: MeetingEvent & { taskKey?: string; title: string; status: string; stream?: string }): void {
+  if ((event.stream || "conversation") !== "implementation") {
+    appendFileSync(resolve(conversationPipelineRoot, "tasks.jsonl"), `${JSON.stringify(event)}\n`);
+    return;
+  }
+  const taskKey = event.taskKey || slugTaskKey(event.title);
+  const stateDir = implementationStateDir(event.status);
+  const targetDir = resolve(stateDir, taskKey);
+  const currentDir = findImplementationTaskDir(taskKey);
+  if (currentDir && currentDir !== targetDir) {
+    mkdirSync(dirname(targetDir), { recursive: true });
+    rmSync(targetDir, { recursive: true, force: true });
+    renameSync(currentDir, targetDir);
+  } else {
+    mkdirSync(targetDir, { recursive: true });
+  }
+  const taskPath = resolve(targetDir, "task.json");
+  const nextTask = {
+    taskKey,
+    mirroredFromEventId: event.id,
+    mirroredAt: nowIso(),
+    ...readJsonFile(taskPath),
+    ...event
+  };
+  writeFileSync(taskPath, `${JSON.stringify(nextTask, null, 2)}\n`, "utf8");
+  const details = (event as { details?: string }).details;
+  if (typeof details === "string" && details.trim()) {
+    writeFileSync(resolve(targetDir, "input.md"), details.endsWith("\n") ? details : `${details}\n`, "utf8");
+  }
+}
+
+function implementationStateDir(status: string): string {
+  switch (status) {
+    case "working": return implementationTaskWorkingRoot;
+    case "done": return implementationTaskDoneRoot;
+    case "failed":
+    case "blocked": return implementationTaskFailedRoot;
+    case "queued":
+    default: return implementationTaskQueuedRoot;
+  }
+}
+
+function findImplementationTaskDir(taskKey: string): string | undefined {
+  for (const root of [implementationTaskQueuedRoot, implementationTaskWorkingRoot, implementationTaskDoneRoot, implementationTaskFailedRoot]) {
+    const candidate = resolve(root, taskKey);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+async function pumpImplementationQueue(): Promise<void> {
+  if (implementationWorkerBusy) return;
+  implementationWorkerBusy = true;
+  try {
+    const candidates = readdirSync(implementationTaskQueuedRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    const nextKey = candidates[0];
+    if (!nextKey) return;
+    const queuedDir = resolve(implementationTaskQueuedRoot, nextKey);
+    const workingDir = resolve(implementationTaskWorkingRoot, nextKey);
+    rmSync(workingDir, { recursive: true, force: true });
+    renameSync(queuedDir, workingDir);
+    const task = readJsonFile(resolve(workingDir, "task.json")) as Record<string, unknown>;
+    await processImplementationTask(nextKey, workingDir, task);
+  } finally {
+    implementationWorkerBusy = false;
+  }
+}
+
+async function processImplementationTask(taskKey: string, workingDir: string, task: Record<string, unknown>): Promise<void> {
+  const title = String(task.title || taskKey);
+  const details = typeof task.details === "string" ? task.details : "";
+  const prompt = typeof task.implementationPrompt === "string" && task.implementationPrompt.trim()
+    ? task.implementationPrompt
+    : buildImplementationPrompt(title, details, task);
+  appendEvent({
+    id: newEventId("task"),
+    type: "agent.task",
+    stream: "implementation",
+    meetingId,
+    createdAt: nowIso(),
+    agentId: implementationWorkerAgentId,
+    taskKey,
+    title,
+    status: "working",
+    taskClass: asTaskClass(task.taskClass),
+    details
+  } as MeetingEvent);
+  writeFileSync(resolve(workingDir, "worker.json"), `${JSON.stringify({ startedAt: nowIso(), prompt }, null, 2)}\n`, "utf8");
+  const result = await runCodexTask(prompt, repoRoot) as { ok?: boolean; stdout?: string; stderr?: string; code?: number | null };
+  const summary = summarizeImplementationResult(result);
+  writeFileSync(resolve(workingDir, "result.md"), summary.endsWith("\n") ? summary : `${summary}\n`, "utf8");
+  const artifact = await createSmartArtifact({
+    kind: "implementation",
+    slug: taskKey,
+    title,
+    summary: `Implementation worker output for ${title}`,
+    body: summary,
+    tags: "meeting,implementation,codex"
+  }) as { path?: string };
+  const status = result.ok ? "done" : "failed";
+  const finalDir = resolve(implementationStateDir(status), taskKey);
+  rmSync(finalDir, { recursive: true, force: true });
+  renameSync(workingDir, finalDir);
+  const finalTask = {
+    ...task,
+    taskKey,
+    status,
+    resultSummary: summary,
+    artifactPath: artifact.path,
+    completedAt: nowIso()
+  };
+  writeFileSync(resolve(finalDir, "task.json"), `${JSON.stringify(finalTask, null, 2)}\n`, "utf8");
+  appendEvent({
+    id: newEventId("task"),
+    type: "agent.task",
+    stream: "implementation",
+    meetingId,
+    createdAt: nowIso(),
+    agentId: implementationWorkerAgentId,
+    taskKey,
+    title,
+    status,
+    taskClass: asTaskClass(task.taskClass),
+    details: details || summary,
+    previewUrl: artifact.path
+  } as MeetingEvent);
+  if (result.ok) {
+    appendEvent({
+      id: newEventId("msg"),
+      type: "agent.message",
+      stream: "implementation",
+      meetingId,
+      createdAt: nowIso(),
+      agentId: implementationWorkerAgentId,
+      format: "markdown",
+      surface: "status",
+      lifecycle: "final",
+      text: `Implementation task completed: **${title}**${artifact.path ? `\n\nArtifact: \`${artifact.path}\`` : ""}`
+    } as MeetingEvent);
+    appendEvent({
+      id: newEventId("msg"),
+      type: "agent.message",
+      stream: "implementation",
+      meetingId,
+      createdAt: nowIso(),
+      agentId: implementationWorkerAgentId,
+      format: "markdown",
+      surface: "canvas",
+      lifecycle: "final",
+      documentId: `task-result:${taskKey}`,
+      text: `# ${title}\n\n${summary}${artifact.path ? `\n\nArtifact path: \`${artifact.path}\`` : ""}`
+    } as MeetingEvent);
+    appendEvent({
+      id: newEventId("hand"),
+      type: "agent.hand_raise",
+      stream: "conversation",
+      meetingId,
+      createdAt: nowIso(),
+      agentId: realtimeAgentId,
+      reason: `Implementation worker completed "${title}" and there is a result ready to show on screen.`,
+      confidence: 0.94,
+      requestedMode: "show"
+    } as MeetingEvent);
+  }
+}
+
+function buildImplementationPrompt(title: string, details: string, task: Record<string, unknown>): string {
+  const sourceDocumentId = typeof task.sourceDocumentId === "string" ? task.sourceDocumentId : "";
+  return [
+    `Implementation task: ${title}`,
+    details ? `Details:\n${details}` : "",
+    sourceDocumentId ? `Source document: ${sourceDocumentId}` : "",
+    "Work in the current repository.",
+    "Make the appropriate code or content changes.",
+    "Return a concise summary of what changed, verification performed, and any remaining limitations."
+  ].filter(Boolean).join("\n\n");
+}
+
+function summarizeImplementationResult(result: { ok?: boolean; stdout?: string; stderr?: string; code?: number | null }): string {
+  return [
+    `## Outcome`,
+    result.ok ? "Completed successfully." : `Failed with code ${result.code ?? "unknown"}.`,
+    "",
+    result.stdout ? `## Codex summary\n\n${result.stdout}` : "",
+    result.stderr ? `## Stderr\n\n\`\`\`text\n${result.stderr}\n\`\`\`` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function readJsonFile(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function inferEventStream(event: MeetingEvent): "conversation" | "implementation" {
+  if ("stream" in event && (event.stream === "conversation" || event.stream === "implementation")) return event.stream;
+  if (event.type === "agent.task") return "conversation";
+  if (event.type === "agent.message" && event.documentId?.startsWith("task-result:")) return "implementation";
+  return "conversation";
+}
+
+function safeFileComponent(value: string): string {
+  return value.replace(/[\\/:\s]+/g, "-").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 120) || "document";
+}
+
+function readImplementationQueueState(): Record<string, unknown> {
+  return {
+    queued: listTaskDirs(implementationTaskQueuedRoot),
+    working: listTaskDirs(implementationTaskWorkingRoot),
+    done: listTaskDirs(implementationTaskDoneRoot).slice(0, 10),
+    failed: listTaskDirs(implementationTaskFailedRoot).slice(0, 10)
+  };
+}
+
+function listTaskDirs(root: string): string[] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 }
 
 function asObject(value: unknown): Record<string, unknown> {

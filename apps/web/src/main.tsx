@@ -561,6 +561,7 @@ function App() {
           "Use create_meeting_task with stream=conversation for planning-side tasks.",
           "Use create_meeting_task with stream=implementation for Codex work or execution lifecycle.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",
+          "Prefer implementation tasks over calling run_codex_task directly from the conversation agent.",
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
           "Use run_codex_task when the conversation implies real project planning or concrete coding follow-up.",

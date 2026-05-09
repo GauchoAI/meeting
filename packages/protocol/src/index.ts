@@ -98,6 +98,8 @@ export interface AgentTaskEvent extends BaseEvent {
   branch?: string;
   previewUrl?: string;
   details?: string;
+  implementationPrompt?: string;
+  sourceDocumentId?: string;
 }
 
 export interface RepositoryContextEvent extends BaseEvent {
