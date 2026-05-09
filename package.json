@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --parallel --filter @meeting/api --filter @meeting/web dev",
+    "dev": "pnpm --parallel --filter @meeting/api --filter @meeting/web --filter @meeting/agent-worker dev",
     "dev:api": "pnpm --filter @meeting/api dev",
     "dev:web": "pnpm --filter @meeting/web dev",
     "dev:agent": "pnpm --filter @meeting/agent-worker dev",

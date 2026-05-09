@@ -252,6 +252,7 @@ function App() {
       channel.addEventListener("open", () => {
         setRealtimeState("connected");
         configureRealtimeSession();
+        requestBootstrapContextSync();
         void postMeetingEvent({
           id: newEventId("msg"),
           type: "agent.message",
@@ -346,6 +347,23 @@ function App() {
             }
           }
         }
+      }
+    });
+  }
+
+  function requestBootstrapContextSync() {
+    pendingResponseModeRef.current = "silent";
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: ["text"],
+        instructions: [
+          "Bootstrap silently.",
+          "Call read_meeting_context immediately and internalize the current canvas, transcript, tasks, and implementation queue.",
+          "Do not explore the repo to learn the current project status.",
+          "Do not speak audio.",
+          "If there is nothing urgent after syncing, respond with exactly NO_ACTION."
+        ].join("\n")
       }
     });
   }
@@ -509,6 +527,7 @@ function App() {
           "The host granted you the floor.",
           reason ? `Your current raised-hand reason is: ${reason}` : "Speak about the most useful proposal or issue you detected recently.",
           "Speak concisely and only about your current proposal or the most useful thing you noticed in the recent conversation.",
+          "Keep it to at most two short sentences unless the user explicitly asks for more.",
           "If you have no meaningful contribution, say so briefly."
         ].join("\n")
       }
@@ -565,7 +584,7 @@ function App() {
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
           "Use run_codex_task when the conversation implies real project planning or concrete coding follow-up.",
-          "Keep any text response short."
+          "Keep any text response to at most one short sentence."
         ].join("\n")
       }
     });

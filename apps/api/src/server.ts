@@ -26,10 +26,10 @@ const implementationTaskDoneRoot = resolve(implementationTaskRoot, "done");
 const implementationTaskFailedRoot = resolve(implementationTaskRoot, "failed");
 const repoRoot = resolveRepoPath(".");
 const workspaceRoot = resolveRepoPath(process.env.MEETING_WORKSPACE_ROOT || ".");
+const implementationBackend = process.env.MEETING_IMPLEMENTATION_BACKEND || "pi-agent";
 const events: MeetingEvent[] = [];
 const sseClients = new Set<ServerResponse>();
 const realtimeAgentId = "realtime-codex";
-const implementationWorkerAgentId = "implementation-worker";
 let implementationWorkerBusy = false;
 
 loadEventLog();
@@ -122,9 +122,11 @@ server.listen(port, () => {
   console.log(`[meeting-api] http://localhost:${port}`);
 });
 
-setInterval(() => {
-  void pumpImplementationQueue();
-}, 1500);
+if (implementationBackend === "api") {
+  setInterval(() => {
+    void pumpImplementationQueue();
+  }, 1500);
+}
 
 function appendTrace(channel: string, text: string, details?: unknown): void {
   appendEvent({
@@ -766,10 +768,12 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
 }
 
 function buildRealtimeInstructions(): string {
+  const startupContext = summarizeStartupContext();
   return [
     "You are a live coding meeting agent inside a browser-based voice call.",
     "Most of the time you are a silent background listener, not an always-speaking chatbot.",
     "Speak naturally and keep spoken answers concise when explicitly granted the floor.",
+    "Default to brief answers. Prefer one short sentence. Do not ramble.",
     "The current meeting canvas and transcript are first-class context, not something to rediscover.",
     "There are two streams in this system: conversation and implementation.",
     "Conversation is the true branch for human discussion, live notes, diagrams, planning, and hand raises.",
@@ -801,6 +805,8 @@ function buildRealtimeInstructions(): string {
     `The allowed workspace root for shell and Codex work is ${workspaceRoot}.`,
     "When the user asks whether you can work with Codex, answer yes and mention run_codex_task explicitly.",
     "Use run_codex_task for larger code edits, codebase analysis, or multi-step repo work.",
+    "Startup context snapshot follows. Treat it as already-known context and only refresh it with read_meeting_context when needed.",
+    startupContext,
     "If you change the preview, tell the user what changed and what to look at on screen."
   ].join("\n");
 }
@@ -1035,6 +1041,31 @@ function firstMarkdownHeading(text: string): string | undefined {
   return match?.[1]?.trim();
 }
 
+function summarizeStartupContext(): string {
+  const context = readMeetingContext() as {
+    currentCanvas?: { text?: string; documentId?: string } | null;
+    tasks?: Array<{ title?: string; status?: string; taskClass?: string }>;
+    implementationQueue?: { queued?: string[]; working?: string[] };
+  };
+  const lines = ["Current known state:"];
+  const canvas = context.currentCanvas;
+  if (canvas?.text) {
+    lines.push(`- Current canvas document: ${canvas.documentId || "realtime-live-canvas"}`);
+    lines.push(`- Canvas heading: ${firstMarkdownHeading(canvas.text) || "Untitled"}`);
+    lines.push(`- Canvas excerpt: ${canvas.text.replace(/\s+/g, " ").slice(0, 320)}`);
+  } else {
+    lines.push("- No current canvas document is available yet.");
+  }
+  const tasks = Array.isArray(context.tasks) ? context.tasks.slice(0, 4) : [];
+  if (tasks.length) {
+    lines.push(`- Recent tasks: ${tasks.map((task) => `${task.title} [${task.status}${task.taskClass ? `/${task.taskClass}` : ""}]`).join("; ")}`);
+  }
+  const queued = context.implementationQueue?.queued || [];
+  const working = context.implementationQueue?.working || [];
+  lines.push(`- Implementation queue: queued=${queued.length}, working=${working.length}`);
+  return lines.join("\n");
+}
+
 function ensurePipelineLayout(): void {
   for (const dir of [
     conversationPipelineRoot,
@@ -1171,7 +1202,7 @@ async function processImplementationTask(taskKey: string, workingDir: string, ta
     stream: "implementation",
     meetingId,
     createdAt: nowIso(),
-    agentId: implementationWorkerAgentId,
+        agentId: "pi-agent",
     taskKey,
     title,
     status: "working",
@@ -1209,7 +1240,7 @@ async function processImplementationTask(taskKey: string, workingDir: string, ta
     stream: "implementation",
     meetingId,
     createdAt: nowIso(),
-    agentId: implementationWorkerAgentId,
+    agentId: "pi-agent",
     taskKey,
     title,
     status,
@@ -1224,7 +1255,7 @@ async function processImplementationTask(taskKey: string, workingDir: string, ta
       stream: "implementation",
       meetingId,
       createdAt: nowIso(),
-      agentId: implementationWorkerAgentId,
+      agentId: "pi-agent",
       format: "markdown",
       surface: "status",
       lifecycle: "final",
@@ -1236,7 +1267,7 @@ async function processImplementationTask(taskKey: string, workingDir: string, ta
       stream: "implementation",
       meetingId,
       createdAt: nowIso(),
-      agentId: implementationWorkerAgentId,
+      agentId: "pi-agent",
       format: "markdown",
       surface: "canvas",
       lifecycle: "final",
@@ -1502,6 +1533,6 @@ function seedSystemEvent(): void {
     meetingId,
     createdAt: nowIso(),
     level: "info",
-    text: "Meeting API ready. Transcripts come from local Whisper; agent output comes through Pi or MCP."
+    text: "Meeting API ready. Transcripts come from local Whisper or Realtime; implementation work is delegated through the pi-agent or MCP."
   });
 }
