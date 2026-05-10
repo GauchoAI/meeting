@@ -21,6 +21,7 @@ const conversationCurrentNotePath = resolve(conversationRoot, "notes/current.md"
 const implementationInboxRoot = resolve(pipelineRoot, "implementation/inbox");
 const implementationConversationInboxPath = resolve(implementationInboxRoot, "conversation.jsonl");
 const piHandoffsPath = resolve(implementationInboxRoot, "pi-handoffs.jsonl");
+const piDirectMessagesPath = resolve(implementationInboxRoot, "pi-direct-messages.jsonl");
 const implementationTaskQueuedRoot = resolve(pipelineRoot, "implementation/tasks/queued");
 const implementationTaskWorkingRoot = resolve(pipelineRoot, "implementation/tasks/working");
 const implementationTaskDoneRoot = resolve(pipelineRoot, "implementation/tasks/done");
@@ -30,6 +31,7 @@ interface TailOffsets {
   events: number;
   tasks: number;
   hands: number;
+  piMessages: number;
 }
 
 interface ReceivedInputCapture {
@@ -45,7 +47,7 @@ interface ReceivedInputCapture {
 }
 
 let busy = false;
-let tailOffsets: TailOffsets = { transcript: 0, events: 0, tasks: 0, hands: 0 };
+let tailOffsets: TailOffsets = { transcript: 0, events: 0, tasks: 0, hands: 0, piMessages: 0 };
 const partialLogState = new Map<string, { text: string; loggedAt: number }>();
 
 ensureLayout();
@@ -362,7 +364,7 @@ function buildRoutingContext(input: { taskKey: string; task: Record<string, unkn
     receivedInputPath: resolve(input.workingDir, "received-input.md"),
     implementationConversationInboxPath,
     piHandoffsPath,
-    artifactIndexPath,
+    artifactIndexPath: artifactsIndexPath,
     artifactIndexCount: artifactIndexCount(),
     matchingHandoffRecordCount: input.matchingHandoffRecords.length,
     matchingHandoffRecordKinds: [...new Set(input.matchingHandoffRecords.map((record) => stringField(record.kind)).filter(Boolean))]
@@ -427,7 +429,8 @@ function primeConversationTail(): void {
     transcript: fileSize(conversationTranscriptJsonlPath),
     events: fileSize(conversationEventsPath),
     tasks: fileSize(conversationTasksPath),
-    hands: fileSize(conversationHandsPath)
+    hands: fileSize(conversationHandsPath),
+    piMessages: fileSize(piDirectMessagesPath)
   };
   console.log(`[meeting-agent] tailing Realtime/Whisper conversation stream from ${conversationRoot}`);
   const recentTranscript = tailTextFile(conversationTranscriptMdPath, 6).join("\n");
@@ -452,6 +455,10 @@ function pollConversationStream(): void {
   const hands = readAppendedLines(conversationHandsPath, tailOffsets.hands);
   tailOffsets.hands = hands.offset;
   for (const line of hands.lines) handleConversationRecord(line, "hand");
+
+  const piMessages = readAppendedLines(piDirectMessagesPath, tailOffsets.piMessages);
+  tailOffsets.piMessages = piMessages.offset;
+  for (const line of piMessages.lines) handlePiDirectMessage(line);
 }
 
 function handleConversationRecord(line: string, source: "transcript" | "event" | "task" | "hand"): void {
@@ -481,6 +488,15 @@ function handleConversationRecord(line: string, source: "transcript" | "event" |
   if (source === "hand" && event.type === "agent.hand_raise") {
     console.log(`[meeting-agent:hand] ${compact(String(event.reason || ""), 420)}`);
   }
+}
+
+function handlePiDirectMessage(line: string): void {
+  const message = parseJsonLine(line);
+  if (!message) return;
+  const intent = typeof message.intent === "string" ? message.intent : "inform";
+  const text = typeof message.text === "string" ? message.text : "";
+  const taskKey = typeof message.taskKey === "string" ? ` task=${message.taskKey}` : "";
+  console.log(`[meeting-agent:direct:${intent}]${taskKey} ${compact(text, 800)}`);
 }
 
 function maybeLogPartial(event: Record<string, unknown>): void {

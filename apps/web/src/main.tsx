@@ -60,6 +60,7 @@ const availableRealtimeTools = [
   "deliver_assistant_output: one command for canvas + Realtime/status delivery using structured canvas Markdown and 3-line terminal status",
   "publish_task_result: publish a polished completed-task result on the main canvas before review",
   "create_meeting_task: create visible task cards for proposed work",
+  "message_pi_agent: send direct lightweight coordination to pi-agent without task/artifact/canvas updates",
   "run_codex_task: send a concise handoff to pi-agent, which invokes local Codex and answers back into the meeting",
   "run_shell_command: run short terminal commands in the allowed workspace",
   "read_rendered_html: read the isolated preview HTML if needed",
@@ -912,7 +913,7 @@ function App() {
           "Do not wait for the host to say the exact word Codex if the work clearly belongs to pi-agent.",
           "When pi-agent has published a result, read meeting context and raise your hand with requestedMode=show or requestedMode=review. Codex/pi-agent results should be shown as text, not spoken audio.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
-          "If you have something useful, prefer silent actions: deliver_assistant_output, post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
+          "If you have something useful, prefer silent actions: message_pi_agent, deliver_assistant_output, post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
           `Maintain a living meeting document on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
           "Use the canvas document for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
           "Use create_meeting_task with stream=conversation for planning-side tasks.",
@@ -2651,7 +2652,7 @@ function dedupeTasks(events: AgentTaskEvent[]): AgentTaskEvent[] {
 }
 
 function implementationToolName(name: string): boolean {
-  return name === "run_codex_task" || name === "publish_task_result" || name === "deliver_assistant_output";
+  return name === "run_codex_task" || name === "publish_task_result" || name === "deliver_assistant_output" || name === "message_pi_agent";
 }
 
 function isPiAgentReviewEvent(event: MeetingEvent): event is AgentMessageEvent | AgentHandRaiseEvent {

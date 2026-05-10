@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 const api = readFileSync("apps/api/src/server.ts", "utf8");
 const web = readFileSync("apps/web/src/main.tsx", "utf8");
 const docs = readFileSync("docs/assistant-output-delivery.md", "utf8");
+const directDocs = readFileSync("docs/agent-direct-messaging.md", "utf8");
+const mcp = readFileSync("apps/mcp-server/src/create-server.ts", "utf8");
+const worker = readFileSync("apps/agent-worker/src/worker.ts", "utf8");
 
 const checks = [
   [api.includes('name: "deliver_assistant_output"'), "Realtime tool schema exposes deliver_assistant_output"],
@@ -16,7 +19,11 @@ const checks = [
   [api.includes('!isTaskResultWrapperMessage(event)') && web.includes('documentId.startsWith("task-result:")'), "Task-result wrappers do not override artifact canvas selection"],
   [web.includes('event.surface === "status" && !event.documentId && event.stream !== "implementation"') && !web.includes('text.length >= 40'), "Realtime notification ignores status-only pi-agent wrappers"],
   [web.includes('Task: Review latest Pi/Codex output.') && web.includes('status-only updates should not replace it') && !web.includes('Context: surface='), "Realtime Pi updates use preferred message format without routing metadata"],
-  [docs.includes('deliver_assistant_output') && docs.includes('Status: <one-line current state>') && docs.includes('status-only delivery replace'), "Delivery workflow docs describe command and template"]
+  [api.includes('name: "message_pi_agent"') && api.includes('pi-direct-messages.jsonl'), "Realtime exposes direct voice-agent to pi-agent messaging without canvas output"],
+  [worker.includes('handlePiDirectMessage') && worker.includes('[meeting-agent:direct:'), "Pi-agent worker tails direct messages"],
+  [mcp.includes('meeting_message_voice_agent') && mcp.includes('voice-message:'), "Pi-agent can message voice agent without canvas updates"],
+  [docs.includes('deliver_assistant_output') && docs.includes('Status: <one-line current state>') && docs.includes('status-only delivery replace'), "Delivery workflow docs describe command and template"],
+  [directDocs.includes('Task: <actionable request>') && directDocs.includes('message_pi_agent') && directDocs.includes('meeting_message_voice_agent'), "Direct messaging docs describe low-noise handoffs"]
 ];
 
 const failures = checks.filter(([ok]) => !ok).map(([, message]) => message);

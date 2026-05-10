@@ -22,6 +22,7 @@ const implementationPipelineRoot = resolve(pipelineRoot, "implementation");
 const implementationInboxRoot = resolve(implementationPipelineRoot, "inbox");
 const implementationConversationInboxPath = resolve(implementationInboxRoot, "conversation.jsonl");
 const piHandoffsPath = resolve(implementationInboxRoot, "pi-handoffs.jsonl");
+const piDirectMessagesPath = resolve(implementationInboxRoot, "pi-direct-messages.jsonl");
 const implementationTaskRoot = resolve(implementationPipelineRoot, "tasks");
 const implementationTaskQueuedRoot = resolve(implementationTaskRoot, "queued");
 const implementationTaskWorkingRoot = resolve(implementationTaskRoot, "working");
@@ -131,10 +132,11 @@ if (implementationBackend === "api") {
   }, 1500);
 }
 
-function appendTrace(channel: string, text: string, details?: unknown): void {
+function appendTrace(channel: string, text: string, details?: unknown, stream?: "conversation" | "implementation"): void {
   appendEvent({
     id: newEventId("trace"),
     type: "agent.trace",
+    stream,
     meetingId,
     createdAt: nowIso(),
     agentId: "meeting-api",
@@ -511,6 +513,21 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       },
       {
         type: "function",
+        name: "message_pi_agent",
+        description: "Send a concise direct coordination message to pi-agent without creating a task, artifact, or canvas update. Use for lightweight questions, acknowledgments, or requests to coordinate with the voice agent.",
+        parameters: {
+          type: "object",
+          properties: {
+            message: { type: "string" },
+            intent: { type: "string", enum: ["inform", "question", "request", "ack"] },
+            taskKey: { type: "string" }
+          },
+          required: ["message"],
+          additionalProperties: false
+        }
+      },
+      {
+        type: "function",
         name: "run_codex_task",
         description: "Send a concise structured implementation handoff to the running pi-agent session. Pi-agent invokes Codex and answers back into the meeting through its artifact/UI tools.",
         parameters: {
@@ -715,6 +732,16 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
         previewUrl: `http://localhost:${port}/realtime-artifacts/index.html`,
         bytes: Buffer.byteLength(html, "utf8")
       };
+    } else if (name === "message_pi_agent") {
+      const args = asObject(input);
+      const message = String(args.message || "").trim();
+      if (!message) throw new Error("message is required");
+      const intent = asDirectMessageIntent(args.intent);
+      const taskKey = optionalString(args.taskKey);
+      const record = { ts: nowIso(), role: "realtime-agent", kind: "direct_message", intent, taskKey, text: message };
+      appendPiDirectMessage(record);
+      appendTrace("agent", "Direct message sent to pi-agent", { intent, taskKey, message: compactText(message, 500) }, "implementation");
+      output = { ok: true, path: piDirectMessagesPath, intent, taskKey };
     } else if (name === "run_shell_command") {
       const args = asObject(input);
       const command = String(args.command || "");
@@ -769,8 +796,8 @@ function buildRealtimeInstructions(): string {
     "There are two streams in this system: conversation and implementation.",
     "Conversation is the true branch for human discussion, live notes, diagrams, planning, and hand raises.",
     "Implementation is the Codex execution branch with task lifecycle and result review.",
-    "You have ten tools and should accurately describe them when asked.",
-    "Available tools: read_meeting_context, read_repo_guide, raise_meeting_hand, post_meeting_markdown, deliver_assistant_output, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
+    "You have twelve tools and should accurately describe them when asked.",
+    "Available tools: read_meeting_context, read_repo_guide, raise_meeting_hand, post_meeting_markdown, deliver_assistant_output, publish_task_result, create_meeting_task, message_pi_agent, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
     "When you need to know what is currently on screen, what the current plan says, or what the humans are discussing, call read_meeting_context first instead of exploring the repo.",
     "When you need to understand this repository's file layout or implementation delegation path, call read_repo_guide before guessing.",
     "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
@@ -794,6 +821,7 @@ function buildRealtimeInstructions(): string {
     "run_shell_command is for quick inspection and lightweight terminal tasks.",
     "Maintain a stable living canvas document with post_meeting_markdown using documentId=realtime-live-canvas.",
     "For assistant results that need both canvas visibility and Realtime/status delivery, prefer deliver_assistant_output: canvas uses structured Markdown, status uses exactly Status/Confidence/Next.",
+    "Use message_pi_agent for lightweight direct coordination with pi-agent; it must not create artifacts or canvas updates.",
     "For completed or milestone work, use publish_task_result to put a polished result on the main canvas before or while raising your hand.",
     "read_rendered_html and write_rendered_html are specifically for the isolated browser preview file and are not the main path for improving the app.",
     "You have tool access to inspect the local workspace, queue Codex work through pi-agent, and write a complete index.html preview that renders on screen.",
@@ -1564,9 +1592,18 @@ function appendPiHandoff(jsonl: string): void {
   appendFileSync(piHandoffsPath, `${jsonl.trim()}\n`, "utf8");
 }
 
+function appendPiDirectMessage(record: Record<string, unknown>): void {
+  mkdirSync(dirname(piDirectMessagesPath), { recursive: true });
+  appendFileSync(piDirectMessagesPath, `${JSON.stringify(record)}\n`, "utf8");
+}
+
 function implementationTitleFromPrompt(prompt: string): string {
   const firstLine = prompt.split("\n").map((line) => line.trim()).find(Boolean) || "Codex implementation task";
   return firstLine.replace(/^#+\s*/, "").slice(0, 90) || "Codex implementation task";
+}
+
+function asDirectMessageIntent(value: unknown): "inform" | "question" | "request" | "ack" {
+  return value === "question" || value === "request" || value === "ack" ? value : "inform";
 }
 
 function asRequestedMode(value: unknown): "speak" | "show" | "work" | "review" {
@@ -1670,6 +1707,11 @@ function runProcess(command: string, options: { cwd: string; args?: string[]; sh
       });
     });
   });
+}
+
+function compactText(value: string, maxLength: number): string {
+  const compact = value.trim().replace(/\s+/g, " ");
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
 }
 
 function trimOutput(value: string): string {

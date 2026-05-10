@@ -676,7 +676,7 @@
             "If durable artifact work is needed, create a visible implementation task if helpful, then call run_codex_task with your concise handoff for pi-agent.",
             "Be eager to use run_codex_task when the conversation asks for diagrams, architecture, project plans, documentation, code changes, repo improvements, or durable artifacts.",
             "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
-            "If you have something useful, prefer silent actions: deliver_assistant_output, post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
+            "If you have something useful, prefer silent actions: message_pi_agent, deliver_assistant_output, post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
             "Maintain a living meeting document on the main canvas with post_meeting_markdown using surface=canvas and documentId=realtime-live-canvas.",
             "Raise your hand with requestedMode=speak only for Realtime conversation contributions that should be spoken aloud.",
             "Keep any text response to at most one short sentence."
@@ -1024,7 +1024,7 @@
     }
 
     function implementationToolName(name) {
-      return name === "run_codex_task" || name === "publish_task_result" || name === "deliver_assistant_output";
+      return name === "run_codex_task" || name === "publish_task_result" || name === "deliver_assistant_output" || name === "message_pi_agent";
     }
 
     function isRealtimeTextDelta(type) {

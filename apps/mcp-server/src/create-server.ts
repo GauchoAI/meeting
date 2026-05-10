@@ -36,6 +36,37 @@ export function createMeetingMcpServer() {
   );
 
   server.tool(
+    "meeting_message_voice_agent",
+    "Send a concise private coordination message to the Realtime voice agent without updating the canvas. Use this to ask it to raise its hand or speak a short summary on your behalf.",
+    {
+      message: z.string(),
+      intent: z.enum(["inform", "raise-hand", "speak", "question"]).default("inform"),
+      when: z.string().optional()
+    },
+    async ({ message, intent, when }) => {
+      await postEvent(api, {
+        id: newEventId("msg"),
+        type: "agent.message",
+        stream: "conversation",
+        meetingId,
+        createdAt: nowIso(),
+        agentId,
+        format: "plain",
+        surface: "status",
+        lifecycle: "final",
+        documentId: `voice-message:${newEventId("voice")}`,
+        text: [
+          "For voice agent:",
+          `Intent: ${intent}`,
+          `Message: ${message}`,
+          when ? `When: ${when}` : ""
+        ].filter(Boolean).join("\n")
+      } as MeetingEvent);
+      return text("Sent voice-agent message without updating the canvas.");
+    }
+  );
+
+  server.tool(
     "meeting_post_markdown",
     "Render Markdown in the meeting UI. Mermaid code blocks are supported.",
     {

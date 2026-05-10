@@ -145,6 +145,7 @@ Tools:
 
 - `meeting_raise_hand`
 - `meeting_post_markdown`
+- `meeting_message_voice_agent`
 - `meeting_set_repository`
 - `meeting_create_task`
 
