@@ -110,7 +110,7 @@
     let localSpeechStreamPlayback = null;
     let localSpeechFinishCurrent = null;
     let localSpeechQueue = [];
-    let localSpeechQueueDraining = false;
+    let localSpeechQueuePlaying = false;
     const codexStreamingSpeech = new Map();
     let localSpeechStartedAt = 0;
     let localSpeechBargeInStartedAt = 0;
@@ -1310,27 +1310,105 @@
       const text = clipText(String(message || "").trim(), options.maxChars || 360);
       if (!text || realtimeMuted) return;
       if (options.clearExisting) clearLocalSpeechQueue();
-      localSpeechQueue.push(text);
-      void drainLocalSpeechQueue();
+      localSpeechQueue.push(createLocalSpeechQueueItem(text));
+      warmLocalSpeechQueue();
+      void playLocalSpeechQueue();
     }
 
-    async function drainLocalSpeechQueue() {
-      if (localSpeechQueueDraining) return;
-      localSpeechQueueDraining = true;
+    function createLocalSpeechQueueItem(text) {
+      return {
+        text,
+        generation: 0,
+        synthesis: null,
+        fallbackNoted: false
+      };
+    }
+
+    function warmLocalSpeechQueue() {
+      const maxPrefetch = localStreamingTts ? 1 : 3;
+      let inFlight = 0;
+      for (const item of localSpeechQueue) {
+        if (item.synthesis) inFlight += 1;
+      }
+      for (const item of localSpeechQueue) {
+        if (inFlight >= maxPrefetch) break;
+        if (!item.synthesis) {
+          item.generation = nextLocalSpeechGeneration();
+          item.synthesis = prepareLocalSpeechAudio(item.text, item.generation, item).catch((error) => ({ ok: false, error, item }));
+          inFlight += 1;
+        }
+      }
+    }
+
+    async function playLocalSpeechQueue() {
+      if (localSpeechQueuePlaying) return;
+      localSpeechQueuePlaying = true;
       try {
         while (localSpeechQueue.length && joined && usesLocalSpeechOutput() && !realtimeMuted) {
-          const next = localSpeechQueue.shift();
-          if (!next) continue;
-          await speakLocalVoiceMessage(next);
+          warmLocalSpeechQueue();
+          const item = localSpeechQueue.shift();
+          if (!item) continue;
+          if (!item.synthesis) {
+            item.generation = nextLocalSpeechGeneration();
+            item.synthesis = prepareLocalSpeechAudio(item.text, item.generation, item).catch((error) => ({ ok: false, error, item }));
+          }
+          await playPreparedLocalSpeechItem(item);
+          warmLocalSpeechQueue();
         }
       } finally {
-        localSpeechQueueDraining = false;
+        localSpeechQueuePlaying = false;
+        if (localSpeechQueue.length && joined && usesLocalSpeechOutput() && !realtimeMuted) void playLocalSpeechQueue();
       }
     }
 
     function clearLocalSpeechQueue() {
+      for (const item of localSpeechQueue) item.controller?.abort();
       localSpeechQueue = [];
       codexStreamingSpeech.clear();
+    }
+
+    function nextLocalSpeechGeneration() {
+      const queuedGenerations = localSpeechQueue.map((item) => Number(item.generation || 0));
+      return Math.max(localSpeechGeneration, ...queuedGenerations) + 1;
+    }
+
+    async function prepareLocalSpeechAudio(text, generation, item = {}) {
+      item.controller = new AbortController();
+      const startedAt = Date.now();
+      if (localStreamingTts) {
+        try {
+          return await prepareLocalSpeechStream(text, generation, item.controller, startedAt);
+        } catch (error) {
+          if (!item.fallbackNoted) {
+            item.fallbackNoted = true;
+            await postRealtimeTrace("error", "Streaming local TTS prefetch failed; falling back to full audio response", { error: error?.message || String(error), provider: localTtsProvider });
+          }
+        }
+      }
+      return await prepareLocalSpeechBlob(text, generation, item.controller, startedAt);
+    }
+
+    async function playPreparedLocalSpeechItem(item) {
+      const generation = item.generation || (localSpeechGeneration + 1);
+      localSpeechGeneration = generation;
+      pauseLocalSttForSpeech();
+      stopLocalSpeechAudio();
+      renderStatus(item.synthesis ? "local voice ready" : "preparing local voice", "speaking");
+      try {
+        const prepared = await item.synthesis;
+        if (!prepared?.ok) throw prepared?.error || new Error("local TTS preparation failed");
+        if (prepared.generation !== localSpeechGeneration) return;
+        if (prepared.kind === "stream") {
+          await playPreparedLocalSpeechStream(prepared);
+        } else {
+          await playLocalSpeechBlob(prepared.blob, prepared.generation);
+        }
+      } catch (error) {
+        if (generation !== localSpeechGeneration) return;
+        await postRealtimeTrace("error", "Local TTS failed; browser speech fallback is disabled", { error: error?.message || String(error) });
+        renderStatus("local TTS unavailable; speech skipped", "ready");
+        resumeLocalSttAfterSpeech();
+      }
     }
 
     async function speakLocalVoiceMessage(message) {
@@ -1341,17 +1419,9 @@
       stopLocalSpeechAudio();
       renderStatus("preparing local voice", "speaking");
       try {
-        if (localStreamingTts) {
-          try {
-            await playLocalSpeechStream(text, generation);
-            return;
-          } catch (error) {
-            if (generation !== localSpeechGeneration) return;
-            stopLocalSpeechAudio();
-            await postRealtimeTrace("error", "Streaming local TTS failed; falling back to full audio response", { error: error?.message || String(error), provider: localTtsProvider });
-          }
-        }
-        await synthesizeAndPlayLocalSpeechBlob(text, generation);
+        const prepared = await prepareLocalSpeechAudio(text, generation, {});
+        if (prepared.kind === "stream") await playPreparedLocalSpeechStream(prepared);
+        else await playLocalSpeechBlob(prepared.blob, prepared.generation);
       } catch (error) {
         if (generation !== localSpeechGeneration) return;
         await postRealtimeTrace("error", "Local TTS failed; browser speech fallback is disabled", { error: error?.message || String(error) });
@@ -1360,43 +1430,40 @@
       }
     }
 
-    async function synthesizeAndPlayLocalSpeechBlob(text, generation) {
+    async function prepareLocalSpeechBlob(text, generation, signal, startedAt = Date.now()) {
       const response = await fetch(`${api}/tts/synthesize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text }),
+        signal
       });
-      if (generation !== localSpeechGeneration) return;
       if (!response.ok) {
         const body = await response.text();
         throw new Error(body || `local TTS returned ${response.status}`);
       }
       const blob = await response.blob();
-      if (generation !== localSpeechGeneration) return;
-      await playLocalSpeechBlob(blob, generation);
+      return { ok: true, kind: "blob", blob, generation, prepareMs: Date.now() - startedAt };
     }
 
-    async function playLocalSpeechStream(text, generation) {
-      stopLocalSpeechAudio();
-      const controller = new AbortController();
+    async function prepareLocalSpeechStream(text, generation, signal, startedAt = Date.now()) {
       const response = await fetch(`${api}/tts/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
-        signal: controller.signal
+        signal
       });
-      if (generation !== localSpeechGeneration) {
-        controller.abort();
-        return;
-      }
       if (!response.ok || !response.body) {
         const body = await response.text().catch(() => "");
         throw new Error(body || `streaming local TTS returned ${response.status}`);
       }
+      return { ok: true, kind: "stream", response, generation, prepareMs: Date.now() - startedAt };
+    }
 
+    async function playPreparedLocalSpeechStream(prepared) {
+      stopLocalSpeechAudio();
+      const { response, generation } = prepared;
       const sampleRate = Number(response.headers.get("x-tts-sample-rate") || "24000") || 24000;
       const playback = createLocalSpeechStreamPlayback(sampleRate);
-      playback.abortController = controller;
       localSpeechStreamPlayback = playback;
       renderStatus("local voice streaming", "speaking");
 
