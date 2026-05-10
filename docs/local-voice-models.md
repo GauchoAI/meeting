@@ -35,6 +35,14 @@ pnpm dev:api
 
 The bridge is intentionally simple: it receives each browser audio chunk, transcribes it, and returns JSON. This tests local quality and integration before investing in a true streaming vLLM deployment.
 
+The stable shell exposes three voice modes:
+
+- `OpenAI voice`: the previous OpenAI Realtime listen/speak path.
+- `Local Voxtral`: microphone chunks go to `/audio/chunk`, which uses Voxtral through `STT_PROVIDER=voxtral-http`; Pi/Codex remains the tool-using brain; explicit Pi voice messages are spoken with browser speech synthesis.
+- `Hybrid`: OpenAI Realtime remains the conversational voice while local Voxtral also writes transcript events into the Meeting/Pi pipeline.
+
+When `.env` sets `STT_PROVIDER=voxtral-http`, the stable shell defaults to `Local Voxtral` unless `localStorage.meeting.voiceMode` already has a saved preference.
+
 ## Moshi MLX Lab
 
 Model: `kyutai/moshika-mlx-bf16`

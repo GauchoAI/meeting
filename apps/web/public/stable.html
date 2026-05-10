@@ -20,6 +20,7 @@
     button.speak { background: #16a34a; min-width: 160px; }
     button.speak[disabled] { opacity: 0.5; cursor: not-allowed; }
     button.speak.active { background: #dc2626; }
+    select { border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 999px; padding: 8px 10px; background: rgba(15, 23, 42, 0.95); color: #e2e8f0; font-weight: 700; }
     audio { display: none; }
     kbd { border: 1px solid rgba(148, 163, 184, 0.45); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; background: rgba(15, 23, 42, 0.9); color: #e2e8f0; font-size: 12px; }
     iframe { display: block; width: 100%; height: calc(100% - 52px); border: 0; background: #050816; }
@@ -33,6 +34,11 @@
     <div class="status"><span id="dot" class="dot"></span><span id="status">stable shell idle</span></div>
     <div class="spacer"></div>
     <div class="hint">Voice runs in this stable shell. UI below can reload safely.</div>
+    <select id="voiceMode" aria-label="Voice mode">
+      <option value="realtime">OpenAI voice</option>
+      <option value="local">Local Voxtral</option>
+      <option value="hybrid">Hybrid</option>
+    </select>
     <button id="join">Join meeting</button>
     <button id="mute" class="secondary" disabled>Mute agent</button>
     <button id="sleep" class="secondary" disabled>Sleep until prompted</button>
@@ -57,11 +63,14 @@
     const muteButton = document.getElementById("mute");
     const sleepButton = document.getElementById("sleep");
     const speakButton = document.getElementById("speak");
+    const voiceModeSelect = document.getElementById("voiceMode");
     const remoteAudio = document.getElementById("remoteAudio");
     const uiFrame = document.getElementById("ui");
 
     let localStream = null;
     let joined = false;
+    let voiceMode = localStorage.getItem("meeting.voiceMode") || "realtime";
+    let speechProvider = "unknown";
     let realtimePeer = null;
     let realtimeChannel = null;
     let realtimeState = "idle";
@@ -75,6 +84,10 @@
     let assistantDraft = "";
     let assistantDraftMessageId = null;
     let assistantDraftFlushTimer = null;
+    let localSttActive = false;
+    let localSttStream = null;
+    let localSttRecorder = null;
+    let localSttChunkTimer = null;
     let directVoiceTurnActive = false;
     let directVoiceTurnToolCalled = false;
     let analysisTimer = null;
@@ -93,6 +106,7 @@
     leaveButton.addEventListener("click", leave);
     muteButton.addEventListener("click", () => setRealtimeAgentMuted(!realtimeMuted));
     sleepButton.addEventListener("click", () => setRealtimeAgentActivationMode(realtimeActivationMode === "sleeping" ? "active" : "sleeping", "stable shell toggle"));
+    voiceModeSelect.addEventListener("change", () => setVoiceMode(String(voiceModeSelect.value || "realtime")));
     uiFrame.addEventListener("load", publishShellState);
 
     window.addEventListener("message", (event) => {
@@ -107,6 +121,14 @@
       if (data.type === "meeting:realtime:text-floor") requestAgentTextFloor(String(data.mode || "show"), String(data.reason || ""));
     });
 
+    voiceModeSelect.value = voiceMode;
+    void loadSpeechStatus().then(() => {
+      if (!localStorage.getItem("meeting.voiceMode") && speechProvider === "voxtral-http") setVoiceMode("local", { persist: false, trace: false });
+      renderStatus();
+      publishShellState();
+    }).catch((error) => {
+      void postRealtimeTrace("error", "Speech provider status failed", { error: error?.message || String(error) });
+    });
     connectEventStream();
     if (sessionStorage.getItem(autoJoinKey) === "true" || sessionStorage.getItem(legacyAutoJoinKey) === "true") {
       void join().catch((error) => {
@@ -120,9 +142,10 @@
 
     async function join() {
       if (joined) {
-        ensureRealtimeConnected("join requested while already joined");
+        if (usesRealtimeVoice()) ensureRealtimeConnected("join requested while already joined");
         return;
       }
+      await loadSpeechStatus().catch(() => undefined);
       localStream = await getMeetingMediaStream();
       joined = true;
       realtimeDesired = true;
@@ -132,10 +155,17 @@
       leaveButton.hidden = false;
       muteButton.disabled = false;
       speakButton.disabled = true;
-      renderStatus("voice agent connecting", "ready");
+      renderStatus(usesRealtimeVoice() ? "voice agent connecting" : "local voice listening", "ready");
       publishShellState();
-      void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", undefined);
-      connectRealtimeAgent(localStream);
+      if (usesLocalStt()) startLocalSttCapture(localStream);
+      if (usesRealtimeVoice()) {
+        void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", { voiceMode, speechProvider });
+        connectRealtimeAgent(localStream);
+      } else {
+        void postRealtimeTrace("agent", "Stable shell joined meeting with local voice mode", { voiceMode, speechProvider });
+        renderStatus();
+        publishShellState();
+      }
     }
 
     async function getMeetingMediaStream() {
@@ -154,6 +184,8 @@
       sessionStorage.removeItem(legacyAutoJoinKey);
       clearRealtimeReconnect();
       disconnectRealtimeAgent({ intentional: true });
+      stopLocalSttCapture();
+      window.speechSynthesis?.cancel();
       localStream?.getTracks().forEach((track) => track.stop());
       localStream = null;
       joinButton.hidden = false;
@@ -285,7 +317,7 @@
     }
 
     function scheduleRealtimeReconnect(delayMs, reason = "scheduled reconnect") {
-      if (!realtimeDesired || !joined || realtimeReconnectTimer !== null) return;
+      if (!usesRealtimeVoice() || !realtimeDesired || !joined || realtimeReconnectTimer !== null) return;
       const attempt = realtimeReconnectAttempt;
       const delay = delayMs ?? Math.min(15000, 750 * 2 ** Math.min(attempt, 5));
       realtimeReconnectTimer = window.setTimeout(() => {
@@ -311,6 +343,10 @@
         void join();
         return;
       }
+      if (!usesRealtimeVoice()) {
+        renderStatus("local voice mode active", "ready");
+        return;
+      }
       realtimeDesired = true;
       realtimeReconnectAttempt = 0;
       clearRealtimeReconnect();
@@ -319,7 +355,7 @@
     }
 
     function ensureRealtimeConnected(reason) {
-      if (!joined || realtimeState !== "idle") return;
+      if (!usesRealtimeVoice() || !joined || realtimeState !== "idle") return;
       scheduleRealtimeReconnect(0, reason);
     }
 
@@ -521,6 +557,12 @@
       return response.output;
     }
 
+    async function loadSpeechStatus() {
+      const health = await fetch(`${api}/health`).then((res) => res.json());
+      speechProvider = String(health?.speech?.provider || "unknown");
+      return health;
+    }
+
     async function relayDirectVoiceTextToPiAgent(text) {
       const message = clipText(String(text || ""), 1000);
       await postRealtimeTrace("tool", "Relaying direct voice-agent text to pi-agent", { message }, "implementation");
@@ -530,6 +572,35 @@
         body: JSON.stringify({ name: "message_pi_agent", arguments: { intent: "request", message } })
       }).then((res) => res.json());
       await postRealtimeTrace(toolResponse.ok ? "tool" : "error", "Relayed direct voice-agent text result", toolResponse, "implementation");
+    }
+
+    function setVoiceMode(next, options = {}) {
+      const mode = next === "local" || next === "hybrid" ? next : "realtime";
+      const previous = voiceMode;
+      voiceMode = mode;
+      voiceModeSelect.value = mode;
+      if (options.persist !== false) localStorage.setItem("meeting.voiceMode", mode);
+      if (joined && localStream) {
+        if (usesLocalStt()) startLocalSttCapture(localStream);
+        else stopLocalSttCapture();
+        if (usesRealtimeVoice()) ensureRealtimeConnected("voice mode changed");
+        else disconnectRealtimeAgent({ intentional: true });
+      }
+      if (options.trace !== false && previous !== mode) void postRealtimeTrace("agent", "Stable shell voice mode changed", { previous, voiceMode: mode, speechProvider });
+      renderStatus();
+      publishShellState();
+    }
+
+    function usesRealtimeVoice() {
+      return voiceMode === "realtime" || voiceMode === "hybrid";
+    }
+
+    function usesLocalStt() {
+      return voiceMode === "local" || voiceMode === "hybrid";
+    }
+
+    function usesLocalSpeechOutput() {
+      return voiceMode === "local";
     }
 
     function setRealtimeAgentMuted(muted) {
@@ -863,7 +934,11 @@
           return;
         }
         if (isPiAgentReviewEvent(event)) {
-          void notifyRealtimeOfPiAgentUpdate(event);
+          if (usesRealtimeVoice() && realtimeState === "connected") {
+            void notifyRealtimeOfPiAgentUpdate(event);
+          } else if (usesLocalSpeechOutput()) {
+            void handleLocalPiAgentUpdate(event);
+          }
         }
       });
       eventsSource.onerror = () => {
@@ -871,6 +946,97 @@
         eventsSource = null;
         window.setTimeout(connectEventStream, 2000);
       };
+    }
+
+    function startLocalSttCapture(stream) {
+      if (localSttActive) return;
+      const audioTracks = stream?.getAudioTracks?.() || [];
+      if (!audioTracks.length) return;
+      localSttStream = new MediaStream(audioTracks);
+      localSttActive = true;
+      recordLocalSttChunk(localSttStream);
+      void postRealtimeTrace("agent", "Local STT capture started in stable shell", { provider: speechProvider, voiceMode });
+      renderStatus();
+      publishShellState();
+    }
+
+    function recordLocalSttChunk(audioOnlyStream) {
+      if (!localSttActive) return;
+      if (!audioOnlyStream.getAudioTracks().some((track) => track.readyState === "live")) {
+        stopLocalSttCapture();
+        return;
+      }
+      const mimeType = preferredMimeType();
+      const recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        const scheduleNext = () => {
+          if (localSttActive) {
+            localSttChunkTimer = window.setTimeout(() => recordLocalSttChunk(audioOnlyStream), 80);
+          }
+        };
+        if (chunks.length > 0) {
+          const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+          void sendAudioChunk(blob).finally(scheduleNext);
+        } else {
+          scheduleNext();
+        }
+      };
+      recorder.onerror = (event) => {
+        void postRealtimeTrace("error", "Local STT recorder failed", { error: String(event?.error?.message || event?.type || event) });
+      };
+      recorder.start();
+      localSttRecorder = recorder;
+      localSttChunkTimer = window.setTimeout(() => {
+        if (recorder.state === "recording") recorder.stop();
+      }, 3000);
+    }
+
+    function stopLocalSttCapture() {
+      localSttActive = false;
+      if (localSttChunkTimer !== null) {
+        window.clearTimeout(localSttChunkTimer);
+        localSttChunkTimer = null;
+      }
+      if (localSttRecorder?.state === "recording") localSttRecorder.stop();
+      localSttRecorder = null;
+      localSttStream = null;
+      renderStatus();
+      publishShellState();
+    }
+
+    async function sendAudioChunk(blob) {
+      const extension = blob.type.includes("mp4") ? "mp4" : "webm";
+      try {
+        await fetch(`${api}/audio/chunk?extension=${extension}&speaker=Host`, {
+          method: "POST",
+          headers: { "Content-Type": blob.type || "application/octet-stream" },
+          body: await blob.arrayBuffer()
+        });
+      } catch (error) {
+        await postRealtimeTrace("error", "Local STT audio chunk failed", { error: error?.message || String(error) });
+      }
+    }
+
+    async function handleLocalPiAgentUpdate(event) {
+      if (!isVoiceAgentDirectMessage(event) || realtimeMuted) return;
+      const envelope = parseVoiceAgentEnvelope(String(event.text || ""));
+      const message = envelope.message || String(event.text || "").trim();
+      if (!message) return;
+      speakLocalVoiceMessage(message);
+      await postRealtimeTrace("agent", "Local voice spoke Pi/Codex message", { eventId: event.id, intent: envelope.intent || "inform" });
+    }
+
+    function speakLocalVoiceMessage(message) {
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(clipText(message, 360));
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
     }
 
     async function notifyRealtimeOfPiAgentUpdate(event) {
@@ -947,6 +1113,16 @@
 
     function isVoiceAgentDirectMessage(event) {
       return event?.type === "agent.message" && String(event.documentId || "").startsWith("voice-message:");
+    }
+
+    function parseVoiceAgentEnvelope(text) {
+      const result = {};
+      for (const line of String(text || "").split(/\r?\n/)) {
+        const match = /^(Intent|Message|When):\s*(.*)$/i.exec(line.trim());
+        if (!match) continue;
+        result[match[1].toLowerCase()] = match[2].trim();
+      }
+      return result;
     }
 
     function formatPiAgentUpdateForRealtime(event, context) {
@@ -1089,8 +1265,10 @@
         statusEl.textContent = text;
       } else if (!joined) {
         statusEl.textContent = "stable shell idle";
+      } else if (!usesRealtimeVoice()) {
+        statusEl.textContent = `${speechProviderLabel()} listening (${localSttActive ? "local STT active" : "local STT idle"})`;
       } else if (realtimeState === "connected") {
-        statusEl.textContent = `voice agent live (${realtimeMuted ? "muted listener" : "audio responder"}, ${realtimeActivationLabel()})`;
+        statusEl.textContent = `voice agent live (${voiceMode === "hybrid" ? `${speechProviderLabel()} + ` : ""}${realtimeMuted ? "muted listener" : "audio responder"}, ${realtimeActivationLabel()})`;
       } else if (realtimeState === "connecting") {
         statusEl.textContent = "voice agent connecting";
       } else {
@@ -1101,7 +1279,8 @@
       muteButton.textContent = realtimeMuted ? "Unmute agent" : "Mute agent";
       muteButton.disabled = !joined;
       sleepButton.textContent = realtimeActivationMode === "sleeping" ? "Wake agent" : "Sleep until prompted";
-      sleepButton.disabled = !joined;
+      sleepButton.disabled = !joined || !usesRealtimeVoice();
+      voiceModeSelect.value = voiceMode;
     }
 
     function publishShellState() {
@@ -1112,8 +1291,18 @@
         realtimeMuted,
         realtimeResponseMode,
         realtimeActivationMode,
+        voiceMode,
+        localSttActive,
+        speechProvider,
         reconnectAttempt: realtimeReconnectAttempt
       }, window.location.origin);
+    }
+
+    function speechProviderLabel() {
+      if (speechProvider === "voxtral-http") return "Local Voxtral";
+      if (speechProvider === "local-whisper") return "Local Whisper";
+      if (speechProvider === "moshi-http") return "Local Moshi";
+      return "Local STT";
     }
 
     function implementationToolName(name) {
@@ -1159,6 +1348,13 @@
     function clipText(text, maxLength) {
       const normalized = String(text || "").trim();
       return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+    }
+
+    function preferredMimeType() {
+      for (const type of ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"]) {
+        if (MediaRecorder.isTypeSupported(type)) return type;
+      }
+      return "";
     }
 
     function shouldRelayDirectVoiceText(text) {

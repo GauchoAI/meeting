@@ -46,6 +46,9 @@ interface ShellRealtimeState {
   realtimeMuted: boolean;
   realtimeResponseMode: RealtimeResponseMode;
   realtimeActivationMode?: RealtimeActivationMode;
+  voiceMode?: "realtime" | "local" | "hybrid";
+  localSttActive?: boolean;
+  speechProvider?: string;
   reconnectAttempt?: number;
 }
 
@@ -1189,8 +1192,13 @@ function App() {
   const effectiveRealtimeResponseMode = isEmbedded ? shellRealtimeState?.realtimeResponseMode || "speak" : realtimeResponseMode;
   const effectiveRealtimeActivationMode = isEmbedded ? shellRealtimeState?.realtimeActivationMode || "active" : realtimeActivationMode;
   const effectiveRealtimeConnected = effectiveRealtimeState === "connected";
-  const effectiveRealtimeLabel = effectiveRealtimeConnected
-    ? `${effectiveRealtimeMuted ? "Muted listener" : "Audio responder"} · ${realtimeActivationLabel(effectiveRealtimeActivationMode)} · ${effectiveRealtimeResponseMode}`
+  const effectiveVoiceMode = shellRealtimeState?.voiceMode || "realtime";
+  const effectiveSpeechProvider = shellRealtimeState?.speechProvider || "";
+  const effectiveLocalSttActive = Boolean(shellRealtimeState?.localSttActive);
+  const effectiveRealtimeLabel = isEmbedded && effectiveVoiceMode === "local" && shellRealtimeState?.joined
+    ? `${speechProviderLabel(effectiveSpeechProvider)} · ${effectiveLocalSttActive ? "listening" : "idle"} · ${effectiveRealtimeMuted ? "muted" : "browser speech"}`
+    : effectiveRealtimeConnected
+      ? `${effectiveVoiceMode === "hybrid" ? `${speechProviderLabel(effectiveSpeechProvider)} + ` : ""}${effectiveRealtimeMuted ? "Muted listener" : "Audio responder"} · ${realtimeActivationLabel(effectiveRealtimeActivationMode)} · ${effectiveRealtimeResponseMode}`
     : effectiveRealtimeState === "connecting"
       ? "Connecting"
       : isEmbedded && shellRealtimeState?.joined
@@ -1231,10 +1239,10 @@ function App() {
                       ? "Realtime agent connecting"
                       : "Realtime agent idle"}
               </div>
-              {effectiveRealtimeState !== "connecting" && (
+              {effectiveVoiceMode !== "local" && effectiveRealtimeState !== "connecting" && (
                 <button className="secondary" onClick={restartRealtimeAgent}>{effectiveRealtimeState === "connected" ? "Restart voice agent" : "Retry voice agent"}</button>
               )}
-              {effectiveRealtimeConnected && (
+              {(effectiveRealtimeConnected || (isEmbedded && effectiveVoiceMode === "local" && shellRealtimeState?.joined)) && (
                 <button className="secondary" onClick={() => setRealtimeAgentMuted(!effectiveRealtimeMuted)}>{effectiveRealtimeMuted ? "Unmute agent" : "Mute agent"}</button>
               )}
               {effectiveRealtimeConnected && (
@@ -2869,6 +2877,13 @@ function stringValue(value: unknown): string {
 function clipText(text: string, maxLength: number): string {
   const normalized = text.trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function speechProviderLabel(provider: string): string {
+  if (provider === "voxtral-http") return "Local Voxtral";
+  if (provider === "local-whisper") return "Local Whisper";
+  if (provider === "moshi-http") return "Local Moshi";
+  return "Local STT";
 }
 
 function shouldRelayDirectVoiceText(text: string): boolean {
