@@ -1,0 +1,15 @@
+{
+  "kind": "note",
+  "slug": "concise-prompt-rendering-guidance",
+  "title": "Concise Prompt Rendering Guidance",
+  "createdAt": "2026-05-10T02:02:33.896Z",
+  "updatedAt": "2026-05-10T02:02:33.896Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "terminal",
+    "prompt-rendering",
+    "concision",
+    "guidance"
+  ],
+  "summary": "Short guidance for rendering pi-agent questions and instructions with minimal boilerplate, before/after examples, and a reusable template."
+}
