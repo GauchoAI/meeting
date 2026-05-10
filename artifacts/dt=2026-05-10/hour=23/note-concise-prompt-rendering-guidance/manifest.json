@@ -3,7 +3,7 @@
   "slug": "concise-prompt-rendering-guidance",
   "title": "Concise Prompt Rendering Guidance",
   "createdAt": "2026-05-10T02:02:33.896Z",
-  "updatedAt": "2026-05-10T02:02:33.896Z",
+  "updatedAt": "2026-05-10T02:17:30.000Z",
   "artifact": "artifact.smart.md",
   "tags": [
     "terminal",
@@ -11,5 +11,5 @@
     "concision",
     "guidance"
   ],
-  "summary": "Short guidance for rendering pi-agent questions and instructions with minimal boilerplate, before/after examples, and a reusable template."
+  "summary": "Concise guidance for rendering pi-agent questions and instructions with current-vs-preferred examples, a reusable template, and a canvas selection rule that keeps artifacts ahead of wrapper status."
 }
