@@ -2,7 +2,7 @@
 
 ## Opinion
 
-The current canvas-style status message is clear and scannable in a visual meeting UI, but it is too structured for terminal output. Terminal rendering should be flatter, shorter, and minimally formatted so it reads well in a narrow, linear stream.
+Canvas-style status messages can use headings and bullets, but terminal status should be compact, linear, and minimally formatted. Prefer three readable lines over a full structured report.
 
 ## Before — canvas-style
 
@@ -37,7 +37,3 @@ Status: <one-line current state>
 Confidence: <level> — <short reason>
 Next: <1–3 concrete actions>
 ```
-
-## Rule of thumb
-
-Use headings and bullets for canvas artifacts; use three compact lines for terminal status messages.

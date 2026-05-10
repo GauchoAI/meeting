@@ -3,7 +3,7 @@
   "slug": "terminal-message-rendering-guidance",
   "title": "Terminal Message Rendering Guidance",
   "createdAt": "2026-05-10T01:26:05.129Z",
-  "updatedAt": "2026-05-10T01:26:05.129Z",
+  "updatedAt": "2026-05-10T01:27:09.086Z",
   "artifact": "artifact.smart.md",
   "tags": [
     "terminal",
@@ -11,5 +11,5 @@
     "assistant-messages",
     "guidance"
   ],
-  "summary": "Guidance for converting structured canvas-style assistant status messages into concise terminal-friendly output."
+  "summary": "Terminal-friendly assistant message rendering guidance with opinion, before/after example, and template."
 }
