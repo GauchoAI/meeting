@@ -76,6 +76,10 @@ const server = createServer(async (req, res) => {
     const payload = await readJson<{ name?: string; arguments?: unknown }>(req);
     return runRealtimeTool(payload.name || "", payload.arguments, res);
   }
+  if (req.method === "POST" && url.pathname === "/tts/synthesize") {
+    const payload = await readJson<{ text?: string }>(req);
+    return synthesizeLocalSpeech(payload.text || "", res);
+  }
   if (req.method === "POST" && url.pathname === "/audio/chunk") {
     const extension = url.searchParams.get("extension") || "webm";
     const speakerLabel = url.searchParams.get("speaker") || "Host";
@@ -326,6 +330,17 @@ function sendJson(res: ServerResponse, payload: unknown, status = 200): void {
   sendCorsHeaders(res);
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+function sendBinary(res: ServerResponse, body: Buffer, contentTypeValue: string, extraHeaders: Record<string, string> = {}): void {
+  sendCorsHeaders(res);
+  res.writeHead(200, {
+    "Content-Type": contentTypeValue,
+    "Content-Length": String(body.length),
+    "Cache-Control": "no-cache",
+    ...extraHeaders
+  });
+  res.end(body);
 }
 
 function sendArtifactFile(pathname: string, res: ServerResponse): void {
@@ -603,6 +618,43 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
     res.end(answer);
   } catch (error) {
     sendJson(res, { error: error instanceof Error ? error.message : String(error) }, 500);
+  }
+}
+
+async function synthesizeLocalSpeech(text: string, res: ServerResponse): Promise<void> {
+  const compact = compactText(text, 700);
+  if (!compact) return sendJson(res, { ok: false, error: "missing text" }, 400);
+  const endpoint = process.env.CHATTERBOX_TTS_URL || process.env.MEETING_TTS_URL || "http://127.0.0.1:8791/synthesize";
+  const startedAt = Date.now();
+  appendTrace("latency", "tts.start", { provider: "chatterbox-turbo", endpoint, textChars: compact.length });
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: compact })
+    });
+    const contentTypeHeader = response.headers.get("content-type") || "";
+    const elapsedMs = Date.now() - startedAt;
+    if (!response.ok) {
+      const body = await response.text();
+      appendTrace("error", "tts.failed", { provider: "chatterbox-turbo", status: response.status, elapsedMs, body: body.slice(0, 1000) });
+      return sendJson(res, { ok: false, error: body || `local TTS returned ${response.status}` }, 502);
+    }
+    const audio = Buffer.from(await response.arrayBuffer());
+    appendTrace("latency", "tts.end", {
+      provider: "chatterbox-turbo",
+      elapsedMs,
+      bytes: audio.length,
+      upstreamElapsedMs: response.headers.get("x-tts-elapsed-ms")
+    });
+    sendBinary(res, audio, contentTypeHeader.includes("audio/") ? contentTypeHeader : "audio/wav", {
+      "X-TTS-Provider": response.headers.get("x-tts-provider") || "chatterbox-turbo",
+      "X-TTS-Elapsed-Ms": response.headers.get("x-tts-elapsed-ms") || String(elapsedMs)
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendTrace("error", "tts.failed", { provider: "chatterbox-turbo", endpoint, message });
+    sendJson(res, { ok: false, error: message }, 503);
   }
 }
 

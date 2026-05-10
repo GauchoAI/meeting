@@ -1196,7 +1196,7 @@ function App() {
   const effectiveSpeechProvider = shellRealtimeState?.speechProvider || "";
   const effectiveLocalSttActive = Boolean(shellRealtimeState?.localSttActive);
   const effectiveRealtimeLabel = isEmbedded && effectiveVoiceMode === "local" && shellRealtimeState?.joined
-    ? `${speechProviderLabel(effectiveSpeechProvider)} · ${effectiveLocalSttActive ? "listening" : "idle"} · ${effectiveRealtimeMuted ? "muted" : "browser speech"}`
+    ? `${speechProviderLabel(effectiveSpeechProvider)} · ${effectiveLocalSttActive ? "listening" : "idle"} · ${effectiveRealtimeMuted ? "muted" : "local TTS"}`
     : effectiveRealtimeConnected
       ? `${effectiveVoiceMode === "hybrid" ? `${speechProviderLabel(effectiveSpeechProvider)} + ` : ""}${effectiveRealtimeMuted ? "Muted listener" : "Audio responder"} · ${realtimeActivationLabel(effectiveRealtimeActivationMode)} · ${effectiveRealtimeResponseMode}`
     : effectiveRealtimeState === "connecting"

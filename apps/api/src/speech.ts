@@ -5,7 +5,12 @@ export interface SpeechProviderStatus {
   provider: "local-whisper" | "deepgram" | "voxtral-http" | "moshi-http";
   configured: boolean;
   streamingStt: boolean;
-  streamingTts: false;
+  streamingTts: boolean;
+  localTts?: {
+    provider: "chatterbox-turbo";
+    configured: boolean;
+    endpoint: string;
+  };
   settingsPath?: string;
   listenModel?: string;
   speakModel?: string;
@@ -21,11 +26,21 @@ export function speechProviderStatus(): SpeechProviderStatus {
     configured: speechProviderConfigured(provider),
     streamingStt: streamingSttSupported(provider),
     streamingTts: false,
+    localTts: localTtsStatus(),
     settingsPath: settings.path,
     listenModel: localListenModel(provider) || settings.listenModel,
     speakModel: settings.speakModel,
     thinkModel: settings.thinkModel,
     note: speechProviderNote(provider)
+  };
+}
+
+function localTtsStatus(): SpeechProviderStatus["localTts"] {
+  const endpoint = process.env.CHATTERBOX_TTS_URL || process.env.MEETING_TTS_URL || "http://127.0.0.1:8791/synthesize";
+  return {
+    provider: "chatterbox-turbo",
+    configured: true,
+    endpoint
   };
 }
 

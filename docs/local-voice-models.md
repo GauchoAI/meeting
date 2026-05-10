@@ -38,7 +38,7 @@ The bridge is intentionally simple: it receives each browser audio chunk, transc
 The stable shell exposes three voice modes:
 
 - `OpenAI voice`: the previous OpenAI Realtime listen/speak path.
-- `Local Voxtral`: microphone chunks go to `/audio/chunk`, which uses Voxtral through `STT_PROVIDER=voxtral-http`; Pi/Codex remains the tool-using brain; explicit Pi voice messages are spoken with browser speech synthesis.
+- `Local Voxtral`: microphone chunks go to `/audio/chunk`, which uses Voxtral through `STT_PROVIDER=voxtral-http`; Pi/Codex remains the tool-using brain; explicit Pi voice messages must use the local TTS path, not browser speech synthesis.
 - `Hybrid`: OpenAI Realtime remains the conversational voice while local Voxtral also writes transcript events into the Meeting/Pi pipeline.
 
 When `.env` sets `STT_PROVIDER=voxtral-http`, the stable shell defaults to `Local Voxtral` unless `localStorage.meeting.voiceMode` already has a saved preference.

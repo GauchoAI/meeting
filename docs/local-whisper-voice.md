@@ -1,6 +1,6 @@
 # Local Whisper Voice Path
 
-The reliable voice architecture is: browser VAD captures turns, local Whisper transcribes them, Pi/Codex owns reasoning and tools, and the stable shell speaks Codex replies through local/browser TTS.
+The reliable voice architecture is: browser capture sends explicit speech turns, local Whisper transcribes them, Pi/Codex owns reasoning and tools, and the stable shell speaks prepared replies through local TTS only.
 
 ## Runtime Shape
 
@@ -63,5 +63,5 @@ localStorage.removeItem("meeting.localAcousticBargeIn")
 ## Remaining V2 Work
 
 - Add partial transcript events from a true streaming Whisper worker or `whisper-stream`.
-- Add a local streaming TTS worker if browser `speechSynthesis` is not good enough.
+- Make the local Chatterbox TTS worker stream chunks instead of waiting for a full WAV before playback.
 - Add an explicit "Codex was interrupted" event so Pi can stop long replies or summarize where it left off.

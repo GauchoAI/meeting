@@ -103,6 +103,8 @@
     let localSttSuppressUploadsUntil = 0;
     let localSttPausedForSpeech = false;
     let localPushToTalkActive = false;
+    let localSpeechAudio = null;
+    let localSpeechAudioUrl = null;
     let localSpeechStartedAt = 0;
     let localSpeechBargeInStartedAt = 0;
     let localSpeechResumeTimer = null;
@@ -227,7 +229,7 @@
         window.clearTimeout(localSpeechResumeTimer);
         localSpeechResumeTimer = null;
       }
-      window.speechSynthesis?.cancel();
+      stopLocalSpeechAudio();
       localStream?.getTracks().forEach((track) => track.stop());
       localStream = null;
       joinButton.hidden = false;
@@ -1052,7 +1054,7 @@
       if (localSttPausedForSpeech) {
         const level = currentLocalMicLevel();
         const canInterrupt = now - localSpeechStartedAt >= localBargeInGraceMs();
-        if (localAcousticBargeInEnabled() && canInterrupt && window.speechSynthesis?.speaking && level >= localBargeInThreshold()) {
+        if (localAcousticBargeInEnabled() && canInterrupt && localSpeechAudioPlaying() && level >= localBargeInThreshold()) {
           if (!localSpeechBargeInStartedAt) localSpeechBargeInStartedAt = now;
           if (now - localSpeechBargeInStartedAt >= localBargeInHoldMs()) {
             interruptLocalSpeechForBargeIn(level);
@@ -1173,7 +1175,7 @@
       localSttPausedForSpeech = false;
       localSpeechStartedAt = 0;
       localSpeechBargeInStartedAt = 0;
-      window.speechSynthesis?.cancel();
+      stopLocalSpeechAudio();
       void postRealtimeTrace("agent", "Local voice speech interrupted by push-to-talk", undefined);
     }
 
@@ -1283,31 +1285,80 @@
       if (realtimeMuted) return;
       const message = localSpeechTextForPiAgentUpdate(event);
       if (!message) return;
-      speakLocalVoiceMessage(message);
-      await postRealtimeTrace("agent", "Local voice spoke Pi/Codex message", { eventId: event.id, direct: isVoiceAgentDirectMessage(event) });
+      await speakLocalVoiceMessage(message);
+      await postRealtimeTrace("agent", "Local TTS played Pi/Codex message", { eventId: event.id, direct: isVoiceAgentDirectMessage(event) });
     }
 
-    function speakLocalVoiceMessage(message) {
-      if (!("speechSynthesis" in window)) return;
+    async function speakLocalVoiceMessage(message) {
       localSpeechGeneration += 1;
       const generation = localSpeechGeneration;
       const text = clipText(message, 360);
       pauseLocalSttForSpeech();
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1;
-      utterance.pitch = 1;
-      const finish = () => {
+      stopLocalSpeechAudio();
+      renderStatus("preparing local voice", "speaking");
+      try {
+        const response = await fetch(`${api}/tts/synthesize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
         if (generation !== localSpeechGeneration) return;
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || `local TTS returned ${response.status}`);
+        }
+        const blob = await response.blob();
+        if (generation !== localSpeechGeneration) return;
+        await playLocalSpeechBlob(blob, generation);
+      } catch (error) {
+        if (generation !== localSpeechGeneration) return;
+        await postRealtimeTrace("error", "Local TTS failed; browser speech fallback is disabled", { error: error?.message || String(error) });
+        renderStatus("local TTS unavailable; speech skipped", "ready");
         resumeLocalSttAfterSpeech();
-      };
-      utterance.onend = finish;
-      utterance.onerror = finish;
-      window.speechSynthesis.speak(utterance);
-      const fallbackMs = Math.max(1800, Math.min(14000, text.split(/\s+/).filter(Boolean).length * 430 + 900));
-      window.setTimeout(() => {
-        if (generation === localSpeechGeneration && localSttPausedForSpeech && !window.speechSynthesis.speaking) finish();
-      }, fallbackMs);
+      }
+    }
+
+    function playLocalSpeechBlob(blob, generation) {
+      return new Promise((resolve) => {
+        stopLocalSpeechAudio();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        localSpeechAudio = audio;
+        localSpeechAudioUrl = url;
+        const finish = () => {
+          if (generation === localSpeechGeneration) resumeLocalSttAfterSpeech();
+          if (localSpeechAudio === audio) {
+            localSpeechAudio = null;
+            localSpeechAudioUrl = null;
+          }
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        audio.onended = finish;
+        audio.onerror = finish;
+        renderStatus("local voice speaking", "speaking");
+        void audio.play().catch((error) => {
+          void postRealtimeTrace("error", "Local TTS playback failed", { error: error?.message || String(error) });
+          finish();
+        });
+      });
+    }
+
+    function localSpeechAudioPlaying() {
+      return Boolean(localSpeechAudio && !localSpeechAudio.paused && !localSpeechAudio.ended);
+    }
+
+    function stopLocalSpeechAudio() {
+      if (localSpeechAudio) {
+        localSpeechAudio.pause();
+        localSpeechAudio.removeAttribute("src");
+        localSpeechAudio.load();
+        localSpeechAudio = null;
+      }
+      if (localSpeechAudioUrl) {
+        URL.revokeObjectURL(localSpeechAudioUrl);
+        localSpeechAudioUrl = null;
+      }
     }
 
     function pauseLocalSttForSpeech() {
@@ -1343,7 +1394,7 @@
       localSpeechStartedAt = 0;
       localSpeechBargeInStartedAt = 0;
       localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 220);
-      window.speechSynthesis?.cancel();
+      stopLocalSpeechAudio();
       if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
       renderStatus("local voice interrupted; listening", "ready");
       publishShellState();
