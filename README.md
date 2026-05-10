@@ -101,7 +101,7 @@ Behavior:
   task cards, inspecting the repo, or handing off implementation work to
   `pi-agent`;
 - raw Realtime transcript is not sent directly to Codex; the Realtime agent
-  sends concise JSONL handoffs with `run_codex_task`;
+  sends concise structured handoffs with `run_codex_task`;
 - `pi-agent` receives those handoffs through the existing meeting extension,
   invokes local Codex, and answers back through Meeting tools/artifacts;
 - Realtime watches `pi-agent` messages and raised hands, injects them directly

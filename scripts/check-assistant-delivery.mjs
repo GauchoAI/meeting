@@ -10,11 +10,12 @@ const checks = [
   [api.includes('surface: "canvas"') && api.includes('surface: "status"'), "Delivery workflow separates canvas and status surfaces"],
   [api.includes('formatAssistantStatusMarkdown') && api.includes('formatAssistantCanvasMarkdown'), "Delivery workflow uses shared canvas/status formatters"],
   [api.includes('formatPiHandoffForHumans') && api.includes('Task: ${input.title}') && api.includes('Output: ${inferHumanOutputTarget'), "Pi handoff utterances use Task/Context/Constraints/Output format"],
+  [api.includes('Send a concise structured implementation handoff') && web.includes('run_codex_task sends a concise structured handoff'), "Realtime handoff instructions avoid user-facing JSONL wording"],
   [!api.includes('Treat the JSONL below as the task handoff') && !api.includes('Use the Meeting artifact tools to answer in the Meeting UI'), "Human-facing handoffs do not expose raw JSONL boilerplate"],
-  [web.includes('const latestCanvas = canvasMessages[0]') && web.includes('setSelectedCanvasDocumentId(latestCanvas.documentId)'), "Web UI auto-selects latest canvas document"],
+  [web.includes('const selectableCanvasMessages') && web.includes('const focusedCanvasMessage') && !web.includes('setSelectedCanvasDocumentId(latestCanvas.documentId)'), "Web UI keeps manual canvas focus while Auto follows real canvas documents"],
   [web.includes('event.surface === "status" && !event.documentId && event.stream !== "implementation"') && !web.includes('text.length >= 40'), "Realtime notification ignores status-only pi-agent wrappers"],
-  [web.includes('Task: Review latest Pi/Codex output.') && web.includes('Constraints: Preserve the selected artifact/canvas'), "Realtime Pi updates use preferred message format"],
-  [docs.includes('deliver_assistant_output') && docs.includes('Status: <one-line current state>'), "Delivery workflow docs describe command and template"]
+  [web.includes('Task: Review latest Pi/Codex output.') && web.includes('status-only updates should not replace it') && !web.includes('Context: surface='), "Realtime Pi updates use preferred message format without routing metadata"],
+  [docs.includes('deliver_assistant_output') && docs.includes('Status: <one-line current state>') && docs.includes('status-only delivery replace'), "Delivery workflow docs describe command and template"]
 ];
 
 const failures = checks.filter(([ok]) => !ok).map(([, message]) => message);

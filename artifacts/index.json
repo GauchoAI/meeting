@@ -1,6 +1,319 @@
 {
-  "updatedAt": "2026-05-06T19:51:57.812Z",
+  "updatedAt": "2026-05-10T02:10:07.499Z",
   "artifacts": [
+    {
+      "kind": "note",
+      "slug": "exact-verbatim-input-comparison",
+      "title": "Exact Verbatim Input View and Comparison",
+      "createdAt": "2026-05-10T02:10:07.480Z",
+      "updatedAt": "2026-05-10T02:10:07.480Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "verbatim",
+        "prompt-rendering",
+        "comparison",
+        "terminal"
+      ],
+      "summary": "Exact received Task/Context/Constraints/Output input plus concise differences versus the current verbatim message rendering artifact.",
+      "path": "artifacts/dt=2026-05-10/hour=23/note-exact-verbatim-input-comparison/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=23/note-exact-verbatim-input-comparison",
+      "mtime": "2026-05-10T02:10:07.488Z"
+    },
+    {
+      "kind": "note",
+      "slug": "verbatim-message-rendering-before-after",
+      "title": "Verbatim Message Rendering: Current vs Preferred",
+      "createdAt": "2026-05-10T02:03:37.263Z",
+      "updatedAt": "2026-05-10T02:08:02.179Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "voice-agent",
+        "prompt-rendering",
+        "terminal",
+        "before-after"
+      ],
+      "summary": "Roundtrip-tested verbatim before/after examples for rendering voice-agent handoffs while preserving actionable tasks.",
+      "path": "artifacts/dt=2026-05-10/hour=23/note-verbatim-message-rendering-before-after/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=23/note-verbatim-message-rendering-before-after",
+      "mtime": "2026-05-10T02:08:02.189Z"
+    },
+    {
+      "kind": "note",
+      "slug": "concise-prompt-rendering-guidance",
+      "title": "Concise Prompt Rendering Guidance",
+      "createdAt": "2026-05-10T02:02:33.896Z",
+      "updatedAt": "2026-05-10T02:02:33.896Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "terminal",
+        "prompt-rendering",
+        "concision",
+        "guidance"
+      ],
+      "summary": "Short guidance for rendering pi-agent questions and instructions with minimal boilerplate, before/after examples, and a reusable template.",
+      "path": "artifacts/dt=2026-05-10/hour=23/note-concise-prompt-rendering-guidance/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=23/note-concise-prompt-rendering-guidance",
+      "mtime": "2026-05-10T02:02:33.905Z"
+    },
+    {
+      "kind": "implementation",
+      "slug": "create-and-open-terminal-rendering-guidance-artifact",
+      "title": "Create and open terminal-rendering guidance artifact",
+      "createdAt": "2026-05-10T01:30:01.142Z",
+      "updatedAt": "2026-05-10T01:30:01.142Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Pi agent implementation output for Create and open terminal-rendering guidance artifact",
+      "path": "artifacts/dt=2026-05-10/hour=22/implementation-create-and-open-terminal-rendering-guidance-artifact/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=22/implementation-create-and-open-terminal-rendering-guidance-artifact",
+      "mtime": "2026-05-10T01:30:01.152Z"
+    },
+    {
+      "kind": "note",
+      "slug": "terminal-message-rendering-guidance",
+      "title": "Terminal Message Rendering Guidance",
+      "createdAt": "2026-05-10T01:26:05.129Z",
+      "updatedAt": "2026-05-10T01:27:09.086Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "terminal",
+        "rendering",
+        "assistant-messages",
+        "guidance"
+      ],
+      "summary": "Terminal-friendly assistant message rendering guidance with opinion, before/after example, and template.",
+      "path": "artifacts/dt=2026-05-10/hour=22/note-terminal-message-rendering-guidance/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=22/note-terminal-message-rendering-guidance",
+      "mtime": "2026-05-10T01:27:09.093Z"
+    },
+    {
+      "kind": "plan",
+      "slug": "project-plan",
+      "title": "Project Plan Notes (Draft)",
+      "createdAt": "2026-05-09T21:41:29.915Z",
+      "updatedAt": "2026-05-09T21:41:29.915Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "project",
+        "plan",
+        "draft"
+      ],
+      "summary": "Draft project plan captured from the current live canvas, including SaaS direction, AWS deployment intent, paid users, WhatsApp via Matrix integration, and open questions.",
+      "path": "artifacts/dt=2026-05-09/hour=18/plan-project-plan/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=18/plan-project-plan",
+      "mtime": "2026-05-09T21:41:29.929Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "napoleon-uniforms-excalidraw",
+      "title": "Napoleon’s Uniforms (Excalidraw Sketch)",
+      "createdAt": "2026-05-09T19:08:21.000Z",
+      "updatedAt": "2026-05-09T19:54:27.383Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "napoleon",
+        "uniforms",
+        "excalidraw",
+        "diagram",
+        "french-army"
+      ],
+      "summary": "Improved sketch of French line, light, and Imperial Guard uniform groupings with clearer roles, headgear cues, and a small legend.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-uniforms-excalidraw/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-uniforms-excalidraw",
+      "mtime": "2026-05-09T19:55:23.666Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "julius-caesar-politics-bash",
+      "title": "Julius Caesar: Politics (Bash-Only)",
+      "createdAt": "2026-05-09T19:15:47.984Z",
+      "updatedAt": "2026-05-09T19:15:47.984Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Bash-only attempt: an Excalidraw sketch of political blocs, alliances, and influence around Julius Caesar.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-julius-caesar-politics-bash/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-julius-caesar-politics-bash",
+      "mtime": "2026-05-09T19:15:47.992Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "napoleon-battle-plan-bash",
+      "title": "Napoleon: Battle Plan (Bash-Only)",
+      "createdAt": "2026-05-09T19:14:55.385Z",
+      "updatedAt": "2026-05-09T19:14:55.385Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Bash-only attempt: an Excalidraw sketch of a simple battle plan with wings, center, reserve, artillery, and key terrain.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-battle-plan-bash/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-battle-plan-bash",
+      "mtime": "2026-05-09T19:14:55.393Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "napoleon-battle-plan-excalidraw",
+      "title": "Napoleon: Battle Plan (Excalidraw Sketch)",
+      "createdAt": "2026-05-09T19:13:59.000Z",
+      "updatedAt": "2026-05-09T19:13:59.000Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "napoleon",
+        "battle-plan",
+        "excalidraw",
+        "diagram",
+        "military-history"
+      ],
+      "summary": "An Excalidraw-style battlefield sketch of Napoleon’s left, center, right, reserves, artillery, and key terrain.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-battle-plan-excalidraw/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-battle-plan-excalidraw",
+      "mtime": "2026-05-09T19:14:35.521Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "napoleon-command-structure-bash",
+      "title": "Napoleon: Command & Arms (Bash-Only)",
+      "createdAt": "2026-05-09T19:13:01.195Z",
+      "updatedAt": "2026-05-09T19:13:01.195Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Bash-only attempt: an Excalidraw map of Headquarters, Corps, combat arms, and lines of communication.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-command-structure-bash/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-command-structure-bash",
+      "mtime": "2026-05-09T19:13:01.202Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "napoleon-command-structure-excalidraw",
+      "title": "Napoleon: Command & Arms (Excalidraw Map)",
+      "createdAt": "2026-05-09T19:11:36.000Z",
+      "updatedAt": "2026-05-09T19:11:36.000Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "napoleon",
+        "command-structure",
+        "excalidraw",
+        "diagram",
+        "military-history"
+      ],
+      "summary": "An Excalidraw-style map of Napoleon’s headquarters, corps, battlefield arms, and communication links.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-command-structure-excalidraw/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-command-structure-excalidraw",
+      "mtime": "2026-05-09T19:12:21.492Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "napoleon-uniforms-excalidraw-escaped",
+      "title": "Napoleon’s Uniforms (Excalidraw Sketch Escaped)",
+      "createdAt": "2026-05-09T19:10:23.781Z",
+      "updatedAt": "2026-05-09T19:10:23.781Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Escaped shell attempt to create a diagram artifact with an Excalidraw sketch.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-uniforms-excalidraw-escaped/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-uniforms-excalidraw-escaped",
+      "mtime": "2026-05-09T19:54:46.977Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "napoleon-uniforms-excalidraw-direct",
+      "title": "Napoleon’s Uniforms (Excalidraw Sketch Direct)",
+      "createdAt": "2026-05-09T19:09:53.049Z",
+      "updatedAt": "2026-05-09T19:09:53.049Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Direct shell attempt to create a diagram artifact with an Excalidraw sketch.",
+      "path": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-uniforms-excalidraw-direct/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/diagram-napoleon-uniforms-excalidraw-direct",
+      "mtime": "2026-05-09T19:09:53.058Z"
+    },
+    {
+      "kind": "note",
+      "slug": "napoleon-army-uniforms-retry",
+      "title": "Napoleon’s Army Uniforms (Retry)",
+      "createdAt": "2026-05-09T19:07:12.184Z",
+      "updatedAt": "2026-05-09T19:07:12.184Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Retry attempt for creating a note artifact about Napoleonic-era French uniforms.",
+      "path": "artifacts/dt=2026-05-09/hour=16/note-napoleon-army-uniforms-retry/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/note-napoleon-army-uniforms-retry",
+      "mtime": "2026-05-09T19:07:12.190Z"
+    },
+    {
+      "kind": "note",
+      "slug": "napoleon-army-uniforms",
+      "title": "Napoleon’s Army Uniforms",
+      "createdAt": "2026-05-09T19:03:48.882Z",
+      "updatedAt": "2026-05-09T19:03:48.882Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "napoleon",
+        "napoleonic-wars",
+        "uniforms",
+        "french-army",
+        "military-history"
+      ],
+      "summary": "A concise note on the look, function, and meaning of French army uniforms during the Napoleonic era.",
+      "path": "artifacts/dt=2026-05-09/hour=16/note-napoleon-army-uniforms/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-09/hour=16/note-napoleon-army-uniforms",
+      "mtime": "2026-05-09T19:04:17.612Z"
+    },
+    {
+      "kind": "diagram",
+      "slug": "meeting-project-architecture",
+      "title": "Meeting Project Architecture",
+      "createdAt": "2026-05-06T21:44:18.099Z",
+      "updatedAt": "2026-05-06T21:44:18.099Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "meeting",
+        "architecture",
+        "project",
+        "diagrams",
+        "local-first"
+      ],
+      "summary": "A rendered architecture overview of the local-first Meeting project: browser UI, API event bus, transcript pipeline, agents, MCP tools, artifacts, and wiki retrieval.",
+      "path": "artifacts/dt=2026-05-06/hour=18/diagram-meeting-project-architecture/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=18/diagram-meeting-project-architecture",
+      "mtime": "2026-05-06T21:46:54.897Z"
+    },
+    {
+      "kind": "note",
+      "slug": "sir-tristan-and-older-legends",
+      "title": "Sir Tristan and His Older Legends",
+      "createdAt": "2026-05-06T21:27:03.945Z",
+      "updatedAt": "2026-05-06T21:27:03.945Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "sir-tristan",
+        "arthurian-legend",
+        "tristan-and-isolde",
+        "medieval-romance",
+        "knights"
+      ],
+      "summary": "A focused artifact on Sir Tristan, his place in Arthurian tradition, and the older Celtic and medieval romance layers behind his story.",
+      "path": "artifacts/dt=2026-05-06/hour=18/note-sir-tristan-and-older-legends/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=18/note-sir-tristan-and-older-legends",
+      "mtime": "2026-05-06T21:27:03.954Z"
+    },
+    {
+      "kind": "note",
+      "slug": "napoleonic-artillery-armament",
+      "title": "Napoleonic Artillery Armament Across Europe",
+      "createdAt": "2026-05-06T21:22:47.521Z",
+      "updatedAt": "2026-05-06T21:22:47.521Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "napoleon",
+        "napoleonic-wars",
+        "artillery",
+        "military-history",
+        "diagrams"
+      ],
+      "summary": "An illustrated overview of artillery weapons and doctrine used by major powers during the Napoleonic Wars.",
+      "path": "artifacts/dt=2026-05-06/hour=18/note-napoleonic-artillery-armament/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-06/hour=18/note-napoleonic-artillery-armament",
+      "mtime": "2026-05-06T21:22:47.528Z"
+    },
     {
       "kind": "note",
       "slug": "arthur-battle-evidence-map",
@@ -70,7 +383,7 @@
       "summary": "A combined markdown note with both Excalidraw and Mermaid diagrams about the Knights of King Arthur.",
       "path": "artifacts/dt=2026-05-06/hour=14/note-knights-of-king-arthur/artifact.smart.md",
       "dir": "artifacts/dt=2026-05-06/hour=14/note-knights-of-king-arthur",
-      "mtime": "2026-05-06T19:51:47.517Z"
+      "mtime": "2026-05-06T21:23:41.781Z"
     },
     {
       "kind": "diagram",

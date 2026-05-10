@@ -7,7 +7,7 @@ Use `deliver_assistant_output` when an assistant result must appear consistently
 One tool call does the full delivery:
 
 1. Publishes structured Markdown to the canvas with a stable `documentId`.
-2. Selects the latest canvas document in the web UI automatically.
+2. Selects the latest real canvas document only while the web UI is in Auto focus mode.
 3. Emits a concise Realtime/status message without wrapping or replacing the canvas content.
 
 ## Canvas template
@@ -61,5 +61,6 @@ Next: <1–3 concrete actions>
 
 - Do not post a separate status wrapper as the main content.
 - Do not rely on status messages to carry durable artifact content.
+- Do not let status-only delivery replace the selected canvas or artifact.
 - Use stable `documentId` values so repeated calls update the same conceptual canvas document.
 - Keep status text flat; reserve headings and bullets for canvas Markdown.

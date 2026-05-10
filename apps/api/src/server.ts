@@ -512,7 +512,7 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "run_codex_task",
-        description: "Send a concise JSONL handoff to the running pi-agent session. Pi-agent invokes Codex and answers back into the meeting through its artifact/UI tools.",
+        description: "Send a concise structured implementation handoff to the running pi-agent session. Pi-agent invokes Codex and answers back into the meeting through its artifact/UI tools.",
         parameters: {
           type: "object",
           properties: {
@@ -521,7 +521,7 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
             taskKey: { type: "string", description: "Optional stable task key for lifecycle updates." },
             taskClass: { type: "string", enum: ["artifact.render", "artifact.edit", "code.change", "research.explore", "critique.review", "conversation"] },
             hints: { type: "array", items: { type: "string" }, description: "Optional short hints from the Realtime agent for pi-agent." },
-            contextJsonl: { type: "string", description: "Optional newline-delimited JSON handoff records. If omitted, the API builds records from prompt/title/hints." },
+            contextJsonl: { type: "string", description: "Advanced optional internal handoff records. Prefer prompt/title/hints for normal user-facing tasks." },
             sourceDocumentId: { type: "string", description: "Optional current canvas document id that motivated the task." },
             cwd: { type: "string", description: "Optional path relative to the allowed workspace root." }
           },
@@ -781,13 +781,13 @@ function buildRealtimeInstructions(): string {
     "In muted background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, and run_codex_task.",
     "When you create a planning or capture task, use create_meeting_task with stream=conversation.",
     "When you start or update proposed Codex execution work, use create_meeting_task with stream=implementation for visibility, then run_codex_task for execution.",
-    "run_codex_task sends your concise JSONL handoff to the running pi-agent session; it does not run Codex inline inside your conversation turn.",
+    "run_codex_task sends your concise structured handoff to the running pi-agent session; it does not run Codex inline inside your conversation turn.",
     "Prefer creating implementation tasks first; use run_codex_task only when you have a clear summary, task title, and hints for pi-agent.",
     "Do not speak automatically while muted; raise your hand with requestedMode=speak if you need the host to unmute/grant the floor.",
     "Do not say you need to go look up the current project plan if a current canvas document already exists. Read meeting context and work from that.",
     "pi-agent is the implementation brain that invokes local Codex and preserves hot reload/self-improvement behavior.",
     "run_codex_task is your primary tool for delegating real coding work in the repository to pi-agent.",
-    "Do not pass raw transcript dumps to run_codex_task. Pass a concise summary and short hints; raw user and agent communications are mirrored separately as JSONL.",
+    "Do not pass raw transcript dumps to run_codex_task. Pass a concise Task/Context/Constraints/Output-style summary and short hints; low-level communication mirroring happens separately in the implementation inbox.",
     "Human-granted Realtime conversation uses audio. Codex/pi-agent results use text in the UI.",
     "pi-agent answers appear back in the meeting as piAgent messages and hand raises. When pi-agent has a useful result, raise your hand with requestedMode=show or requestedMode=review, not requestedMode=speak.",
     "Pi/Codex updates may also arrive as direct text messages in your conversation; treat them as current context and react according to muted/unmuted state.",
@@ -1329,14 +1329,16 @@ async function processImplementationTask(taskKey: string, workingDir: string, ta
 
 function buildImplementationPrompt(title: string, details: string, task: Record<string, unknown>): string {
   const sourceDocumentId = typeof task.sourceDocumentId === "string" ? task.sourceDocumentId : "";
+  const context = [
+    sourceDocumentId ? `Source document: ${sourceDocumentId}.` : "",
+    details.trim() || "No additional task details were provided."
+  ].filter(Boolean).join(" ");
   return [
-    `Implementation task: ${title}`,
-    details ? `Details:\n${details}` : "",
-    sourceDocumentId ? `Source document: ${sourceDocumentId}` : "",
-    "Work in the current repository.",
-    "Make the appropriate code or content changes.",
-    "Return a concise summary of what changed, verification performed, and any remaining limitations."
-  ].filter(Boolean).join("\n\n");
+    `Task: ${title}`,
+    `Context: ${context}`,
+    "Constraints: Work in the current repository. Make the appropriate code or content changes. Preserve canvas focus for status-only assistant updates.",
+    "Output: Concise summary of what changed, verification performed, and any remaining limitations."
+  ].join("\n");
 }
 
 function summarizeImplementationResult(result: { ok?: boolean; stdout?: string; stderr?: string; code?: number | null }): string {
@@ -1455,17 +1457,73 @@ function optionalStringArray(value: unknown): string[] {
 }
 
 function formatPiHandoffForHumans(input: { title: string; prompt: string; hints: string[]; sourceDocumentId?: string; taskClass: string }): string {
+  const context = [
+    input.sourceDocumentId ? `Source document: ${input.sourceDocumentId}.` : "",
+    `Work type: ${humanTaskClassLabel(input.taskClass)}.`,
+    summarizePromptForHumans(input.prompt)
+  ].filter(Boolean).join(" ");
   const constraints = [
-    ...input.hints,
-    "Preserve actionable content; omit raw JSONL/routing metadata unless it changes the action.",
+    ...input.hints.map((hint) => normalizeHumanText(hint)).filter(Boolean),
+    "Preserve actionable content; omit raw transport records and routing metadata unless it changes the action.",
     "Keep the response concise and ensure status-only messages do not steal canvas focus."
   ];
   return [
     `Task: ${input.title}`,
-    `Context: ${input.sourceDocumentId ? `Source document is ${input.sourceDocumentId}; ` : ""}task class is ${input.taskClass}.`,
+    `Context: ${context}`,
     `Constraints: ${constraints.join(" ")}`,
     `Output: ${inferHumanOutputTarget(input.taskClass, input.prompt)}`
   ].join("\n");
+}
+
+function summarizePromptForHumans(prompt: string): string {
+  const normalized = normalizeHumanText(prompt);
+  if (!normalized) return "";
+  const records = parseJsonlRecords(prompt);
+  if (records.length) {
+    const extracted = records
+      .map((record) => typeof record.text === "string" ? record.text : typeof record.title === "string" ? record.title : "")
+      .map(normalizeHumanText)
+      .filter(Boolean)
+      .join(" ");
+    if (extracted) return clipHumanText(extracted, 1200);
+  }
+  return clipHumanText(normalized, 1200);
+}
+
+function parseJsonlRecords(text: string): Array<Record<string, unknown>> {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length || !lines.every((line) => line.startsWith("{") && line.endsWith("}"))) return [];
+  const records: Array<Record<string, unknown>> = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+      records.push(parsed as Record<string, unknown>);
+    } catch {
+      return [];
+    }
+  }
+  return records;
+}
+
+function normalizeHumanText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function clipHumanText(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function humanTaskClassLabel(taskClass: string): string {
+  switch (taskClass) {
+    case "artifact.render": return "artifact rendering";
+    case "artifact.edit": return "artifact editing";
+    case "code.change": return "code change";
+    case "research.explore": return "research";
+    case "critique.review": return "review";
+    case "conversation": return "conversation support";
+    default: return "implementation";
+  }
 }
 
 function inferHumanOutputTarget(taskClass: string, prompt: string): string {

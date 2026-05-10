@@ -242,14 +242,17 @@ function App() {
   const transcriptEvents = events.filter((event): event is UtteranceEvent | PartialUtteranceEvent => (event.type === "utterance.final" || event.type === "utterance.partial") && (event.stream || "conversation") === "conversation").slice(0, 16);
   const canvasMessages = messages.filter((event) => isCanvasMessage(event) && (event.stream || "conversation") === "conversation");
   const implementationCanvasMessages = messages.filter((event) => isCanvasMessage(event) && event.stream === "implementation");
+  const selectableCanvasMessages = [...canvasMessages, ...implementationCanvasMessages].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const statusMessages = messages.filter((event) => !isCanvasMessage(event));
   const conversationStatusMessages = statusMessages.filter((event) => (event.stream || "conversation") === "conversation");
   const implementationStatusMessages = statusMessages.filter((event) => event.stream === "implementation");
-  const explicitCanvasDocument = resolveCanvasDocument(query, canvasMessages);
-  const selectedCanvasMessage = selectedCanvasDocumentId ? canvasMessages.find((event) => event.documentId === selectedCanvasDocumentId) : undefined;
-  const liveCanvasMessage = canvasMessages.find((event) => event.documentId === realtimeLiveCanvasDocumentId) || canvasMessages[0];
-  const canvasDocument = explicitCanvasDocument || (selectedCanvasMessage
-    ? { agentId: selectedCanvasMessage.agentId, text: selectedCanvasMessage.text, createdAt: selectedCanvasMessage.createdAt, documentId: selectedCanvasMessage.documentId }
+  const explicitCanvasDocument = resolveCanvasDocument(query, selectableCanvasMessages);
+  const selectedCanvasMessage = selectedCanvasDocumentId ? selectableCanvasMessages.find((event) => event.documentId === selectedCanvasDocumentId) : undefined;
+  const liveCanvasMessage = canvasMessages.find((event) => event.documentId === realtimeLiveCanvasDocumentId) || selectableCanvasMessages[0];
+  const autoCanvasMessage = selectableCanvasMessages[0] || liveCanvasMessage;
+  const focusedCanvasMessage = selectedCanvasMessage || (selectedCanvasDocumentId ? liveCanvasMessage : autoCanvasMessage);
+  const canvasDocument = explicitCanvasDocument || (focusedCanvasMessage
+    ? { agentId: focusedCanvasMessage.agentId, text: focusedCanvasMessage.text, createdAt: focusedCanvasMessage.createdAt, documentId: focusedCanvasMessage.documentId }
     : undefined);
   const latestStatusMessage = conversationStatusMessages[0];
   const renderStats = summarizeRenderSamples(renderSamples);
@@ -266,13 +269,6 @@ function App() {
   useEffect(() => {
     if (activeHandRaises.length > 0) setControlCenterOpen(true);
   }, [activeHandRaises.length]);
-
-  useEffect(() => {
-    const latestCanvas = canvasMessages[0];
-    if (!latestCanvas?.documentId) return;
-    if (selectedCanvasDocumentId === latestCanvas.documentId) return;
-    setSelectedCanvasDocumentId(latestCanvas.documentId);
-  }, [canvasMessages, selectedCanvasDocumentId]);
 
   async function joinMeeting() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -864,9 +860,9 @@ function App() {
           "Use create_meeting_task with stream=conversation for planning-side tasks.",
           "Use create_meeting_task with stream=implementation for proposed Codex work visibility, then run_codex_task for the actual pi-agent execution handoff.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",
-          "run_codex_task sends a concise JSONL handoff to the running pi-agent session; it does not run Codex inline inside this conversation turn.",
+          "run_codex_task sends a concise structured handoff to the running pi-agent session; it does not run Codex inline inside this conversation turn.",
           "Prefer implementation tasks first, and use run_codex_task only when you have a clear summary, task title, and hints for pi-agent.",
-          "Do not pass raw transcript dumps to run_codex_task. Pass your proposed summary and short hints; raw user and agent communications are mirrored separately as JSONL.",
+          "Do not pass raw transcript dumps to run_codex_task. Pass your proposed Task/Context/Constraints/Output summary and short hints; low-level communication mirroring happens separately in the implementation inbox.",
           "Use deliver_assistant_output for one-command canvas + status delivery: structured Markdown for canvas artifacts, exactly Status/Confidence/Next for status surfaces.",
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand with requestedMode=speak only for Realtime conversation contributions that should be spoken aloud.",
@@ -2601,18 +2597,35 @@ function formatPiAgentUpdateForRealtime(event: AgentMessageEvent | AgentHandRais
   if (event.type === "agent.hand_raise") {
     return [
       "Task: Review Pi/Codex hand raise.",
-      `Context: requestedMode=${event.requestedMode}; reason=${event.reason}`,
-      "Constraints: Treat as current meeting context; do not post wrapper text over the canvas.",
-      "Output: If useful, briefly tell the host or raise a show/review hand."
+      `Context: Pi/Codex raised a ${humanRequestedMode(event.requestedMode)} hand: ${event.reason}`,
+      "Constraints: Treat it as current meeting context; do not post wrapper text over the canvas.",
+      "Output: If useful, briefly tell the host or request text review."
     ].join("\n");
   }
 
   return [
     "Task: Review latest Pi/Codex output.",
-    `Context: surface=${event.surface || "status"}; stream=${event.stream || "conversation"}${event.documentId ? `; documentId=${event.documentId}` : ""}.`,
-    "Constraints: Preserve the selected artifact/canvas; do not treat status-only wrappers as primary output.",
+    `Context: Pi/Codex posted ${humanPiAgentMessageContext(event)}`,
+    "Constraints: Preserve the selected artifact/canvas; status-only updates should not replace it.",
     `Output: ${clipText(event.text.replace(/\s+/g, " "), 1200)}`
   ].join("\n");
+}
+
+function humanRequestedMode(mode: AgentRequestedMode): string {
+  switch (mode) {
+    case "show": return "show";
+    case "review": return "review";
+    case "work": return "work";
+    case "speak": return "speak";
+    default: return "review";
+  }
+}
+
+function humanPiAgentMessageContext(event: AgentMessageEvent): string {
+  const surface = event.surface === "canvas" ? "a canvas document" : "a status update";
+  const stream = event.stream === "implementation" ? "from implementation work" : "in the conversation";
+  const document = event.documentId ? ` Document: ${event.documentId}.` : "";
+  return `${surface} ${stream}.${document}`;
 }
 
 function summarizeMeetingContextForRealtime(context: unknown, source: "reconnect" | "manual"): string {

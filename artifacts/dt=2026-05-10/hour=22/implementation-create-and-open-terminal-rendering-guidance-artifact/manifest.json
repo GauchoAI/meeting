@@ -1,0 +1,10 @@
+{
+  "kind": "implementation",
+  "slug": "create-and-open-terminal-rendering-guidance-artifact",
+  "title": "Create and open terminal-rendering guidance artifact",
+  "createdAt": "2026-05-10T01:30:01.142Z",
+  "updatedAt": "2026-05-10T01:30:01.142Z",
+  "artifact": "artifact.smart.md",
+  "tags": [],
+  "summary": "Pi agent implementation output for Create and open terminal-rendering guidance artifact"
+}
