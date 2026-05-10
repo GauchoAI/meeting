@@ -534,7 +534,7 @@ function App() {
     sendRealtimeEvent({
       type: "response.create",
       response: {
-        output_modalities: ["audio", "text"],
+        output_modalities: ["audio"],
         instructions: [
           "The host granted you the floor.",
           reason ? `Your current raised-hand reason is: ${reason}` : "Speak about the most useful proposal or issue you detected recently.",
@@ -630,7 +630,7 @@ function App() {
     sendRealtimeEvent({
       type: "response.create",
       response: {
-        output_modalities: pendingResponseModeRef.current === "speak" ? ["audio", "text"] : ["text"]
+        output_modalities: pendingResponseModeRef.current === "speak" ? ["audio"] : ["text"]
       }
     });
   }
