@@ -1035,7 +1035,7 @@
       const now = Date.now();
       if (localSttPausedForSpeech) {
         const level = currentLocalMicLevel();
-        const canInterrupt = now - localSpeechStartedAt >= localSpeechBargeInGraceMs();
+        const canInterrupt = now - localSpeechStartedAt >= localBargeInGraceMs();
         if (canInterrupt && window.speechSynthesis?.speaking && level >= localBargeInThreshold()) {
           if (!localSpeechBargeInStartedAt) localSpeechBargeInStartedAt = now;
           if (now - localSpeechBargeInStartedAt >= localBargeInHoldMs()) {
