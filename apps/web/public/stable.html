@@ -1377,7 +1377,7 @@
       const startedAt = Date.now();
       if (localStreamingTts) {
         try {
-          return await prepareLocalSpeechStream(text, generation, item.controller, startedAt);
+          return await prepareLocalSpeechStream(text, generation, item.controller.signal, startedAt);
         } catch (error) {
           if (!item.fallbackNoted) {
             item.fallbackNoted = true;
@@ -1385,7 +1385,7 @@
           }
         }
       }
-      return await prepareLocalSpeechBlob(text, generation, item.controller, startedAt);
+      return await prepareLocalSpeechBlob(text, generation, item.controller.signal, startedAt);
     }
 
     async function playPreparedLocalSpeechItem(item) {
