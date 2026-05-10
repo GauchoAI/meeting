@@ -84,6 +84,8 @@ async function tick(): Promise<void> {
 
 async function processTask(taskKey: string, workingDir: string, task: Record<string, unknown>): Promise<void> {
   const title = String(task.title || taskKey);
+  const taskClass = normalizeTaskClass(task.taskClass);
+  console.log(`[pi-agent:implementation:working] task=${taskKey} class=${taskClass || "unknown"} ${compact(title, 220)}`);
   const details = typeof task.details === "string" ? task.details : "";
   const basePrompt = typeof task.implementationPrompt === "string" && task.implementationPrompt.trim()
     ? task.implementationPrompt
@@ -113,7 +115,7 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
     taskKey,
     title,
     status: "working",
-    taskClass: normalizeTaskClass(task.taskClass),
+    taskClass,
     details
   } as AgentTaskEvent);
 
@@ -154,10 +156,12 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
     taskKey,
     title,
     status,
-    taskClass: normalizeTaskClass(task.taskClass),
+    taskClass,
     details: details || summarizeForTaskDetails(summary),
     previewUrl: selectedArtifactPath || artifactResult.path
   } as AgentTaskEvent);
+
+  console.log(`[pi-agent:implementation:${status}] task=${taskKey} class=${taskClass || "unknown"} ${compact(title, 220)}`);
 
   if (result.ok) {
     await postEvent({
@@ -172,7 +176,7 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
       lifecycle: "final",
       text: `Pi agent completed **${title}**.${selectedArtifactPath ? ` Artifact: \`${selectedArtifactPath}\`.` : ""}`
     } as MeetingEvent);
-    if (shouldPublishTaskCanvas(normalizeTaskClass(task.taskClass))) {
+    if (shouldPublishTaskCanvas(taskClass)) {
       if (selectedArtifactPath && selectedArtifactMarkdown) {
         await postEvent({
           id: newEventId("msg"),
@@ -485,7 +489,7 @@ function handleConversationRecord(line: string, source: "transcript" | "event" |
     return;
   }
   if (source === "task" && event.type === "agent.task") {
-    console.log(`[meeting-agent:task] ${event.status || "queued"} ${event.title || event.taskKey || "untitled task"}`);
+    console.log(`[pi-agent:implementation:${event.status || "queued"}] task=${event.taskKey || "unknown"} class=${event.taskClass || "unknown"} ${compact(String(event.title || "untitled task"), 220)}`);
     return;
   }
   if (source === "hand" && event.type === "agent.hand_raise") {
@@ -499,7 +503,7 @@ function handlePiDirectMessage(line: string): void {
   const intent = typeof message.intent === "string" ? message.intent : "inform";
   const text = typeof message.text === "string" ? message.text : "";
   const taskKey = typeof message.taskKey === "string" ? ` task=${message.taskKey}` : "";
-  console.log(`[meeting-agent:direct:${intent}]${taskKey} ${compact(text, 800)}`);
+  console.log(`[pi-agent:direct:${intent}]${taskKey} ${compact(text, 800)}`);
   if (directMessageAlreadySeen(message)) return;
   mkdirSync(dirname(piDirectMessagesSeenPath), { recursive: true });
   writeFileSync(piDirectMessagesSeenPath, `${JSON.stringify({ ...message, seenAt: nowIso(), seenBy: agentId })}\n`, { encoding: "utf8", flag: "a" });
