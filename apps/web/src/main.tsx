@@ -329,6 +329,7 @@ function App() {
     sendRealtimeEvent({
       type: "session.update",
       session: {
+        type: "realtime",
         audio: {
           input: {
             transcription: {

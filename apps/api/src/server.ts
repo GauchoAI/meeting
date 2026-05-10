@@ -338,6 +338,19 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
     model: process.env.MEETING_REALTIME_MODEL || "gpt-realtime-2",
     instructions: buildRealtimeInstructions(),
     audio: {
+      input: {
+        transcription: {
+          model: "gpt-4o-mini-transcribe",
+          language: "en"
+        },
+        turn_detection: {
+          type: "server_vad",
+          create_response: false,
+          interrupt_response: false,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 900
+        }
+      },
       output: {
         voice: process.env.MEETING_REALTIME_VOICE || "marin"
       }
