@@ -154,6 +154,8 @@
       if (data.type === "meeting:realtime:prompt") sendRealtimePrompt(String(data.text || ""));
       if (data.type === "meeting:realtime:floor") requestAgentFloor(String(data.reason || ""));
       if (data.type === "meeting:realtime:text-floor") requestAgentTextFloor(String(data.mode || "show"), String(data.reason || ""));
+      if (data.type === "meeting:push-to-talk:start") startLocalPushToTalk();
+      if (data.type === "meeting:push-to-talk:stop") stopLocalPushToTalk();
     });
 
     voiceModeSelect.value = voiceMode;
