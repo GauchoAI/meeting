@@ -739,10 +739,25 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       if (!message) throw new Error("message is required");
       const intent = asDirectMessageIntent(args.intent);
       const taskKey = optionalString(args.taskKey);
-      const record = { ts: nowIso(), role: "realtime-agent", kind: "direct_message", intent, taskKey, text: message };
+      const directTaskKey = taskKey || slugTaskKey(`direct-message-${newEventId("msg")}`);
+      const record = { ts: nowIso(), role: "realtime-agent", kind: "direct_message", intent, taskKey: directTaskKey, text: message };
       appendPiDirectMessage(record);
-      appendTrace("agent", "Direct message sent to pi-agent", { intent, taskKey, message: compactText(message, 500) }, "implementation");
-      output = { ok: true, path: piDirectMessagesPath, intent, taskKey };
+      appendEvent({
+        id: newEventId("task"),
+        type: "agent.task",
+        stream: "implementation",
+        meetingId,
+        createdAt: nowIso(),
+        agentId: realtimeAgentId,
+        taskKey: directTaskKey,
+        title: directMessageTitle(intent),
+        status: "queued",
+        taskClass: "conversation",
+        details: message,
+        implementationPrompt: directMessagePrompt({ intent, message })
+      } as MeetingEvent);
+      appendTrace("agent", "Direct message sent to pi-agent", { intent, taskKey: directTaskKey, message: compactText(message, 500) }, "implementation");
+      output = { ok: true, path: piDirectMessagesPath, intent, taskKey: directTaskKey, delegatedTo: "pi-agent" };
     } else if (name === "run_shell_command") {
       const args = asObject(input);
       const command = String(args.command || "");
@@ -1617,6 +1632,24 @@ function inferHumanOutputTarget(taskClass: string, prompt: string): string {
   if (taskClass === "artifact.render" || /durable artifact|artifact/i.test(prompt)) return "Selectable Meeting artifact, opened on the canvas.";
   if (taskClass === "critique.review") return "Concise review in the Meeting UI.";
   return "Concise Meeting UI response.";
+}
+
+function directMessageTitle(intent: string): string {
+  switch (intent) {
+    case "question": return "Direct question from Realtime agent";
+    case "request": return "Direct request from Realtime agent";
+    case "ack": return "Direct acknowledgement from Realtime agent";
+    default: return "Direct message from Realtime agent";
+  }
+}
+
+function directMessagePrompt(input: { intent: string; message: string }): string {
+  return [
+    "Task: Respond to a direct Realtime voice-agent coordination message.",
+    `Context: Intent=${input.intent}. Message: ${input.message}`,
+    "Constraints: Keep the response concise. Do not update or steal the canvas. If the message only needs acknowledgment, reply with a short status/hand-ready note.",
+    "Output: Brief pi-agent response visible in the implementation stream, with no canvas update."
+  ].join("\n");
 }
 
 function buildPiHandoffJsonl(input: { taskKey: string; title: string; prompt: string; hints: string[]; cwd: string; sourceDocumentId?: string; taskClass: string }): string {

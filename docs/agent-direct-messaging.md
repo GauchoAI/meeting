@@ -27,7 +27,7 @@ Example:
 }
 ```
 
-The message is appended to `.meeting/pipeline/implementation/inbox/pi-direct-messages.jsonl`, logged by the pi-agent worker, and marked processed in `.meeting/pipeline/implementation/inbox/pi-direct-messages.seen.jsonl` when the worker observes it.
+The message is appended to `.meeting/pipeline/implementation/inbox/pi-direct-messages.jsonl`, logged by the pi-agent worker, marked processed in `.meeting/pipeline/implementation/inbox/pi-direct-messages.seen.jsonl`, and queued as a lightweight `conversation` implementation task so it is injected into pi-agent/Codex just like `run_codex_task`.
 
 ## Pi-agent → voice agent
 
@@ -47,5 +47,5 @@ When: After the current artifact remains selected.
 - Do not include raw routing records unless they change the action.
 - Keep direct messages short and explicit.
 - Canvas artifacts remain the source of truth for durable content.
-- `run_codex_task` must enqueue an implementation task by itself; `create_meeting_task` is useful for visibility but is not required for delivery.
+- `run_codex_task` and `message_pi_agent` must enqueue implementation tasks by themselves; `create_meeting_task` is useful for visibility but is not required for delivery.
 - Code-change handoffs should return status plus a hand raise without replacing the current canvas; artifact render/edit tasks may publish canvas content.
