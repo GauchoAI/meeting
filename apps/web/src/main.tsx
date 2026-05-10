@@ -73,7 +73,8 @@ function App() {
   const [selectedCanvasDocumentId, setSelectedCanvasDocumentId] = useState<string | null>(null);
   const [renderSamples, setRenderSamples] = useState<RenderSample[]>([]);
   const [realtimeState, setRealtimeState] = useState<RealtimeState>("idle");
-  const [realtimeResponseMode, setRealtimeResponseMode] = useState<RealtimeResponseMode>("silent");
+  const [realtimeMuted, setRealtimeMuted] = useState(false);
+  const [realtimeResponseMode, setRealtimeResponseMode] = useState<RealtimeResponseMode>("speak");
   const [realtimePrompt, setRealtimePrompt] = useState("");
   const [realtimeDraftText, setRealtimeDraftText] = useState("");
   const [dismissedHandIds, setDismissedHandIds] = useState<string[]>([]);
@@ -83,7 +84,8 @@ function App() {
   const assistantDraftRef = useRef("");
   const assistantDraftMessageIdRef = useRef<string | null>(null);
   const assistantDraftFlushTimeoutRef = useRef<number | null>(null);
-  const pendingResponseModeRef = useRef<RealtimeResponseMode>("silent");
+  const realtimeMutedRef = useRef(false);
+  const pendingResponseModeRef = useRef<RealtimeResponseMode>("speak");
   const analysisTimeoutRef = useRef<number | null>(null);
   const liveAnalysisTimeoutRef = useRef<number | null>(null);
   const lastAnalysisAtRef = useRef(0);
@@ -160,7 +162,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    if (realtimeState !== "connected") return;
     const latestPiAgentEvent = events.find((event) =>
       (event.type === "agent.message" || event.type === "agent.hand_raise") && event.agentId === piAgentId
     );
@@ -169,7 +171,7 @@ function App() {
     const createdAt = Date.parse(latestPiAgentEvent.createdAt);
     if (Number.isFinite(createdAt) && Date.now() - createdAt > 45_000) return;
     void requestPiAgentResultReview(latestPiAgentEvent);
-  }, [events, realtimeResponseMode, realtimeState]);
+  }, [events, realtimeState]);
 
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
   const handRaiseEvents = events.filter((event): event is AgentHandRaiseEvent => event.type === "agent.hand_raise" && event.agentId === realtimeAgentId);
@@ -238,7 +240,7 @@ function App() {
   async function connectRealtimeAgent() {
     if (realtimeState !== "idle") return;
     setRealtimeState("connecting");
-    setRealtimeResponseMode("silent");
+    restoreRealtimeBaseMode();
     assistantDraftRef.current = "";
     setRealtimeDraftText("");
     try {
@@ -277,7 +279,7 @@ function App() {
           text: [
             "Realtime agent connected.",
             "",
-            "Mode: **silent background listener**",
+            `Mode: **${realtimeMutedRef.current ? "muted listener" : "audio responder"}**`,
             "",
             "**Available tools**",
             "",
@@ -331,16 +333,15 @@ function App() {
     realtimePeerRef.current = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     assistantDraftRef.current = "";
-    pendingResponseModeRef.current = "silent";
+    restoreRealtimeBaseMode();
     transcriptDraftIdsRef.current.clear();
     transcriptDraftTextRef.current.clear();
     setRealtimeDraftText("");
-    setRealtimeResponseMode("silent");
     setRealtimeState("idle");
     setDismissedHandIds([]);
   }
 
-  function configureRealtimeSession() {
+  function configureRealtimeSession(muted = realtimeMutedRef.current) {
     sendRealtimeEvent({
       type: "session.update",
       session: {
@@ -353,8 +354,8 @@ function App() {
             },
             turn_detection: {
               type: "server_vad",
-              create_response: false,
-              interrupt_response: false,
+              create_response: !muted,
+              interrupt_response: !muted,
               prefix_padding_ms: 300,
               silence_duration_ms: 900
             }
@@ -365,7 +366,7 @@ function App() {
   }
 
   function requestBootstrapContextSync() {
-    pendingResponseModeRef.current = "silent";
+    beginRealtimeResponse("silent");
     sendRealtimeEvent({
       type: "response.create",
       response: {
@@ -394,24 +395,38 @@ function App() {
       await postRealtimeTrace("debug", type, event);
       return;
     }
+    if (type === "response.created") {
+      const mode = responseModeFromEvent(event);
+      if (mode) beginRealtimeResponse(mode);
+      return;
+    }
     if (type === "conversation.item.input_audio_transcription.delta") {
       await persistRealtimeTranscriptDelta(event);
       return;
     }
     if (type === "conversation.item.input_audio_transcription.completed") {
       await persistRealtimeTranscriptCompleted(event);
-      scheduleSilentAnalysis("user_turn_completed");
+      if (realtimeMutedRef.current) {
+        scheduleSilentAnalysis("user_turn_completed");
+      } else {
+        pendingResponseModeRef.current = "speak";
+        setRealtimeResponseMode("speak");
+      }
       return;
     }
-    if ((type === "response.output_text.delta" && pendingResponseModeRef.current === "silent")
-      || (type === "response.output_audio_transcript.delta" && pendingResponseModeRef.current === "speak")) {
+    if ((isRealtimeTextDelta(type) && pendingResponseModeRef.current === "silent")
+      || (isRealtimeAudioTranscriptDelta(type) && pendingResponseModeRef.current === "speak")) {
       assistantDraftRef.current += String(event.delta || "");
       setRealtimeDraftText(assistantDraftRef.current);
       scheduleAssistantDraftPersist();
       return;
     }
-    if ((type === "response.output_text.done" && pendingResponseModeRef.current === "silent")
-      || (type === "response.output_audio_transcript.done" && pendingResponseModeRef.current === "speak")) {
+    if ((isRealtimeTextDone(type) && pendingResponseModeRef.current === "silent")
+      || (isRealtimeAudioTranscriptDone(type) && pendingResponseModeRef.current === "speak")) {
+      const completedText = String(event.transcript || event.text || "").trim();
+      if (!assistantDraftRef.current.trim() && completedText) {
+        assistantDraftRef.current = completedText;
+      }
       if (assistantDraftRef.current.trim()) {
         const text = assistantDraftRef.current.trim();
         if (text !== "NO_ACTION") {
@@ -471,10 +486,7 @@ function App() {
       return;
     }
     if (type === "response.done") {
-      if (pendingResponseModeRef.current === "speak") {
-        setRealtimeResponseMode("silent");
-        pendingResponseModeRef.current = "silent";
-      }
+      restoreRealtimeBaseMode();
       return;
     }
   }
@@ -483,6 +495,44 @@ function App() {
     const channel = realtimeChannelRef.current;
     if (!channel || channel.readyState !== "open") return;
     channel.send(JSON.stringify(event));
+  }
+
+  function baseRealtimeMode(): RealtimeResponseMode {
+    return realtimeMutedRef.current ? "silent" : "speak";
+  }
+
+  function restoreRealtimeBaseMode() {
+    const mode = baseRealtimeMode();
+    pendingResponseModeRef.current = mode;
+    setRealtimeResponseMode(mode);
+    if (remoteAudioRef.current) remoteAudioRef.current.muted = realtimeMutedRef.current;
+  }
+
+  function beginRealtimeResponse(mode: RealtimeResponseMode) {
+    assistantDraftRef.current = "";
+    assistantDraftMessageIdRef.current = null;
+    setRealtimeDraftText("");
+    pendingResponseModeRef.current = mode;
+    setRealtimeResponseMode(mode);
+  }
+
+  function responseModeFromEvent(event: Record<string, unknown>): RealtimeResponseMode | undefined {
+    const response = event.response && typeof event.response === "object" ? event.response as Record<string, unknown> : {};
+    const modalities = Array.isArray(response.output_modalities) ? response.output_modalities.map(String) : [];
+    if (modalities.includes("audio")) return "speak";
+    if (modalities.includes("text")) return "silent";
+    return undefined;
+  }
+
+  function setRealtimeAgentMuted(muted: boolean) {
+    realtimeMutedRef.current = muted;
+    setRealtimeMuted(muted);
+    if (remoteAudioRef.current) remoteAudioRef.current.muted = muted;
+    restoreRealtimeBaseMode();
+    if (realtimeState === "connected") {
+      configureRealtimeSession(muted);
+      void postRealtimeTrace("agent", muted ? "Realtime agent muted" : "Realtime agent unmuted", { audioResponses: !muted });
+    }
   }
 
   function sendRealtimePrompt() {
@@ -496,7 +546,7 @@ function App() {
         content: [{ type: "input_text", text }]
       }
     });
-    pendingResponseModeRef.current = "silent";
+    beginRealtimeResponse("silent");
     sendRealtimeEvent({
       type: "response.create",
       response: {
@@ -535,10 +585,8 @@ function App() {
       window.clearTimeout(liveAnalysisTimeoutRef.current);
       liveAnalysisTimeoutRef.current = null;
     }
-    assistantDraftRef.current = "";
-    setRealtimeDraftText("");
-    setRealtimeResponseMode("speak");
-    pendingResponseModeRef.current = "speak";
+    if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
+    beginRealtimeResponse("speak");
     void postMeetingEvent({
       id: newEventId("floor"),
       type: "agent.floor",
@@ -576,10 +624,7 @@ function App() {
       window.clearTimeout(liveAnalysisTimeoutRef.current);
       liveAnalysisTimeoutRef.current = null;
     }
-    assistantDraftRef.current = "";
-    setRealtimeDraftText("");
-    setRealtimeResponseMode("silent");
-    pendingResponseModeRef.current = "silent";
+    beginRealtimeResponse("silent");
     void postMeetingEvent({
       id: newEventId("floor"),
       type: "agent.floor",
@@ -610,7 +655,7 @@ function App() {
   }
 
   function scheduleSilentAnalysis(trigger: string) {
-    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    if (realtimeState !== "connected" || !realtimeMutedRef.current) return;
     if (analysisTimeoutRef.current !== null) window.clearTimeout(analysisTimeoutRef.current);
     analysisTimeoutRef.current = window.setTimeout(() => {
       analysisTimeoutRef.current = null;
@@ -619,7 +664,7 @@ function App() {
   }
 
   function scheduleLiveSilentAnalysis(trigger: string) {
-    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    if (realtimeState !== "connected" || !realtimeMutedRef.current) return;
     if (liveAnalysisTimeoutRef.current !== null) return;
     liveAnalysisTimeoutRef.current = window.setTimeout(() => {
       liveAnalysisTimeoutRef.current = null;
@@ -628,11 +673,11 @@ function App() {
   }
 
   async function requestSilentAnalysis(trigger: string) {
-    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    if (realtimeState !== "connected" || !realtimeMutedRef.current) return;
     const now = Date.now();
     if (now - lastAnalysisAtRef.current < 6000) return;
     lastAnalysisAtRef.current = now;
-    pendingResponseModeRef.current = "silent";
+    beginRealtimeResponse("silent");
     sendRealtimeEvent({
       type: "response.create",
       response: {
@@ -670,7 +715,7 @@ function App() {
   }
 
   async function requestPiAgentResultReview(event: MeetingEvent) {
-    pendingResponseModeRef.current = "silent";
+    beginRealtimeResponse("silent");
     sendRealtimeEvent({
       type: "response.create",
       response: {
@@ -843,7 +888,7 @@ function App() {
 
   return (
     <main className="shell">
-      <audio ref={remoteAudioRef} autoPlay />
+      <audio ref={remoteAudioRef} autoPlay muted={realtimeMuted} />
       <div className="floatingButtons" aria-label="Meeting controls">
         <button className={menuOpen ? "active" : ""} onClick={() => setMenuOpen((value) => !value)}>Menu</button>
         <button className={terminalOpen ? "active" : ""} onClick={() => setTerminalOpen((value) => !value)}>Raw</button>
@@ -865,12 +910,15 @@ function App() {
           {!isEmbedded && (
             <>
               <div className={`status realtimeStatus realtime-${realtimeState}`}>
-                <Radio size={16} /> {realtimeState === "connected" ? `Realtime agent connected (${realtimeResponseMode})` : realtimeState === "connecting" ? "Realtime agent connecting" : "Realtime agent idle"}
+                <Radio size={16} /> {realtimeState === "connected" ? `Realtime agent connected (${realtimeMuted ? "muted" : "audio on"})` : realtimeState === "connecting" ? "Realtime agent connecting" : "Realtime agent idle"}
               </div>
               {realtimeState === "idle" ? (
                 <button onClick={() => void connectRealtimeAgent()}>Connect Realtime agent</button>
               ) : (
                 <button onClick={disconnectRealtimeAgent}>Disconnect Realtime agent</button>
+              )}
+              {realtimeState === "connected" && (
+                <button className="secondary" onClick={() => setRealtimeAgentMuted(!realtimeMuted)}>{realtimeMuted ? "Unmute agent" : "Mute agent"}</button>
               )}
               {realtimeState === "connected" && (
                 <button onClick={() => handleAgentHandAction(activeHandRaises[0])}>{handActionLabel(activeHandRaises[0])}</button>
@@ -941,9 +989,12 @@ function App() {
           <div className="controlCenterHeader">
             <div>
               <strong>Realtime Agent</strong>
-              <p>{realtimeState === "connected" ? `Background listener · ${realtimeResponseMode}` : "Disconnected"}</p>
+              <p>{realtimeState === "connected" ? `${realtimeMuted ? "Muted listener" : "Audio responder"} · ${realtimeResponseMode}` : "Disconnected"}</p>
             </div>
             <div className="opsActions">
+              {realtimeState === "connected" && (
+                <button className="secondary" onClick={() => setRealtimeAgentMuted(!realtimeMuted)}>{realtimeMuted ? "Unmute" : "Mute"}</button>
+              )}
               <button className="secondary" onClick={() => setSelectedCanvasDocumentId(realtimeLiveCanvasDocumentId)}>Live notes</button>
               <button className="secondary" onClick={() => setSelectedCanvasDocumentId(null)}>Auto</button>
               <button className="secondary" onClick={() => setControlCenterOpen(false)}>Close</button>
@@ -2326,6 +2377,22 @@ function dedupeTasks(events: AgentTaskEvent[]): AgentTaskEvent[] {
 
 function implementationToolName(name: string): boolean {
   return name === "run_codex_task" || name === "publish_task_result";
+}
+
+function isRealtimeTextDelta(type: string): boolean {
+  return type === "response.output_text.delta" || type === "response.text.delta";
+}
+
+function isRealtimeTextDone(type: string): boolean {
+  return type === "response.output_text.done" || type === "response.text.done";
+}
+
+function isRealtimeAudioTranscriptDelta(type: string): boolean {
+  return type === "response.output_audio_transcript.delta" || type === "response.audio_transcript.delta";
+}
+
+function isRealtimeAudioTranscriptDone(type: string): boolean {
+  return type === "response.output_audio_transcript.done" || type === "response.audio_transcript.done";
 }
 
 function firstLine(text: string): string {

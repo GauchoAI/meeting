@@ -84,7 +84,9 @@ in the existing layout.
 
 Behavior:
 
-- the Realtime agent connects as a **silent background listener** by default;
+- the Realtime agent connects as an **audio responder** by default;
+- muting the Realtime agent keeps it listening silently so it can update notes,
+  declare tasks, and raise a hand before speaking;
 - room speech is transcribed and persisted into `.meeting/events.jsonl`,
   `.meeting/session.md`, and `.meeting/pipeline/implementation/inbox/conversation.jsonl`;
 - the agent can silently react by raising a hand, posting Markdown, creating
@@ -96,14 +98,15 @@ Behavior:
   invokes local Codex, and answers back through Meeting tools/artifacts;
 - Realtime watches `pi-agent` messages and raised hands, then can raise its own
   hand for text review;
-- host-granted `speak` floor uses audio for Realtime conversation, while
+- unmuted human speech uses audio for Realtime conversation, while
   Codex/pi-agent results use UI text or canvas artifacts;
-- the host can explicitly grant the floor with **Let agent speak**;
-- after speaking, the agent returns to silent listening mode.
+- if muted, the host can explicitly grant the floor with **Let agent speak**;
+- after a text/Codex review, the agent returns to its base audio or muted mode.
 
 This is the preferred path for project-planning meetings where the agent should
-mostly listen, think, update the live canvas, declare tasks, and only speak when
-invited. Durable smart artifacts are owned by `pi-agent`, not the Realtime
+listen, think, update the live canvas, declare tasks, answer direct spoken
+questions when unmuted, and raise a hand before interrupting when muted.
+Durable smart artifacts are owned by `pi-agent`, not the Realtime
 conversation agent.
 
 ## MCP
