@@ -602,6 +602,10 @@ export default function (pi: ExtensionAPI) {
 	function handleUtterance(event: UtteranceFinalEvent, ctx: ExtensionContext) {
 		const text = event.text.trim();
 		if (!text || isIgnorableTranscript(text)) return;
+		if (isRawRealtimeTranscript(event)) {
+			void postTrace("debug", "stored raw Realtime transcript without sending it to Codex", { id: event.id, textChars: text.length });
+			return;
+		}
 		const utteranceCreatedAt = Date.parse(event.createdAt);
 		if (!Number.isFinite(utteranceCreatedAt) || utteranceCreatedAt < extensionStartedAt - 5000 || Date.now() - utteranceCreatedAt > 120000) {
 			void postTrace("debug", "ignored stale meeting utterance", { id: event.id, createdAt: event.createdAt, textChars: text.length });
@@ -700,6 +704,10 @@ function extractText(content: unknown): string {
 		.filter((part): part is { type: string; text: string } => Boolean(part) && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string")
 		.map((part) => part.text)
 		.join("\n");
+}
+
+function isRawRealtimeTranscript(event: UtteranceFinalEvent): boolean {
+	return event.speakerId === "room" && event.speakerLabel === "Room (Realtime)";
 }
 
 function isIgnorableTranscript(text: string): boolean {

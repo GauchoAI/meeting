@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { newEventId, nowIso, type AgentTaskEvent, type MeetingEvent } from "@meeting/protocol";
@@ -69,8 +69,8 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
   const basePrompt = typeof task.implementationPrompt === "string" && task.implementationPrompt.trim()
     ? task.implementationPrompt
     : buildPrompt(title, details, task);
-  const meetingContext = buildMeetingContextBlock();
-  const prompt = [basePrompt, meetingContext].filter(Boolean).join("\n\n");
+  const handoffContext = buildHandoffContextBlock();
+  const prompt = [basePrompt, handoffContext].filter(Boolean).join("\n\n");
 
   await postEvent({
     id: newEventId("task"),
@@ -86,7 +86,7 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
     details
   } as AgentTaskEvent);
 
-  writeFileSync(resolve(workingDir, "context.md"), meetingContext.endsWith("\n") ? meetingContext : `${meetingContext}\n`, "utf8");
+  writeFileSync(resolve(workingDir, "context.md"), handoffContext.endsWith("\n") ? handoffContext : `${handoffContext}\n`, "utf8");
   writeFileSync(resolve(workingDir, "worker.json"), `${JSON.stringify({ agentId, backend, startedAt: nowIso(), prompt }, null, 2)}\n`, "utf8");
   const result = await runLocalAgent(prompt);
   const summary = summarizeResult(result);
@@ -290,24 +290,20 @@ function handleConversationRecord(line: string, source: "transcript" | "event" |
       const speaker = typeof event.speakerLabel === "string" ? event.speakerLabel : "Host";
       const text = typeof event.text === "string" ? event.text : "";
       console.log(`[meeting-agent:transcript] ${speaker}: ${compact(text, 420)}`);
-      appendConversationInbox("transcript", event);
       return;
     }
   }
   if (source === "event" && event.type === "agent.message") {
     const text = typeof event.text === "string" ? event.text : "";
     console.log(`[meeting-agent:canvas] ${compact(text.replace(/\s+/g, " "), 420)}`);
-    appendConversationInbox("canvas", event);
     return;
   }
   if (source === "task" && event.type === "agent.task") {
     console.log(`[meeting-agent:task] ${event.status || "queued"} ${event.title || event.taskKey || "untitled task"}`);
-    appendConversationInbox("task", event);
     return;
   }
   if (source === "hand" && event.type === "agent.hand_raise") {
     console.log(`[meeting-agent:hand] ${compact(String(event.reason || ""), 420)}`);
-    appendConversationInbox("hand", event);
   }
 }
 
@@ -323,29 +319,14 @@ function maybeLogPartial(event: Record<string, unknown>): void {
   console.log(`[meeting-agent:partial] ${speaker}: ${compact(text, 240)}`);
 }
 
-function appendConversationInbox(kind: string, event: Record<string, unknown>): void {
-  appendFileSync(implementationConversationInboxPath, `${JSON.stringify({ recordedAt: nowIso(), kind, event })}\n`, "utf8");
-}
-
-function buildMeetingContextBlock(): string {
-  const currentCanvas = clampText(readTextIfExists(conversationCurrentNotePath).trim(), 4000);
-  const recentTranscript = tailTextFile(conversationTranscriptMdPath, 32).join("\n");
-  const recentTasks = tailJsonl(conversationTasksPath, 12)
-    .filter((event) => event.type === "agent.task")
-    .map((event) => `- ${event.status || "queued"}: ${event.title || event.taskKey || "untitled task"}`)
-    .join("\n");
-  const recentHands = tailJsonl(conversationHandsPath, 6)
-    .filter((event) => event.type === "agent.hand_raise")
-    .map((event) => `- ${event.reason || "hand raised"}`)
-    .join("\n");
+function buildHandoffContextBlock(): string {
   return [
-    "## Recent Meeting Context",
-    "This context is mirrored from the Realtime/Whisper conversation stream for pi-agent.",
-    currentCanvas ? `### Current Canvas\n${currentCanvas}` : "",
-    recentTranscript ? `### Recent Transcript\n${recentTranscript}` : "",
-    recentTasks ? `### Conversation Tasks\n${recentTasks}` : "",
-    recentHands ? `### Raised Hands\n${recentHands}` : "",
-    `### Inbox\nConversation records are mirrored to ${implementationConversationInboxPath}.`
+    "## Meeting Handoff Contract",
+    "The task prompt above is the Realtime agent's concise handoff summary.",
+    "Do not treat raw conversation as part of the prompt by default.",
+    `If extra provenance is needed, inspect JSONL records at ${implementationConversationInboxPath}.`,
+    "Inbox schema: { ts, role: user|realtime-agent, kind: raw_user_comm|raw_agent_comm|hint, text, ...metadata }.",
+    "Answer through Meeting tools/artifacts so the Realtime agent and host can review or speak about the result."
   ].filter(Boolean).join("\n\n");
 }
 

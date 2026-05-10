@@ -39,6 +39,7 @@ interface RenderSample {
 }
 
 const realtimeAgentId = "realtime-codex";
+const piAgentId = "pi-agent";
 const realtimeLiveCanvasDocumentId = "realtime-live-canvas";
 const availableRealtimeTools = [
   "read_meeting_context: read the current live canvas, transcript, tasks, and raised hands",
@@ -47,7 +48,7 @@ const availableRealtimeTools = [
   "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI, including the living canvas document",
   "publish_task_result: publish a polished completed-task result on the main canvas before review",
   "create_meeting_task: create visible task cards for proposed work",
-  "run_codex_task: queue implementation work through pi-agent, which invokes local Codex",
+  "run_codex_task: send a concise handoff to pi-agent, which invokes local Codex and answers back into the meeting",
   "run_shell_command: run short terminal commands in the allowed workspace",
   "read_rendered_html: read the isolated preview HTML if needed",
   "write_rendered_html: update the isolated preview HTML if explicitly requested"
@@ -85,6 +86,7 @@ function App() {
   const analysisTimeoutRef = useRef<number | null>(null);
   const liveAnalysisTimeoutRef = useRef<number | null>(null);
   const lastAnalysisAtRef = useRef(0);
+  const lastPiAgentNoticeIdRef = useRef<string | null>(null);
   const transcriptDraftIdsRef = useRef(new Map<string, string>());
   const transcriptDraftTextRef = useRef(new Map<string, string>());
   const recordRenderSample = useCallback((sample: RenderSample) => {
@@ -155,6 +157,18 @@ function App() {
       window.removeEventListener("keyup", onKeyUp);
     };
   }, []);
+
+  useEffect(() => {
+    if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
+    const latestPiAgentEvent = events.find((event) =>
+      (event.type === "agent.message" || event.type === "agent.hand_raise") && event.agentId === piAgentId
+    );
+    if (!latestPiAgentEvent || latestPiAgentEvent.id === lastPiAgentNoticeIdRef.current) return;
+    lastPiAgentNoticeIdRef.current = latestPiAgentEvent.id;
+    const createdAt = Date.parse(latestPiAgentEvent.createdAt);
+    if (Number.isFinite(createdAt) && Date.now() - createdAt > 45_000) return;
+    void requestPiAgentResultReview(latestPiAgentEvent);
+  }, [events, realtimeResponseMode, realtimeState]);
 
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
   const handRaiseEvents = events.filter((event): event is AgentHandRaiseEvent => event.type === "agent.hand_raise" && event.agentId === realtimeAgentId);
@@ -571,16 +585,18 @@ function App() {
           "Implementation is the Codex execution branch with task lifecycle and result review.",
           "If you need to understand the current plan, notes, or on-screen state, call read_meeting_context first.",
           "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
-          "If durable artifact work is needed, queue it for pi-agent with run_codex_task or create_meeting_task stream=implementation.",
+          "If durable artifact work is needed, create a visible implementation task if helpful, then call run_codex_task with your concise handoff for pi-agent.",
+          "When pi-agent has published a result, read meeting context, raise your hand if it is worth showing, and speak only after the host grants the floor.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
           "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
           `Maintain a living meeting document on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
           "Use the canvas document for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
           "Use create_meeting_task with stream=conversation for planning-side tasks.",
-          "Use create_meeting_task with stream=implementation for Codex work or execution lifecycle.",
+          "Use create_meeting_task with stream=implementation for proposed Codex work visibility, then run_codex_task for the actual pi-agent execution handoff.",
           "When the conversation contains concrete follow-up work, create declarative tasks with create_meeting_task instead of jumping straight into implementation.",
-          "run_codex_task queues implementation work through pi-agent; it does not run Codex inline inside this conversation turn.",
-          "Prefer implementation tasks first, and use run_codex_task only when a task is ready for pi-agent execution.",
+          "run_codex_task sends a concise JSONL handoff to the running pi-agent session; it does not run Codex inline inside this conversation turn.",
+          "Prefer implementation tasks first, and use run_codex_task only when you have a clear summary, task title, and hints for pi-agent.",
+          "Do not pass raw transcript dumps to run_codex_task. Pass your proposed summary and short hints; raw user and agent communications are mirrored separately as JSONL.",
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
           "Use run_codex_task when the conversation implies concrete coding follow-up that should enter the pi-agent implementation lifecycle.",
@@ -589,6 +605,25 @@ function App() {
       }
     });
     await postRealtimeTrace("agent", "Silent analysis requested", { trigger });
+  }
+
+  async function requestPiAgentResultReview(event: MeetingEvent) {
+    pendingResponseModeRef.current = "silent";
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: ["text"],
+        instructions: [
+          "A pi-agent/Codex result just arrived in the meeting stream.",
+          "Do not speak audio now.",
+          "Call read_meeting_context and inspect piAgent.messages and piAgent.raisedHands.",
+          "If the result is useful to show or explain, call raise_meeting_hand with requestedMode=show or requestedMode=speak and a concise reason.",
+          "If there is nothing to add, respond with exactly NO_ACTION.",
+          "Do not create durable artifacts; pi-agent owns durable artifacts."
+        ].join("\n")
+      }
+    });
+    await postRealtimeTrace("agent", "Pi-agent result review requested", { eventId: event.id, type: event.type });
   }
 
   function sendFollowupResponse() {

@@ -19,6 +19,9 @@ const realtimeArtifactPath = resolve(realtimeArtifactRoot, "index.html");
 const pipelineRoot = resolveRepoPath(".meeting/pipeline");
 const conversationPipelineRoot = resolve(pipelineRoot, "conversation");
 const implementationPipelineRoot = resolve(pipelineRoot, "implementation");
+const implementationInboxRoot = resolve(implementationPipelineRoot, "inbox");
+const implementationConversationInboxPath = resolve(implementationInboxRoot, "conversation.jsonl");
+const piHandoffsPath = resolve(implementationInboxRoot, "pi-handoffs.jsonl");
 const implementationTaskRoot = resolve(implementationPipelineRoot, "tasks");
 const implementationTaskQueuedRoot = resolve(implementationTaskRoot, "queued");
 const implementationTaskWorkingRoot = resolve(implementationTaskRoot, "working");
@@ -429,7 +432,7 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "create_meeting_task",
-        description: "Create or update a visible task card in the meeting UI for proposed work. Use stream=conversation for planning or capture work. Use stream=implementation for Codex execution lifecycle. Reuse the same taskKey when updating an existing task.",
+        description: "Create or update a visible task card in the meeting UI for proposed work. Use stream=conversation for planning or capture work. Use stream=implementation to show proposed pi-agent work. Use run_codex_task for the actual pi-agent execution handoff.",
         parameters: {
           type: "object",
           properties: {
@@ -488,13 +491,16 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "run_codex_task",
-        description: "Queue an implementation task for pi-agent to run Codex in the allowed workspace. Use this for multi-step coding work that should keep the task lifecycle and hot-reload workflow.",
+        description: "Send a concise JSONL handoff to the running pi-agent session. Pi-agent invokes Codex and answers back into the meeting through its artifact/UI tools.",
         parameters: {
           type: "object",
           properties: {
             prompt: { type: "string" },
             title: { type: "string", description: "Short visible task title." },
             taskKey: { type: "string", description: "Optional stable task key for lifecycle updates." },
+            taskClass: { type: "string", enum: ["artifact.render", "artifact.edit", "code.change", "research.explore", "critique.review", "conversation"] },
+            hints: { type: "array", items: { type: "string" }, description: "Optional short hints from the Realtime agent for pi-agent." },
+            contextJsonl: { type: "string", description: "Optional newline-delimited JSON handoff records. If omitted, the API builds records from prompt/title/hints." },
             sourceDocumentId: { type: "string", description: "Optional current canvas document id that motivated the task." },
             cwd: { type: "string", description: "Optional path relative to the allowed workspace root." }
           },
@@ -700,27 +706,31 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       const cwd = requestedCwd ? resolveWorkspacePath(requestedCwd) : repoRoot;
       const title = optionalString(args.title) || implementationTitleFromPrompt(prompt);
       const taskKey = optionalString(args.taskKey) || slugTaskKey(title);
+      const taskClass = asTaskClass(args.taskClass) || "artifact.render";
       const sourceDocumentId = optionalString(args.sourceDocumentId);
-      const implementationPrompt = [
-        `Requested working directory: ${cwd}`,
-        prompt.trim()
-      ].join("\n\n");
+      const hints = optionalStringArray(args.hints);
+      const contextJsonl = optionalString(args.contextJsonl);
+      const handoffJsonl = contextJsonl || buildPiHandoffJsonl({ taskKey, title, prompt, hints, cwd, sourceDocumentId, taskClass });
+      appendPiHandoff(handoffJsonl);
       appendEvent({
-        id: newEventId("task"),
-        type: "agent.task",
+        id: newEventId("utt"),
+        type: "utterance.final",
         stream: "implementation",
         meetingId,
         createdAt: nowIso(),
-        agentId: realtimeAgentId,
-        taskKey,
-        title,
-        status: "queued",
-        taskClass: "code.change",
-        details: summarizePromptForTask(prompt),
-        implementationPrompt,
-        sourceDocumentId
+        speakerId: "realtime-handoff",
+        speakerLabel: "Realtime handoff",
+        text: [
+          "Realtime agent handoff to pi-agent. Treat the JSONL below as the task handoff, not as a raw transcript dump.",
+          "Use the Meeting artifact tools to answer in the Meeting UI. If a durable artifact is requested, create/update it and show it.",
+          "",
+          handoffJsonl
+        ].join("\n"),
+        startMs: Date.now() % 3_600_000,
+        endMs: (Date.now() % 3_600_000) + 1,
+        taskClass
       } as MeetingEvent);
-      output = { ok: true, delegatedTo: "pi-agent", taskKey, title, status: "queued" };
+      output = { ok: true, delegatedTo: "pi-agent", taskKey, title, taskClass, handoffPath: piHandoffsPath };
     } else {
       throw new Error(`unknown tool: ${name}`);
     }
@@ -746,17 +756,19 @@ function buildRealtimeInstructions(): string {
     "When you need to know what is currently on screen, what the current plan says, or what the humans are discussing, call read_meeting_context first instead of exploring the repo.",
     "When you need to understand this repository's file layout or implementation delegation path, call read_repo_guide before guessing.",
     "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
-    "If durable artifact work is needed, queue it for pi-agent with run_codex_task or create_meeting_task stream=implementation.",
+    "If durable artifact work is needed, create a visible implementation task if helpful, then call run_codex_task with your concise handoff for pi-agent.",
     "Do not use shell commands to run smart-artifact scripts yourself.",
     "In background listening mode, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, and run_codex_task.",
     "When you create a planning or capture task, use create_meeting_task with stream=conversation.",
-    "When you start or update Codex execution work, use create_meeting_task with stream=implementation.",
-    "run_codex_task queues implementation work for pi-agent; it does not run Codex inline inside your conversation turn.",
-    "Prefer creating implementation tasks first; use run_codex_task only when the task is ready for pi-agent execution.",
+    "When you start or update proposed Codex execution work, use create_meeting_task with stream=implementation for visibility, then run_codex_task for execution.",
+    "run_codex_task sends your concise JSONL handoff to the running pi-agent session; it does not run Codex inline inside your conversation turn.",
+    "Prefer creating implementation tasks first; use run_codex_task only when you have a clear summary, task title, and hints for pi-agent.",
     "Do not speak automatically while in silent background mode unless the client explicitly grants you the floor.",
     "Do not say you need to go look up the current project plan if a current canvas document already exists. Read meeting context and work from that.",
     "pi-agent is the implementation brain that invokes local Codex and preserves hot reload/self-improvement behavior.",
     "run_codex_task is your primary tool for delegating real coding work in the repository to pi-agent.",
+    "Do not pass raw transcript dumps to run_codex_task. Pass a concise summary and short hints; raw user and agent communications are mirrored separately as JSONL.",
+    "pi-agent answers appear back in the meeting as piAgent messages and hand raises. When pi-agent has a useful result, raise your hand and speak about it only after the floor is granted.",
     "run_shell_command is for quick inspection and lightweight terminal tasks.",
     "Maintain a stable living canvas document with post_meeting_markdown using documentId=realtime-live-canvas.",
     "For completed or milestone work, use publish_task_result to put a polished result on the main canvas before or while raising your hand.",
@@ -769,7 +781,7 @@ function buildRealtimeInstructions(): string {
     `The main application repository root is ${repoRoot}.`,
     `The allowed workspace root for shell and Codex work is ${workspaceRoot}.`,
     "When the user asks whether you can work with Codex, answer yes and mention that run_codex_task queues work through pi-agent.",
-    "Use run_codex_task for larger code edits, codebase analysis, or multi-step repo work that should enter the implementation lifecycle.",
+    "Use run_codex_task for larger code edits, durable artifact generation, codebase analysis, or multi-step repo work that should enter the pi-agent lifecycle.",
     "Startup context snapshot follows. Treat it as already-known context and only refresh it with read_meeting_context when needed.",
     startupContext,
     "If you change the preview, tell the user what changed and what to look at on screen."
@@ -832,7 +844,7 @@ function repoGuideText(): string {
     "",
     "Artifact workflow",
     "- Durable smart artifacts are created, read, and updated by pi-agent/Codex, not by the Realtime agent.",
-    "- If the meeting needs a durable artifact, create an implementation task or call run_codex_task with a precise prompt for pi-agent.",
+    "- If the meeting needs a durable artifact, create an implementation task for visibility if helpful, then call run_codex_task with a precise handoff for pi-agent.",
     "- Realtime should keep only the current living notes/diagram on the meeting canvas with post_meeting_markdown.",
     "",
     "Useful inspection commands",
@@ -867,6 +879,21 @@ function readMeetingContext(): unknown {
     .filter((event): event is Extract<MeetingEvent, { type: "agent.hand_raise" }> => event.type === "agent.hand_raise" && event.agentId === "realtime-codex")
     .slice(-8)
     .map((event) => ({ reason: event.reason, confidence: event.confidence, requestedMode: event.requestedMode }));
+  const piAgentMessages = events
+    .filter((event): event is Extract<MeetingEvent, { type: "agent.message" }> => event.type === "agent.message" && event.agentId === "pi-agent")
+    .slice(-8)
+    .map((event) => ({
+      stream: event.stream,
+      surface: event.surface,
+      lifecycle: event.lifecycle,
+      documentId: event.documentId,
+      createdAt: event.createdAt,
+      text: event.text
+    }));
+  const piAgentHands = events
+    .filter((event): event is Extract<MeetingEvent, { type: "agent.hand_raise" }> => event.type === "agent.hand_raise" && event.agentId === "pi-agent")
+    .slice(-6)
+    .map((event) => ({ createdAt: event.createdAt, reason: event.reason, confidence: event.confidence, requestedMode: event.requestedMode }));
   return {
     ok: true,
     guidance: [
@@ -882,6 +909,10 @@ function readMeetingContext(): unknown {
     canvasDocuments: dedupeCanvasDocuments(canvasMessages).slice(0, 12),
     tasks,
     implementationQueue: readImplementationQueueState(),
+    piAgent: {
+      messages: piAgentMessages,
+      raisedHands: piAgentHands
+    },
     raisedHands,
     transcript
   };
@@ -983,6 +1014,7 @@ function ensurePipelineLayout(): void {
     resolve(conversationPipelineRoot, "notes"),
     resolve(conversationPipelineRoot, "transcript"),
     resolve(conversationPipelineRoot, "hands"),
+    implementationInboxRoot,
     implementationTaskQueuedRoot,
     implementationTaskWorkingRoot,
     implementationTaskDoneRoot,
@@ -997,15 +1029,21 @@ function mirrorEventToPipeline(event: MeetingEvent): void {
   ensurePipelineLayout();
   const stream = "stream" in event && event.stream ? event.stream : inferEventStream(event);
   if (event.type === "utterance.final" || event.type === "utterance.partial") {
+    if (stream === "implementation") {
+      appendFileSync(resolve(implementationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
+      return;
+    }
     const transcriptLog = resolve(conversationPipelineRoot, "transcript", "conversation.jsonl");
     appendFileSync(transcriptLog, `${JSON.stringify(event)}\n`);
     if (event.type === "utterance.final") {
       appendFileSync(resolve(conversationPipelineRoot, "transcript", "conversation.md"), `- ${event.speakerLabel}: ${event.text}\n`);
+      appendConversationInboxRecord(event);
     }
     return;
   }
   if (event.type === "agent.message" && stream === "conversation") {
     appendFileSync(resolve(conversationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
+    appendConversationInboxRecord(event);
     if (event.surface === "canvas") {
       const documentId = event.documentId || "live-canvas";
       const notePath = resolve(conversationPipelineRoot, "notes", `${safeFileComponent(documentId)}.md`);
@@ -1018,15 +1056,78 @@ function mirrorEventToPipeline(event: MeetingEvent): void {
   }
   if (event.type === "agent.hand_raise" && stream === "conversation") {
     appendFileSync(resolve(conversationPipelineRoot, "hands", "raised.jsonl"), `${JSON.stringify(event)}\n`);
+    appendConversationInboxRecord(event);
     return;
   }
   if (event.type === "agent.task") {
     syncTaskEventToSpool(event as MeetingEvent & { taskKey?: string; title: string; status: string; stream?: string });
+    if ((event.stream || "conversation") === "conversation") appendConversationInboxRecord(event);
     return;
   }
   if ((event.type === "agent.message" || event.type === "agent.trace" || event.type === "agent.hand_raise") && stream === "implementation") {
     appendFileSync(resolve(implementationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
   }
+}
+
+function appendConversationInboxRecord(event: MeetingEvent): void {
+  const record = conversationInboxRecord(event);
+  if (!record) return;
+  mkdirSync(dirname(implementationConversationInboxPath), { recursive: true });
+  appendFileSync(implementationConversationInboxPath, `${JSON.stringify(record)}\n`, "utf8");
+}
+
+function conversationInboxRecord(event: MeetingEvent): Record<string, unknown> | undefined {
+  if (event.type === "utterance.final") {
+    return {
+      ts: nowIso(),
+      eventId: event.id,
+      sourceCreatedAt: event.createdAt,
+      role: "user",
+      kind: "raw_user_comm",
+      speaker: event.speakerLabel,
+      text: event.text
+    };
+  }
+  if (event.type === "agent.message") {
+    return {
+      ts: nowIso(),
+      eventId: event.id,
+      sourceCreatedAt: event.createdAt,
+      role: event.agentId === "pi-agent" ? "pi-agent" : "realtime-agent",
+      kind: "raw_agent_comm",
+      stream: event.stream,
+      surface: event.surface,
+      documentId: event.documentId,
+      text: event.text
+    };
+  }
+  if (event.type === "agent.task") {
+    return {
+      ts: nowIso(),
+      eventId: event.id,
+      sourceCreatedAt: event.createdAt,
+      role: "realtime-agent",
+      kind: "hint",
+      taskKey: event.taskKey,
+      status: event.status,
+      taskClass: event.taskClass,
+      title: event.title,
+      text: event.details || event.title
+    };
+  }
+  if (event.type === "agent.hand_raise") {
+    return {
+      ts: nowIso(),
+      eventId: event.id,
+      sourceCreatedAt: event.createdAt,
+      role: event.agentId === "pi-agent" ? "pi-agent" : "realtime-agent",
+      kind: "hint",
+      requestedMode: event.requestedMode,
+      confidence: event.confidence,
+      text: event.reason
+    };
+  }
+  return undefined;
 }
 
 function syncTaskEventToSpool(event: MeetingEvent & { taskKey?: string; title: string; status: string; stream?: string }): void {
@@ -1267,14 +1368,40 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function optionalStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function buildPiHandoffJsonl(input: { taskKey: string; title: string; prompt: string; hints: string[]; cwd: string; sourceDocumentId?: string; taskClass: string }): string {
+  const records = [
+    {
+      role: "realtime-agent",
+      kind: "handoff_summary",
+      taskKey: input.taskKey,
+      taskClass: input.taskClass,
+      title: input.title,
+      text: input.prompt.trim(),
+      cwd: input.cwd,
+      sourceDocumentId: input.sourceDocumentId
+    },
+    ...input.hints.map((hint) => ({
+      role: "realtime-agent",
+      kind: "hint",
+      taskKey: input.taskKey,
+      text: hint
+    }))
+  ];
+  return records.map((record) => JSON.stringify({ ts: nowIso(), ...record })).join("\n");
+}
+
+function appendPiHandoff(jsonl: string): void {
+  mkdirSync(dirname(piHandoffsPath), { recursive: true });
+  appendFileSync(piHandoffsPath, `${jsonl.trim()}\n`, "utf8");
+}
+
 function implementationTitleFromPrompt(prompt: string): string {
   const firstLine = prompt.split("\n").map((line) => line.trim()).find(Boolean) || "Codex implementation task";
   return firstLine.replace(/^#+\s*/, "").slice(0, 90) || "Codex implementation task";
-}
-
-function summarizePromptForTask(prompt: string): string {
-  const trimmed = prompt.trim();
-  return trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}\n\n...` : trimmed;
 }
 
 function asRequestedMode(value: unknown): "speak" | "show" | "work" | "review" {
