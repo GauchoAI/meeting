@@ -348,6 +348,11 @@ function sendRealtimeArtifactFile(pathname: string, res: ServerResponse): void {
 
 async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<void> {
   if (!sdp.trim()) return sendJson(res, { error: "missing sdp" }, 400);
+  if (shouldBlockOpenAiRealtime()) {
+    const provider = process.env.STT_PROVIDER || "local-whisper";
+    appendTrace("agent", "OpenAI Realtime call refused while local voice provider is active", { provider });
+    return sendJson(res, { error: `OpenAI Realtime is disabled while STT_PROVIDER=${provider}. Use local voice mode or set MEETING_ALLOW_OPENAI_REALTIME=true.` }, 409);
+  }
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return sendJson(res, { error: "OPENAI_API_KEY is not configured" }, 400);
 
@@ -587,6 +592,11 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
   } catch (error) {
     sendJson(res, { error: error instanceof Error ? error.message : String(error) }, 500);
   }
+}
+
+function shouldBlockOpenAiRealtime(): boolean {
+  if (process.env.MEETING_ALLOW_OPENAI_REALTIME === "true") return false;
+  return process.env.STT_PROVIDER === "voxtral-http" || process.env.STT_PROVIDER === "moshi-http";
 }
 
 async function runRealtimeTool(name: string, input: unknown, res: ServerResponse): Promise<void> {
