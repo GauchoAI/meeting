@@ -606,12 +606,13 @@ export default function (pi: ExtensionAPI) {
 			void postTrace("debug", "stored raw Realtime transcript without sending it to Codex", { id: event.id, textChars: text.length });
 			return;
 		}
+		const isHandoff = isRealtimeHandoff(event);
 		const utteranceCreatedAt = Date.parse(event.createdAt);
 		if (!Number.isFinite(utteranceCreatedAt) || utteranceCreatedAt < extensionStartedAt - 5000 || Date.now() - utteranceCreatedAt > 120000) {
 			void postTrace("debug", "ignored stale meeting utterance", { id: event.id, createdAt: event.createdAt, textChars: text.length });
 			return;
 		}
-		if (!ctx.isIdle()) {
+		if (!ctx.isIdle() && !isHandoff) {
 			void postTrace("debug", "ignored meeting utterance while agent busy", { id: event.id, createdAt: event.createdAt, textChars: text.length });
 			return;
 		}
@@ -708,6 +709,10 @@ function extractText(content: unknown): string {
 
 function isRawRealtimeTranscript(event: UtteranceFinalEvent): boolean {
 	return event.speakerId === "room" && event.speakerLabel === "Room (Realtime)";
+}
+
+function isRealtimeHandoff(event: UtteranceFinalEvent): boolean {
+	return event.speakerId === "realtime-handoff";
 }
 
 function isIgnorableTranscript(text: string): boolean {
