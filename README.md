@@ -95,7 +95,9 @@ Behavior:
 - `pi-agent` receives those handoffs through the existing meeting extension,
   invokes local Codex, and answers back through Meeting tools/artifacts;
 - Realtime watches `pi-agent` messages and raised hands, then can raise its own
-  hand and speak only after the host grants the floor;
+  hand for text review;
+- host-granted `speak` floor uses audio for Realtime conversation, while
+  Codex/pi-agent results use UI text or canvas artifacts;
 - the host can explicitly grant the floor with **Let agent speak**;
 - after speaking, the agent returns to silent listening mode.
 

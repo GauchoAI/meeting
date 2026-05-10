@@ -31,6 +31,7 @@ type FontSize = "small" | "medium" | "large" | "xlarge";
 type RealtimeState = "idle" | "connecting" | "connected";
 type RealtimeResponseMode = "silent" | "speak";
 type MeetingStream = "conversation" | "implementation";
+type AgentRequestedMode = AgentHandRaiseEvent["requestedMode"];
 
 interface RenderSample {
   markdownMs: number;
@@ -506,6 +507,24 @@ function App() {
     void postRealtimeTrace("input", "Prompt sent to Realtime agent", { text });
   }
 
+  function handleAgentHandAction(event?: AgentHandRaiseEvent) {
+    if (event) {
+      setDismissedHandIds((current) => [...current, event.id]);
+    }
+    if (!event || event.requestedMode === "speak") {
+      requestAgentFloor(event?.reason);
+      return;
+    }
+    requestAgentTextFloor(event.requestedMode, event.reason);
+  }
+
+  function handActionLabel(event?: AgentHandRaiseEvent): string {
+    if (!event || event.requestedMode === "speak") return "Let agent speak";
+    if (event.requestedMode === "show") return "Show text";
+    if (event.requestedMode === "work") return "Review work";
+    return "Review text";
+  }
+
   function requestAgentFloor(reason?: string) {
     if (realtimeState !== "connected") return;
     if (analysisTimeoutRef.current !== null) {
@@ -547,6 +566,49 @@ function App() {
     void postRealtimeTrace("agent", "Floor granted to Realtime agent", undefined);
   }
 
+  function requestAgentTextFloor(mode: Exclude<AgentRequestedMode, "speak">, reason: string) {
+    if (realtimeState !== "connected") return;
+    if (analysisTimeoutRef.current !== null) {
+      window.clearTimeout(analysisTimeoutRef.current);
+      analysisTimeoutRef.current = null;
+    }
+    if (liveAnalysisTimeoutRef.current !== null) {
+      window.clearTimeout(liveAnalysisTimeoutRef.current);
+      liveAnalysisTimeoutRef.current = null;
+    }
+    assistantDraftRef.current = "";
+    setRealtimeDraftText("");
+    setRealtimeResponseMode("silent");
+    pendingResponseModeRef.current = "silent";
+    void postMeetingEvent({
+      id: newEventId("floor"),
+      type: "agent.floor",
+      stream: "conversation",
+      meetingId: "local-demo",
+      createdAt: nowIso(),
+      agentId: realtimeAgentId,
+      granted: true,
+      mode,
+      note: reason
+    });
+    sendRealtimeEvent({
+      type: "response.create",
+      response: {
+        output_modalities: ["text"],
+        instructions: [
+          "The host asked you to respond in the UI as text, not audio.",
+          "This path is for Codex/pi-agent results, work review, and visual show-and-tell.",
+          "Do not speak audio.",
+          "Call read_meeting_context and inspect piAgent.messages, piAgent.raisedHands, currentCanvas, and implementationQueue.",
+          reason ? `The current raised-hand reason is: ${reason}` : "",
+          "Post a concise text response. If there is a visual result to show, use post_meeting_markdown with surface=canvas.",
+          "Keep the status text short unless the user explicitly asks for more detail."
+        ].filter(Boolean).join("\n")
+      }
+    });
+    void postRealtimeTrace("agent", "Text floor granted to Realtime agent", { mode });
+  }
+
   function scheduleSilentAnalysis(trigger: string) {
     if (realtimeState !== "connected" || realtimeResponseMode !== "silent") return;
     if (analysisTimeoutRef.current !== null) window.clearTimeout(analysisTimeoutRef.current);
@@ -586,7 +648,7 @@ function App() {
           "If you need to understand the current plan, notes, or on-screen state, call read_meeting_context first.",
           "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
           "If durable artifact work is needed, create a visible implementation task if helpful, then call run_codex_task with your concise handoff for pi-agent.",
-          "When pi-agent has published a result, read meeting context, raise your hand if it is worth showing, and speak only after the host grants the floor.",
+          "When pi-agent has published a result, read meeting context and raise your hand with requestedMode=show or requestedMode=review. Codex/pi-agent results should be shown as text, not spoken audio.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
           "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
           `Maintain a living meeting document on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
@@ -598,7 +660,7 @@ function App() {
           "Prefer implementation tasks first, and use run_codex_task only when you have a clear summary, task title, and hints for pi-agent.",
           "Do not pass raw transcript dumps to run_codex_task. Pass your proposed summary and short hints; raw user and agent communications are mirrored separately as JSONL.",
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
-          "Raise your hand when you have questions, decisions to confirm, or something important to show before speaking.",
+          "Raise your hand with requestedMode=speak only for Realtime conversation contributions that should be spoken aloud.",
           "Use run_codex_task when the conversation implies concrete coding follow-up that should enter the pi-agent implementation lifecycle.",
           "Keep any text response to at most one short sentence."
         ].join("\n")
@@ -617,7 +679,8 @@ function App() {
           "A pi-agent/Codex result just arrived in the meeting stream.",
           "Do not speak audio now.",
           "Call read_meeting_context and inspect piAgent.messages and piAgent.raisedHands.",
-          "If the result is useful to show or explain, call raise_meeting_hand with requestedMode=show or requestedMode=speak and a concise reason.",
+          "If the result is useful to show or explain, call raise_meeting_hand with requestedMode=show or requestedMode=review and a concise reason.",
+          "Never use requestedMode=speak for Codex/pi-agent output; Codex speaks through text in the UI.",
           "If there is nothing to add, respond with exactly NO_ACTION.",
           "Do not create durable artifacts; pi-agent owns durable artifacts."
         ].join("\n")
@@ -810,7 +873,7 @@ function App() {
                 <button onClick={disconnectRealtimeAgent}>Disconnect Realtime agent</button>
               )}
               {realtimeState === "connected" && (
-                <button onClick={() => requestAgentFloor(activeHandRaises[0]?.reason)}>Let agent speak</button>
+                <button onClick={() => handleAgentHandAction(activeHandRaises[0])}>{handActionLabel(activeHandRaises[0])}</button>
               )}
               <div className="realtimePromptBox">
                 <textarea
@@ -902,10 +965,7 @@ function App() {
                     </div>
                     <p>{event.reason}</p>
                     <div className="opsActions">
-                      <button onClick={() => {
-                        setDismissedHandIds((current) => [...current, event.id]);
-                        requestAgentFloor(event.reason);
-                      }}>Let speak</button>
+                      <button onClick={() => handleAgentHandAction(event)}>{handActionLabel(event)}</button>
                       <button className="secondary" onClick={() => setDismissedHandIds((current) => [...current, event.id])}>Dismiss</button>
                     </div>
                   </article>
