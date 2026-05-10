@@ -1157,8 +1157,9 @@
       if (!localSttActive && localStream) startLocalSttCapture(localStream);
       if (!localSttStream || localPushToTalkActive) return;
       localPushToTalkActive = true;
-      if (localSttPausedForSpeech) stopLocalSpeechForManualInput();
+      if (localSttPausedForSpeech || localSpeechAudioPlaying() || localSpeechQueuePlaying || localSpeechQueue.length) stopLocalSpeechForManualInput();
       localSttSuppressUploadsUntil = 0;
+      localSttDiscardCurrentChunk = false;
       if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
       renderStatus("recording; release Space to send", "speaking");
       publishShellState();
@@ -1189,9 +1190,16 @@
 
     function stopLocalSpeechForManualInput() {
       localSpeechGeneration += 1;
+      clearLocalSpeechQueue();
+      if (localSpeechResumeTimer !== null) {
+        window.clearTimeout(localSpeechResumeTimer);
+        localSpeechResumeTimer = null;
+      }
       localSttPausedForSpeech = false;
       localSpeechStartedAt = 0;
       localSpeechBargeInStartedAt = 0;
+      localSttSuppressUploadsUntil = 0;
+      localSttDiscardCurrentChunk = false;
       stopLocalSpeechAudio();
       void postRealtimeTrace("agent", "Local voice speech interrupted by push-to-talk", undefined);
     }
@@ -1325,7 +1333,7 @@
     }
 
     function warmLocalSpeechQueue() {
-      const maxPrefetch = localStreamingTts ? 1 : 3;
+      const maxPrefetch = 1;
       let inFlight = 0;
       for (const item of localSpeechQueue) {
         if (item.synthesis) inFlight += 1;
@@ -1632,15 +1640,18 @@
         localSpeechStreamPlayback.stop();
         localSpeechStreamPlayback = null;
       }
+      if (localSpeechAudio) {
+        localSpeechAudio.pause();
+        localSpeechAudio.onended = null;
+        localSpeechAudio.onerror = null;
+        localSpeechAudio.removeAttribute("src");
+        localSpeechAudio.load();
+      }
       if (localSpeechFinishCurrent) {
         const finish = localSpeechFinishCurrent;
         localSpeechFinishCurrent = null;
         finish();
-      }
-      if (localSpeechAudio) {
-        localSpeechAudio.pause();
-        localSpeechAudio.removeAttribute("src");
-        localSpeechAudio.load();
+      } else {
         localSpeechAudio = null;
       }
       if (localSpeechAudioUrl) {
@@ -1838,20 +1849,29 @@
 
     function findSpeechBoundary(text, final) {
       const normalized = String(text || "");
+      const early = softSpeechBoundary(normalized, final ? 180 : 130, final ? 100 : 75);
+      if (early >= 0) return early;
       const sentence = /[.!?](?=\s|$)/g;
       let match;
       while ((match = sentence.exec(normalized))) {
         const end = match.index + 1;
         if (end >= 45 || final) return end;
       }
-      if (!final && normalized.length > 220) {
-        const soft = Math.max(normalized.lastIndexOf(",", 220), normalized.lastIndexOf(";", 220), normalized.lastIndexOf(":", 220));
-        if (soft >= 90) return soft + 1;
-        const space = normalized.lastIndexOf(" ", 220);
-        if (space >= 120) return space;
-      }
       if (final && normalized.trim().length >= 18) return normalized.length;
       return -1;
+    }
+
+    function softSpeechBoundary(text, target, min) {
+      const normalized = String(text || "");
+      if (normalized.length < target) return -1;
+      const punctuation = Math.max(
+        normalized.lastIndexOf(",", target),
+        normalized.lastIndexOf(";", target),
+        normalized.lastIndexOf(":", target)
+      );
+      if (punctuation >= min) return punctuation + 1;
+      const space = normalized.lastIndexOf(" ", target);
+      return space >= min ? space : -1;
     }
 
     function isUsefulSpeechSegment(text) {

@@ -122,7 +122,7 @@ That streaming route now exists as `/tts/stream`. It still operates on complete 
 
 The stable shell also watches Pi/Codex `agent.message` draft updates. For status-surface drafts, it extracts complete speech-sized sentences and queues them immediately, so local voice can begin speaking while Codex is still writing the rest of the answer. Canvas/artifact markdown is not read aloud as a stream; final canvas updates remain summarized instead of narrating raw diagrams or code blocks.
 
-The speech queue prefetches upcoming TTS jobs while the current sentence is playing. Blob-based TTS can warm several upcoming sentences; streaming TTS keeps a small lookahead so audio stays ordered without opening many live streams. This avoids avoidable silence between sentences without overlapping spoken output.
+The speech queue prefetches one upcoming TTS job while the current sentence is playing. A larger worker pool overloaded local Chatterbox on Apple Silicon and increased tail latency, so the stable default is ordered playback with one lookahead. Draft speech also uses earlier soft clause boundaries so the first spoken chunk can start before a long first sentence is complete.
 
 ## Sources
 
