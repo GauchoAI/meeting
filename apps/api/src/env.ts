@@ -5,6 +5,7 @@ const configEnvMap: Record<string, string> = {
   sttProvider: "STT_PROVIDER",
   whisperCppBin: "WHISPER_CPP_BIN",
   whisperModelPath: "WHISPER_MODEL_PATH",
+  whisperServerUrl: "WHISPER_SERVER_URL",
   meetingApiPort: "MEETING_API_PORT",
   meetingWebPort: "MEETING_WEB_PORT",
   meetingAgentBackend: "MEETING_AGENT_BACKEND",

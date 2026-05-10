@@ -39,7 +39,7 @@ function speechProviderConfigured(provider: SpeechProviderStatus["provider"]): b
   if (provider === "deepgram") return Boolean(process.env.DEEPGRAM_API_KEY);
   if (provider === "voxtral-http") return Boolean(process.env.VOXTRAL_STT_URL || process.env.STT_PROVIDER === "voxtral-http");
   if (provider === "moshi-http") return Boolean(process.env.MOSHI_STT_URL || process.env.STT_PROVIDER === "moshi-http");
-  return Boolean(process.env.WHISPER_CPP_BIN && process.env.WHISPER_MODEL_PATH);
+  return Boolean(process.env.WHISPER_SERVER_URL || (process.env.WHISPER_CPP_BIN && process.env.WHISPER_MODEL_PATH));
 }
 
 function streamingSttSupported(provider: SpeechProviderStatus["provider"]): boolean {
@@ -57,6 +57,7 @@ function speechProviderNote(provider: SpeechProviderStatus["provider"]): string 
   if (provider === "deepgram") return process.env.DEEPGRAM_API_KEY ? "Deepgram key detected." : "Set DEEPGRAM_API_KEY for Deepgram STT.";
   if (provider === "voxtral-http") return `Experimental local Voxtral STT over HTTP at ${process.env.VOXTRAL_STT_URL || "http://localhost:8787/transcribe"}.`;
   if (provider === "moshi-http") return `Experimental Moshi bridge over HTTP at ${process.env.MOSHI_STT_URL || "http://localhost:8788/transcribe"}. Moshi is for full-duplex voice experiments, not durable tool use.`;
+  if (process.env.WHISPER_SERVER_URL) return `Local Whisper server detected at ${process.env.WHISPER_SERVER_URL}; using preloaded model path when available.`;
   return process.env.DEEPGRAM_API_KEY
     ? "Deepgram key detected; local Whisper remains the default STT provider unless STT_PROVIDER=deepgram."
     : "Local Whisper is the default. Run scripts/setup-whisper.cpp.sh if whisper-cli/model are missing.";
