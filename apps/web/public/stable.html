@@ -1160,7 +1160,8 @@
     }
 
     function localSpeechSilenceMs() {
-      return 2400;
+      const configured = Number(localStorage.getItem("meeting.localSpeechSilenceMs") || "900");
+      return Number.isFinite(configured) ? Math.max(450, Math.min(3000, configured)) : 900;
     }
 
     function localSpeechMaxMs() {
