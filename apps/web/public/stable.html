@@ -42,7 +42,7 @@
     <button id="join">Join meeting</button>
     <button id="mute" class="secondary" disabled>Mute agent</button>
     <button id="sleep" class="secondary" disabled>Sleep until prompted</button>
-    <button id="speak" class="speak" disabled hidden>Send Whisper clip</button>
+    <button id="speak" class="speak" disabled hidden>Hold Space to speak</button>
     <button id="leave" class="secondary" hidden>Leave</button>
   </div>
   <audio id="remoteAudio" autoplay></audio>
@@ -102,6 +102,7 @@
     let localSttDiscardCurrentChunk = false;
     let localSttSuppressUploadsUntil = 0;
     let localSttPausedForSpeech = false;
+    let localPushToTalkActive = false;
     let localSpeechStartedAt = 0;
     let localSpeechBargeInStartedAt = 0;
     let localSpeechResumeTimer = null;
@@ -128,6 +129,19 @@
       voiceModeManuallySelected = true;
       setVoiceMode(String(voiceModeSelect.value || "realtime"));
     });
+    speakButton.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      startLocalPushToTalk();
+    });
+    speakButton.addEventListener("pointerup", (event) => {
+      event.preventDefault();
+      stopLocalPushToTalk();
+    });
+    speakButton.addEventListener("pointercancel", () => stopLocalPushToTalk());
+    speakButton.addEventListener("pointerleave", () => stopLocalPushToTalk());
+    window.addEventListener("keydown", handleLocalPushToTalkKeyDown);
+    window.addEventListener("keyup", handleLocalPushToTalkKeyUp);
+    window.addEventListener("blur", () => stopLocalPushToTalk({ discard: true }));
     uiFrame.addEventListener("load", publishShellState);
 
     window.addEventListener("message", (event) => {
@@ -1049,6 +1063,18 @@
         scheduleLocalVadTick();
         return;
       }
+      if (localPushToTalkActive) {
+        if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
+        if (localSttRecorder?.state === "recording" && now - localSttRecorderStartedAt >= localSpeechMaxMs()) {
+          stopLocalPushToTalk();
+        }
+        scheduleLocalVadTick();
+        return;
+      }
+      if (localCaptureMode() === "push-to-talk") {
+        scheduleLocalVadTick();
+        return;
+      }
       if (now < localSttSuppressUploadsUntil) {
         if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
         scheduleLocalVadTick();
@@ -1105,8 +1131,60 @@
       if (localSttRecorder?.state === "recording") localSttRecorder.stop();
     }
 
+    function startLocalPushToTalk() {
+      if (!joined || !usesLocalStt()) return;
+      if (!localSttActive && localStream) startLocalSttCapture(localStream);
+      if (!localSttStream || localPushToTalkActive) return;
+      localPushToTalkActive = true;
+      if (localSttPausedForSpeech) stopLocalSpeechForManualInput();
+      localSttSuppressUploadsUntil = 0;
+      if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
+      renderStatus("recording; release Space to send", "speaking");
+      publishShellState();
+    }
+
+    function stopLocalPushToTalk(options = {}) {
+      if (!localPushToTalkActive) return;
+      localPushToTalkActive = false;
+      const elapsedMs = localSttRecorderStartedAt ? Date.now() - localSttRecorderStartedAt : 0;
+      stopLocalSpeechRecorder({ discard: Boolean(options.discard) || elapsedMs < 200 });
+      renderStatus();
+      publishShellState();
+    }
+
+    function handleLocalPushToTalkKeyDown(event) {
+      if (event.code !== "Space" || event.repeat || isEditableEventTarget(event.target)) return;
+      if (!joined || !usesLocalStt()) return;
+      event.preventDefault();
+      startLocalPushToTalk();
+    }
+
+    function handleLocalPushToTalkKeyUp(event) {
+      if (event.code !== "Space" || isEditableEventTarget(event.target)) return;
+      if (!joined || !usesLocalStt()) return;
+      event.preventDefault();
+      stopLocalPushToTalk();
+    }
+
+    function stopLocalSpeechForManualInput() {
+      localSpeechGeneration += 1;
+      localSttPausedForSpeech = false;
+      localSpeechStartedAt = 0;
+      localSpeechBargeInStartedAt = 0;
+      window.speechSynthesis?.cancel();
+      void postRealtimeTrace("agent", "Local voice speech interrupted by push-to-talk", undefined);
+    }
+
+    function isEditableEventTarget(target) {
+      const element = target instanceof Element ? target : null;
+      if (!element) return false;
+      const tagName = element.tagName.toLowerCase();
+      return tagName === "input" || tagName === "textarea" || tagName === "select" || element.isContentEditable;
+    }
+
     function stopLocalSttCapture(options = {}) {
       localSttActive = false;
+      localPushToTalkActive = false;
       if (options.suppressUploads) {
         localSttDiscardCurrentChunk = true;
         localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + Number(options.suppressMs || 1600));
@@ -1161,6 +1239,10 @@
 
     function localAcousticBargeInEnabled() {
       return localStorage.getItem("meeting.localAcousticBargeIn") === "true";
+    }
+
+    function localCaptureMode() {
+      return localStorage.getItem("meeting.localCaptureMode") === "auto-vad" ? "auto-vad" : "push-to-talk";
     }
 
     function localSpeechSilenceMs() {
@@ -1533,7 +1615,10 @@
       } else if (!joined) {
         statusEl.textContent = "stable shell idle";
       } else if (!usesRealtimeVoice()) {
-        statusEl.textContent = `${speechProviderLabel()} listening (${localSttActive ? "local STT active" : "local STT idle"})`;
+        if (localPushToTalkActive) statusEl.textContent = `${speechProviderLabel()} recording; release Space to send`;
+        else statusEl.textContent = localCaptureMode() === "push-to-talk"
+          ? `${speechProviderLabel()} ready (hold Space to speak)`
+          : `${speechProviderLabel()} listening (${localSttActive ? "local STT active" : "local STT idle"})`;
       } else if (realtimeState === "connected") {
         statusEl.textContent = `voice agent live (${voiceMode === "hybrid" ? `${speechProviderLabel()} + ` : ""}${realtimeMuted ? "muted listener" : "audio responder"}, ${realtimeActivationLabel()})`;
       } else if (realtimeState === "connecting") {
@@ -1547,6 +1632,10 @@
       muteButton.disabled = !joined;
       sleepButton.textContent = realtimeActivationMode === "sleeping" ? "Wake agent" : "Sleep until prompted";
       sleepButton.disabled = !joined || !usesRealtimeVoice();
+      speakButton.hidden = !joined || !usesLocalStt();
+      speakButton.disabled = !joined || !usesLocalStt();
+      speakButton.textContent = localPushToTalkActive ? "Release to send" : "Hold Space to speak";
+      speakButton.classList.toggle("active", localPushToTalkActive);
       voiceModeSelect.value = voiceMode;
     }
 

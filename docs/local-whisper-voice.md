@@ -5,7 +5,8 @@ The reliable voice architecture is: browser VAD captures turns, local Whisper tr
 ## Runtime Shape
 
 - The stable shell at `http://localhost:5175/stable.html` owns mic capture and speech output so the meeting UI can hot reload without dropping voice state.
-- The API receives only stable VAD chunks with `client=stable-vad-v1`; legacy chunks are ignored for local providers unless `MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS=true`.
+- Local capture defaults to push-to-talk: hold Space while speaking, release Space to send one clip to Whisper.
+- The API receives only stable-shell chunks with `client=stable-vad-v1`; legacy chunks are ignored for local providers unless `MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS=true`.
 - `STT_PROVIDER=local-whisper` keeps OpenAI Realtime disabled by default. Set `MEETING_ALLOW_OPENAI_REALTIME=true` only for explicit paid realtime tests.
 - `WHISPER_SERVER_URL=http://127.0.0.1:8790/inference` enables the preloaded `whisper-server` path. Without it, the API falls back to spawning `whisper-cli` per chunk.
 
@@ -26,6 +27,22 @@ WHISPER_MODEL_PATH=models/ggml-small.bin
 ```
 
 The server path avoids reloading the 465 MB `ggml-small.bin` model for every spoken turn. That is the biggest latency win available without returning to paid realtime models.
+
+## Capture Mode
+
+The default local capture mode is explicit push-to-talk. This is more reliable than acoustic VAD while tuning because it avoids sending tiny or badly cut chunks to Whisper.
+
+To re-enable automatic VAD capture for experiments:
+
+```js
+localStorage.setItem("meeting.localCaptureMode", "auto-vad")
+```
+
+To return to push-to-talk:
+
+```js
+localStorage.removeItem("meeting.localCaptureMode")
+```
 
 ## Interruption
 
