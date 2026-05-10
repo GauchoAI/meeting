@@ -1,8 +1,6 @@
 # Verbatim Message Rendering: Current vs Preferred
 
-## Example 1 — artifact render task
-
-### Current rendering
+## Example 1 — current handoff rendering
 
 ```txt
 Realtime agent handoff to pi-agent. Treat the JSONL below as the task handoff, not as a raw transcript dump.
@@ -11,18 +9,16 @@ Use the Meeting artifact tools to answer in the Meeting UI. If a durable artifac
 {"ts":"2026-05-10T02:03:22.969Z","role":"realtime-agent","kind":"handoff_summary","taskKey":"show-verbatim-current-vs-preferred-message-rendering","taskClass":"artifact.render","title":"Show verbatim current vs preferred message rendering","text":"Create a durable artifact that shows verbatim examples of how voice agent messages are currently rendered versus how they should be rendered to preserve the same actionable tasks. Include side-by-side or clearly separated before/after verbatim blocks and a minimal reusable template. Keep it concise and terminal-friendly. Ensure the artifact remains selected and visible without wrapper/status messages overriding the canvas.","cwd":"/Users/miguel_lemos/Desktop/mamba3/meeting","sourceDocumentId":"realtime-live-canvas"}
 ```
 
-### Preferred rendering
+## Example 1 — preferred rendering
 
 ```txt
 Task: Create a durable artifact showing current vs preferred voice-agent message rendering.
-Context: Source document is realtime-live-canvas.
-Constraints: Use verbatim before/after blocks; preserve actionable task content; keep concise; open the artifact; avoid wrapper/status focus steal.
+Context: Source document is realtime-live-canvas; task class is artifact.render.
+Constraints: Use verbatim before/after blocks; preserve actionable content; keep concise; open the artifact; avoid wrapper/status focus steal.
 Output: Selectable Meeting artifact.
 ```
 
-## Example 2 — troubleshooting task
-
-### Current rendering
+## Example 2 — current troubleshooting fragments
 
 ```txt
 Can you take a look? May be there is a bug.
@@ -30,7 +26,7 @@ Two times I have experienced since then.
 an output. My voice asin gets this call
 ```
 
-### Preferred rendering
+## Example 2 — preferred rendering
 
 ```txt
 Task: Investigate possible repeated UI/voice-agent delivery bug.
