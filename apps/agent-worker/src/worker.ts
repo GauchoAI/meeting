@@ -58,6 +58,8 @@ async function tick(): Promise<void> {
     renameSync(queuedDir, workingDir);
     const task = readJsonFile(resolve(workingDir, "task.json"));
     await processTask(next, workingDir, task);
+  } catch (error) {
+    console.error(`[meeting-agent] task processing failed: ${error instanceof Error ? error.stack || error.message : String(error)}`);
   } finally {
     busy = false;
   }
@@ -86,10 +88,12 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
     details
   } as AgentTaskEvent);
 
+  mkdirSync(workingDir, { recursive: true });
   writeFileSync(resolve(workingDir, "context.md"), handoffContext.endsWith("\n") ? handoffContext : `${handoffContext}\n`, "utf8");
   writeFileSync(resolve(workingDir, "worker.json"), `${JSON.stringify({ agentId, backend, startedAt: nowIso(), prompt }, null, 2)}\n`, "utf8");
   const result = await runLocalAgent(prompt);
   const summary = summarizeResult(result);
+  mkdirSync(workingDir, { recursive: true });
   writeFileSync(resolve(workingDir, "result.md"), summary.endsWith("\n") ? summary : `${summary}\n`, "utf8");
 
   const artifactResult = await createSmartArtifact(taskKey, title, summary);
