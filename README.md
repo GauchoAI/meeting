@@ -25,10 +25,10 @@ bash scripts/install-daemon.sh
 bash scripts/install-mcp-clients.sh
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:5175`.
 
 For the Realtime voice-to-Codex demo added in this repo, open
-`http://localhost:5173/realtime.html` after setting `OPENAI_API_KEY` in `.env`.
+`http://localhost:5175/realtime.html` after setting `OPENAI_API_KEY` in `.env`.
 That path creates a browser WebRTC session to OpenAI Realtime, exposes local
 tools for shell/Codex work, and lets the agent rewrite a live
 `.meeting/realtime/index.html` preview rendered in an iframe.
@@ -61,7 +61,7 @@ OpenAI Realtime voice session:
 
 ```bash
 pnpm dev
-open http://localhost:5173/realtime.html
+open http://localhost:5175/realtime.html
 ```
 
 What it does:
@@ -69,7 +69,7 @@ What it does:
 - opens a WebRTC audio call to `gpt-realtime-2`;
 - keeps your local camera visible in the page, but does not send video to the model;
 - exposes browser-triggered tools that can run short shell commands in the
-  workspace, queue `pi-agent` implementation work, and rewrite
+  workspace, hand off implementation work to `pi-agent`, and rewrite
   `.meeting/realtime/index.html`;
 - reloads the iframe preview whenever the agent publishes new HTML.
 
@@ -79,19 +79,23 @@ developer tool, not a production-safe remote execution surface.
 
 ## Realtime Listener Mode
 
-The main Meeting UI at `http://localhost:5173/` now supports a Realtime agent
+The main Meeting UI at `http://localhost:5175/` now supports a Realtime agent
 in the existing layout.
 
 Behavior:
 
 - the Realtime agent connects as a **silent background listener** by default;
-- room speech is transcribed and persisted into `.meeting/events.jsonl` and
-  `.meeting/session.md`;
+- room speech is transcribed and persisted into `.meeting/events.jsonl`,
+  `.meeting/session.md`, and `.meeting/pipeline/implementation/inbox/conversation.jsonl`;
 - the agent can silently react by raising a hand, posting Markdown, creating
-  task cards, inspecting the repo, or queueing implementation work for
+  task cards, inspecting the repo, or handing off implementation work to
   `pi-agent`;
-- `pi-agent` consumes `.meeting/pipeline/implementation/tasks/queued/*` and
-  invokes local Codex, keeping implementation work in a visible lifecycle;
+- raw Realtime transcript is not sent directly to Codex; the Realtime agent
+  sends concise JSONL handoffs with `run_codex_task`;
+- `pi-agent` receives those handoffs through the existing meeting extension,
+  invokes local Codex, and answers back through Meeting tools/artifacts;
+- Realtime watches `pi-agent` messages and raised hands, then can raise its own
+  hand and speak only after the host grants the floor;
 - the host can explicitly grant the floor with **Let agent speak**;
 - after speaking, the agent returns to silent listening mode.
 
