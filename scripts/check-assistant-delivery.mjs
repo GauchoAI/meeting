@@ -21,7 +21,7 @@ const checks = [
   [web.includes('Task: Review latest Pi/Codex output.') && web.includes('status-only updates should not replace it') && !web.includes('Context: surface='), "Realtime Pi updates use preferred message format without routing metadata"],
   [api.includes('name: "message_pi_agent"') && api.includes('pi-direct-messages.jsonl') && api.includes('piDirectMessagesSeenPath'), "Realtime exposes direct voice-agent to pi-agent messaging without canvas output"],
   [api.includes('directMessagePrompt') && api.includes('taskClass: "conversation"') && api.includes('delegatedTo: "pi-agent"'), "Direct voice-agent messages are injected into pi-agent like Codex tasks"],
-  [api.includes('speakerId: "realtime-direct-message"') && api.includes('directMessageForTerminal'), "Direct voice-agent messages are mirrored to the pi terminal handoff stream"],
+  [api.includes('speakerId: "realtime-direct-message"') && api.includes('directMessageForTerminal') && api.includes('return `${tag}${input.message}`') && !api.includes('Task: Respond to Realtime coordination message'), "Direct voice-agent messages are mirrored concisely to the pi terminal handoff stream"],
   [api.includes('type: "agent.task"') && api.includes('status: "queued"') && api.includes('implementationPrompt: prompt.trim()'), "run_codex_task enqueues an implementation task directly"],
   [worker.includes('handlePiDirectMessage') && worker.includes('[pi-agent:direct:') && worker.includes('piDirectMessagesSeenPath'), "Pi-agent worker tails and visibly logs direct messages"],
   [worker.includes('[pi-agent:implementation:working]') && worker.includes('[pi-agent:implementation:${status}]'), "Pi-agent worker visibly logs implementation task lifecycle"],

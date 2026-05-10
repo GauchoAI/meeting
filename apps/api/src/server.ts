@@ -1679,12 +1679,8 @@ function directMessagePrompt(input: { intent: string; message: string }): string
 }
 
 function directMessageForTerminal(input: { intent: string; message: string }): string {
-  return [
-    "Task: Respond to Realtime coordination message",
-    `Context: intent=${input.intent}; message=${input.message}`,
-    "Constraints: Keep it concise; do not update or steal the canvas.",
-    "Output: Brief reply/status for the voice agent."
-  ].join("\n");
+  const tag = input.intent && input.intent !== "inform" ? `[${input.intent}] ` : "";
+  return `${tag}${input.message}`;
 }
 
 function buildPiHandoffJsonl(input: { taskKey: string; title: string; prompt: string; hints: string[]; cwd: string; sourceDocumentId?: string; taskClass: string }): string {
