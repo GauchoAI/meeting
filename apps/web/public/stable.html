@@ -92,6 +92,13 @@
     let localSttStream = null;
     let localSttRecorder = null;
     let localSttChunkTimer = null;
+    let localSttAudioContext = null;
+    let localSttAudioSource = null;
+    let localSttAnalyser = null;
+    let localSttAnalysisData = null;
+    let localSttVadTimer = null;
+    let localSttRecorderStartedAt = 0;
+    let localSttLastVoiceAt = 0;
     let localSttDiscardCurrentChunk = false;
     let localSttSuppressUploadsUntil = 0;
     let localSttPausedForSpeech = false;
@@ -989,40 +996,83 @@
       if (!audioTracks.length) return;
       localSttStream = new MediaStream(audioTracks);
       localSttActive = true;
-      recordLocalSttChunk(localSttStream);
+      startLocalVadLoop();
       void postRealtimeTrace("agent", "Local STT capture started in stable shell", { provider: speechProvider, voiceMode });
       renderStatus();
       publishShellState();
     }
 
-    function recordLocalSttChunk(audioOnlyStream) {
+    function startLocalVadLoop() {
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor || !localSttStream) {
+        void postRealtimeTrace("error", "Local VAD is unavailable in this browser");
+        return;
+      }
+      localSttAudioContext = new AudioContextCtor();
+      localSttAnalyser = localSttAudioContext.createAnalyser();
+      localSttAnalyser.fftSize = 1024;
+      localSttAnalysisData = new Uint8Array(localSttAnalyser.fftSize);
+      localSttAudioSource = localSttAudioContext.createMediaStreamSource(localSttStream);
+      localSttAudioSource.connect(localSttAnalyser);
+      scheduleLocalVadTick();
+    }
+
+    function scheduleLocalVadTick() {
       if (!localSttActive) return;
-      if (!audioOnlyStream.getAudioTracks().some((track) => track.readyState === "live")) {
+      if (localSttVadTimer !== null) window.clearTimeout(localSttVadTimer);
+      localSttVadTimer = window.setTimeout(runLocalVadTick, 80);
+    }
+
+    function runLocalVadTick() {
+      localSttVadTimer = null;
+      if (!localSttActive || !localSttStream) return;
+      if (!localSttStream.getAudioTracks().some((track) => track.readyState === "live")) {
         stopLocalSttCapture();
         return;
       }
+      const now = Date.now();
+      if (now < localSttSuppressUploadsUntil) {
+        if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
+        scheduleLocalVadTick();
+        return;
+      }
+      const level = currentLocalMicLevel();
+      const speaking = level >= localVoiceThreshold();
+      if (speaking) {
+        localSttLastVoiceAt = now;
+        if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
+      }
+      if (localSttRecorder?.state === "recording") {
+        const elapsedMs = now - localSttRecorderStartedAt;
+        const silenceMs = now - localSttLastVoiceAt;
+        if ((elapsedMs >= 450 && silenceMs >= localSpeechSilenceMs()) || elapsedMs >= localSpeechMaxMs()) {
+          stopLocalSpeechRecorder({ discard: false });
+        }
+      }
+      scheduleLocalVadTick();
+    }
+
+    function startLocalSpeechRecorder() {
+      if (!localSttStream || localSttRecorder?.state === "recording") return;
       const mimeType = preferredMimeType();
-      const recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
+      const recorder = new MediaRecorder(localSttStream, mimeType ? { mimeType } : undefined);
       const chunks = [];
+      const startedAt = Date.now();
+      localSttRecorderStartedAt = startedAt;
+      localSttLastVoiceAt = startedAt;
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunks.push(event.data);
       };
       recorder.onstop = () => {
         const discard = localSttDiscardCurrentChunk || Date.now() < localSttSuppressUploadsUntil;
         localSttDiscardCurrentChunk = false;
-        const scheduleNext = () => {
-          if (localSttActive) {
-            localSttChunkTimer = window.setTimeout(() => recordLocalSttChunk(audioOnlyStream), 80);
-          }
-        };
+        localSttRecorder = null;
+        localSttRecorderStartedAt = 0;
         if (discard) {
           void postRealtimeTrace("debug", "Dropped local STT chunk during local speech output", { chunks: chunks.length });
-          scheduleNext();
         } else if (chunks.length > 0) {
           const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
-          void sendAudioChunk(blob).finally(scheduleNext);
-        } else {
-          scheduleNext();
+          void sendAudioChunk(blob, startedAt);
         }
       };
       recorder.onerror = (event) => {
@@ -1030,9 +1080,11 @@
       };
       recorder.start();
       localSttRecorder = recorder;
-      localSttChunkTimer = window.setTimeout(() => {
-        if (recorder.state === "recording") recorder.stop();
-      }, 3000);
+    }
+
+    function stopLocalSpeechRecorder(options = {}) {
+      if (options.discard) localSttDiscardCurrentChunk = true;
+      if (localSttRecorder?.state === "recording") localSttRecorder.stop();
     }
 
     function stopLocalSttCapture(options = {}) {
@@ -1045,21 +1097,60 @@
         window.clearTimeout(localSttChunkTimer);
         localSttChunkTimer = null;
       }
-      if (localSttRecorder?.state === "recording") localSttRecorder.stop();
+      if (localSttVadTimer !== null) {
+        window.clearTimeout(localSttVadTimer);
+        localSttVadTimer = null;
+      }
+      stopLocalSpeechRecorder({ discard: Boolean(options.suppressUploads) });
+      localSttAudioSource?.disconnect();
+      localSttAudioContext?.close?.().catch(() => undefined);
+      localSttAudioSource = null;
+      localSttAnalyser = null;
+      localSttAnalysisData = null;
+      localSttAudioContext = null;
       localSttRecorder = null;
       localSttStream = null;
       renderStatus();
       publishShellState();
     }
 
-    async function sendAudioChunk(blob) {
+    function currentLocalMicLevel() {
+      if (!localSttAnalyser || !localSttAnalysisData) return 0;
+      localSttAnalyser.getByteTimeDomainData(localSttAnalysisData);
+      let sum = 0;
+      for (const value of localSttAnalysisData) {
+        const centered = (value - 128) / 128;
+        sum += centered * centered;
+      }
+      return Math.sqrt(sum / localSttAnalysisData.length);
+    }
+
+    function localVoiceThreshold() {
+      return 0.018;
+    }
+
+    function localSpeechSilenceMs() {
+      return 2400;
+    }
+
+    function localSpeechMaxMs() {
+      return 22000;
+    }
+
+    async function sendAudioChunk(blob, clientStartedAt = 0) {
       if (Date.now() < localSttSuppressUploadsUntil) {
         await postRealtimeTrace("debug", "Skipped local STT upload during local speech output", { bytes: blob.size });
         return;
       }
       const extension = blob.type.includes("mp4") ? "mp4" : "webm";
       try {
-        await fetch(`${api}/audio/chunk?extension=${extension}&speaker=Host`, {
+        const params = new URLSearchParams({
+          extension,
+          speaker: "Host",
+          client: "stable-vad-v1"
+        });
+        if (clientStartedAt) params.set("clientStartedAt", String(clientStartedAt));
+        await fetch(`${api}/audio/chunk?${params.toString()}`, {
           method: "POST",
           headers: { "Content-Type": blob.type || "application/octet-stream" },
           body: await blob.arrayBuffer()

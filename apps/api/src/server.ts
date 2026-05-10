@@ -79,11 +79,16 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/audio/chunk") {
     const extension = url.searchParams.get("extension") || "webm";
     const speakerLabel = url.searchParams.get("speaker") || "Host";
+    const client = url.searchParams.get("client") || "";
     const clientStartedAt = Number(url.searchParams.get("clientStartedAt") || 0) || undefined;
     const receivedAt = Date.now();
     const audio = await readBuffer(req);
     const uploadReadAt = Date.now();
-    appendTrace("latency", "audio.upload.received", { bytes: audio.length, extension, clientStartedAt, receivedAt, uploadReadAt, clientToApiMs: clientStartedAt ? receivedAt - clientStartedAt : undefined, requestReadMs: uploadReadAt - receivedAt });
+    appendTrace("latency", "audio.upload.received", { bytes: audio.length, extension, client, clientStartedAt, receivedAt, uploadReadAt, clientToApiMs: clientStartedAt ? receivedAt - clientStartedAt : undefined, requestReadMs: uploadReadAt - receivedAt });
+    if (shouldIgnoreLegacyAudioChunk(client)) {
+      appendTrace("debug", "ignored legacy local audio chunk", { client, bytes: audio.length, extension });
+      return sendJson(res, { ok: true, ignored: true, reason: "legacy local audio client" });
+    }
     try {
       const sttStartedAt = Date.now();
       appendTrace("latency", "stt.start", { sttStartedAt, bytes: audio.length, extension, provider: process.env.STT_PROVIDER || "local-whisper" });
@@ -123,6 +128,13 @@ const server = createServer(async (req, res) => {
   }
   return sendJson(res, { error: "not found" }, 404);
 });
+
+function shouldIgnoreLegacyAudioChunk(client: string): boolean {
+  if (process.env.MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS === "true") return false;
+  const provider = process.env.STT_PROVIDER;
+  if (provider !== "voxtral-http" && provider !== "moshi-http") return false;
+  return client !== "stable-vad-v1";
+}
 
 server.listen(port, () => {
   console.log(`[meeting-api] http://localhost:${port}`);
