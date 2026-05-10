@@ -607,12 +607,14 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		const isHandoff = isRealtimeHandoff(event);
+		const isDirectRealtimeMessage = isRealtimeDirectMessage(event);
+		const isRealtimeInjectedMessage = isHandoff || isDirectRealtimeMessage;
 		const utteranceCreatedAt = Date.parse(event.createdAt);
 		if (!Number.isFinite(utteranceCreatedAt) || utteranceCreatedAt < extensionStartedAt - 5000 || Date.now() - utteranceCreatedAt > 120000) {
 			void postTrace("debug", "ignored stale meeting utterance", { id: event.id, createdAt: event.createdAt, textChars: text.length });
 			return;
 		}
-		if (!ctx.isIdle() && !isHandoff) {
+		if (!ctx.isIdle() && !isRealtimeInjectedMessage) {
 			void postTrace("debug", "ignored meeting utterance while agent busy", { id: event.id, createdAt: event.createdAt, textChars: text.length });
 			return;
 		}
@@ -620,30 +622,27 @@ export default function (pi: ExtensionAPI) {
 		const extensionReceivedAt = Date.now();
 		currentLatency = { utteranceId: event.id, utteranceCreatedAt, extensionReceivedAt };
 		void postTrace("latency", "pi.extension.received_utterance", { ...currentLatency, eventAgeMs: currentLatency.utteranceCreatedAt ? extensionReceivedAt - currentLatency.utteranceCreatedAt : undefined, textChars: text.length });
-		if (isMeetingTaskClass(event.taskClass)) {
-			currentTaskClass = event.taskClass;
-			setNextMeetingRoute({ taskClass: event.taskClass, source: `utterance:${event.id}` });
+		const taskClass = event.taskClass;
+		if (isMeetingTaskClass(taskClass)) {
+			const routeTaskClass = taskClass as Parameters<typeof setNextMeetingRoute>[0]["taskClass"];
+			currentTaskClass = routeTaskClass;
+			setNextMeetingRoute({ taskClass: routeTaskClass, source: `utterance:${event.id}` });
 		} else {
 			currentTaskClass = undefined;
 		}
-		void injectMeetingPrompt(text, event.speakerLabel || "Meeting speaker", ctx);
+		void injectMeetingPrompt(text, event.speakerLabel || "Meeting speaker", ctx, { passthrough: isRealtimeInjectedMessage });
 	}
 
-	async function injectMeetingPrompt(text: string, speaker: string, ctx: ExtensionContext) {
+	async function injectMeetingPrompt(text: string, speaker: string, ctx: ExtensionContext, options: { passthrough?: boolean } = {}) {
 		pendingMeetingResponses++;
 		currentMeetingMessageId = newEventId("msg");
 		lastStreamPost = 0;
 		firstUpdatePosted = false;
 		canvasToolSatisfiedTurn = false;
 		void postTrace("input", `${speaker}: ${text}`);
-		const artifactContext = await buildArtifactContext(effectiveCwd(ctx.cwd), text).catch(() => "");
-		const prompt = [
-			`Meeting input from ${speaker}:`,
-			`taskClass: ${currentTaskClass || "conversation"}`,
-			artifactContext,
-			"message:",
-			text,
-		].filter(Boolean).join("\n");
+		const prompt = options.passthrough
+			? text
+			: await buildMeetingPrompt(effectiveCwd(ctx.cwd), text, speaker, currentTaskClass || "conversation");
 
 		if (ctx.isIdle()) {
 			pi.sendUserMessage(prompt);
@@ -713,6 +712,10 @@ function isRawRealtimeTranscript(event: UtteranceFinalEvent): boolean {
 
 function isRealtimeHandoff(event: UtteranceFinalEvent): boolean {
 	return event.speakerId === "realtime-handoff";
+}
+
+function isRealtimeDirectMessage(event: UtteranceFinalEvent): boolean {
+	return event.speakerId === "realtime-direct-message";
 }
 
 function isIgnorableTranscript(text: string): boolean {
@@ -976,11 +979,33 @@ async function searchArtifacts(cwd: string, query: string, limit: number): Promi
 		.slice(0, limit);
 }
 
+async function buildMeetingPrompt(cwd: string, text: string, speaker: string, taskClass: string): Promise<string> {
+	const artifactContext = await buildArtifactContext(cwd, text).catch(() => "");
+	return [
+		`Meeting input from ${speaker}:`,
+		taskClass !== "conversation" ? `taskClass: ${taskClass}` : undefined,
+		artifactContext,
+		"message:",
+		text,
+	].filter(Boolean).join("\n");
+}
+
 async function buildArtifactContext(cwd: string, query: string): Promise<string> {
 	const artifacts = await readArtifactIndex(cwd);
 	if (!artifacts.length) return "";
 	const matches = await searchArtifacts(cwd, query, 5);
 	const intent = await classifyArtifactIntent(cwd, query, artifacts, matches);
+	if (intent.decision === "conversation_only") return "";
+	const conciseLines = [
+		"artifactIntent:",
+		`decision=${intent.decision}`,
+		`rationale=${intent.rationale}`,
+		intent.currentArtifact?.path ? `currentArtifact=${formatArtifactInline(intent.currentArtifact)}` : undefined,
+		intent.bestMatch?.path ? `bestMatch=${formatArtifactInline(intent.bestMatch)} score=${intent.bestMatch.score}` : undefined,
+		`instruction=${intent.instruction}`,
+	].filter(Boolean);
+	if (!verboseArtifactPromptContext()) return conciseLines.join("\n");
+
 	const recent = artifacts
 		.filter((artifact) => typeof artifact.path === "string")
 		.sort((a, b) => dateValue(b.updatedAt || b.mtime) - dateValue(a.updatedAt || a.mtime))
@@ -994,16 +1019,15 @@ async function buildArtifactContext(cwd: string, query: string): Promise<string>
 		return `[${index + 1}] ${title} | slug=${artifact.slug || ""} | path=${artifact.path || ""}${score}`;
 	});
 	return [
-		"artifactIntent:",
-		`decision=${intent.decision}`,
-		`rationale=${intent.rationale}`,
-		intent.currentArtifact?.path ? `currentArtifact=${formatArtifactInline(intent.currentArtifact)}` : undefined,
-		intent.bestMatch?.path ? `bestMatch=${formatArtifactInline(intent.bestMatch)} score=${intent.bestMatch.score}` : undefined,
-		`instruction=${intent.instruction}`,
+		...conciseLines,
 		"artifactIndex:",
 		...lines,
 		"artifactTools: use meeting_write_artifact for create_new_artifact; use meeting_find_artifact for search; use meeting_open_artifact with path, slug, or query to render one artifact; use meeting_inspect_artifact to verify rendered sections/diagrams with browser screenshots; use meeting_queue_visual_review to hand off a rendered artifact to the critique.review route; use meeting_promote_diagram_image to persist a generated diagram PNG and replace the source diagram block.",
 	].filter(Boolean).join("\n");
+}
+
+function verboseArtifactPromptContext(): boolean {
+	return process.env.MEETING_VERBOSE_ARTIFACT_CONTEXT === "true";
 }
 
 async function classifyArtifactIntent(cwd: string, query: string, artifacts: ArtifactRecord[], matches: ArtifactMatch[]): Promise<ArtifactIntent> {

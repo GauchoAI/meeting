@@ -29,6 +29,8 @@ Example:
 
 The message is appended to `.meeting/pipeline/implementation/inbox/pi-direct-messages.jsonl`, logged by the pi-agent worker with a distinct tag such as `[pi-agent:direct:inform]`, mirrored concisely to the same implementation handoff/terminal stream used by `run_codex_task` as just the message text plus an optional `[intent]` tag, marked processed in `.meeting/pipeline/implementation/inbox/pi-direct-messages.seen.jsonl`, and queued as a lightweight `conversation` implementation task so it is injected into pi-agent/Codex just like `run_codex_task`.
 
+The Pi extension must pass these direct coordination utterances through without adding the generic Meeting prompt wrapper or artifact index context. See `docs/pi-meeting-prompt-wrapping.md`.
+
 ## Pi-agent → voice agent
 
 Use `meeting_message_voice_agent` instead of `meeting_post_markdown` when the goal is to ask the voice agent to raise its hand or speak a short summary. This emits a status-surface coordination message with a `voice-message:*` document id so the voice agent can observe it, but it does not update the canvas.
