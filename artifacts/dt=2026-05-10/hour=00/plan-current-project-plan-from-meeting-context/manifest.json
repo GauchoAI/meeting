@@ -1,0 +1,14 @@
+{
+  "kind": "plan",
+  "slug": "current-project-plan-from-meeting-context",
+  "title": "Current Project Plan from Meeting Context",
+  "createdAt": "2026-05-10T03:33:25.273Z",
+  "updatedAt": "2026-05-10T03:33:25.273Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "project-plan",
+    "meeting-context",
+    "implementation-queue"
+  ],
+  "summary": "Readable Now/Next/Later/Done project plan based on current implementation task statuses in the Meeting context."
+}
