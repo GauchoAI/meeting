@@ -29,7 +29,19 @@ The server path avoids reloading the 465 MB `ggml-small.bin` model for every spo
 
 ## Interruption
 
-When Codex is speaking, the stable shell keeps VAD alive but suppresses audio uploads. If sustained human mic energy appears after a short grace period, it cancels browser speech synthesis and returns to listening. This gives barge-in behavior without feeding the agent voice back into Whisper.
+When Codex is speaking, the stable shell keeps VAD alive but suppresses audio uploads so the agent voice is not fed back into Whisper. Automatic acoustic barge-in is disabled by default because laptop speakers can trigger false interruptions.
+
+For tuning only, enable it from the browser console:
+
+```js
+localStorage.setItem("meeting.localAcousticBargeIn", "true")
+```
+
+Disable it again with:
+
+```js
+localStorage.removeItem("meeting.localAcousticBargeIn")
+```
 
 ## Remaining V2 Work
 

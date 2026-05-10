@@ -1036,7 +1036,7 @@
       if (localSttPausedForSpeech) {
         const level = currentLocalMicLevel();
         const canInterrupt = now - localSpeechStartedAt >= localBargeInGraceMs();
-        if (canInterrupt && window.speechSynthesis?.speaking && level >= localBargeInThreshold()) {
+        if (localAcousticBargeInEnabled() && canInterrupt && window.speechSynthesis?.speaking && level >= localBargeInThreshold()) {
           if (!localSpeechBargeInStartedAt) localSpeechBargeInStartedAt = now;
           if (now - localSpeechBargeInStartedAt >= localBargeInHoldMs()) {
             interruptLocalSpeechForBargeIn(level);
@@ -1159,6 +1159,10 @@
       return 240;
     }
 
+    function localAcousticBargeInEnabled() {
+      return localStorage.getItem("meeting.localAcousticBargeIn") === "true";
+    }
+
     function localSpeechSilenceMs() {
       const configured = Number(localStorage.getItem("meeting.localSpeechSilenceMs") || "900");
       return Number.isFinite(configured) ? Math.max(450, Math.min(3000, configured)) : 900;
@@ -1232,7 +1236,7 @@
       localSpeechBargeInStartedAt = 0;
       localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 900);
       if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
-      renderStatus("local voice speaking; listening for interruption", "speaking");
+      renderStatus(localAcousticBargeInEnabled() ? "local voice speaking; listening for interruption" : "local voice speaking; mic guarded", "speaking");
       publishShellState();
     }
 
