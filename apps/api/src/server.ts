@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { formatAssistantCanvasMarkdown, formatAssistantStatusMarkdown, firstMarkdownHeading as firstAssistantMarkdownHeading, isAssistantStatusTemplate, newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
 import { speechProviderStatus } from "./speech.js";
 import { loadDotEnv, loadLocalConfig } from "./env.js";
-import { transcribeWithLocalWhisper } from "./local-whisper.js";
+import { transcribeLocalAudio } from "./local-stt.js";
 
 loadLocalConfig();
 loadDotEnv();
@@ -85,11 +85,11 @@ const server = createServer(async (req, res) => {
     const uploadReadAt = Date.now();
     appendTrace("latency", "audio.upload.received", { bytes: audio.length, extension, clientStartedAt, receivedAt, uploadReadAt, clientToApiMs: clientStartedAt ? receivedAt - clientStartedAt : undefined, requestReadMs: uploadReadAt - receivedAt });
     try {
-      const whisperStartedAt = Date.now();
-      appendTrace("latency", "whisper.start", { whisperStartedAt, bytes: audio.length, extension });
-      const result = await transcribeWithLocalWhisper(audio, extension);
-      const whisperEndedAt = Date.now();
-      appendTrace("latency", "whisper.end", { whisperStartedAt, whisperEndedAt, whisperMs: whisperEndedAt - whisperStartedAt, reportedWhisperMs: result.elapsedMs, textChars: result.text.length });
+      const sttStartedAt = Date.now();
+      appendTrace("latency", "stt.start", { sttStartedAt, bytes: audio.length, extension, provider: process.env.STT_PROVIDER || "local-whisper" });
+      const result = await transcribeLocalAudio(audio, extension);
+      const sttEndedAt = Date.now();
+      appendTrace("latency", "stt.end", { sttStartedAt, sttEndedAt, sttMs: sttEndedAt - sttStartedAt, reportedSttMs: result.elapsedMs, provider: result.provider, model: result.model || result.modelPath, textChars: result.text.length });
       if (result.text && !isIgnorableTranscript(result.text)) {
         const utteranceCreatedAt = Date.now();
         const startMs = utteranceCreatedAt % 3_600_000;

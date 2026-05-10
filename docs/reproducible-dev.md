@@ -20,6 +20,8 @@ http://localhost:5175/stable.html
 Click **Join meeting** once. The stable shell starts the Realtime voice agent
 immediately and keeps it alive while the iframe hot reloads.
 
+Local Voxtral and Moshi experiments are documented in `docs/local-voice-models.md`.
+
 ## Pi extensions
 
 Project-local Pi extensions live in:
