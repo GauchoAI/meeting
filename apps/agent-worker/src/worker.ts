@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { newEventId, nowIso, type AgentTaskEvent, type MeetingEvent } from "@meeting/protocol";
@@ -10,17 +10,40 @@ const agentId = process.env.MEETING_AGENT_ID || "pi-agent";
 const backend = process.env.MEETING_AGENT_BACKEND || "codex";
 const autorun = process.env.MEETING_AGENT_AUTORUN !== "false";
 const pipelineRoot = resolve(root, ".meeting/pipeline");
+const conversationRoot = resolve(pipelineRoot, "conversation");
+const conversationTranscriptJsonlPath = resolve(conversationRoot, "transcript/conversation.jsonl");
+const conversationTranscriptMdPath = resolve(conversationRoot, "transcript/conversation.md");
+const conversationEventsPath = resolve(conversationRoot, "events.jsonl");
+const conversationTasksPath = resolve(conversationRoot, "tasks.jsonl");
+const conversationHandsPath = resolve(conversationRoot, "hands/raised.jsonl");
+const conversationCurrentNotePath = resolve(conversationRoot, "notes/current.md");
+const implementationInboxRoot = resolve(pipelineRoot, "implementation/inbox");
+const implementationConversationInboxPath = resolve(implementationInboxRoot, "conversation.jsonl");
 const implementationTaskQueuedRoot = resolve(pipelineRoot, "implementation/tasks/queued");
 const implementationTaskWorkingRoot = resolve(pipelineRoot, "implementation/tasks/working");
 const implementationTaskDoneRoot = resolve(pipelineRoot, "implementation/tasks/done");
 const implementationTaskFailedRoot = resolve(pipelineRoot, "implementation/tasks/failed");
+interface TailOffsets {
+  transcript: number;
+  events: number;
+  tasks: number;
+  hands: number;
+}
+
 let busy = false;
+let tailOffsets: TailOffsets = { transcript: 0, events: 0, tasks: 0, hands: 0 };
+const partialLogState = new Map<string, { text: string; loggedAt: number }>();
 
 ensureLayout();
 console.log(`[meeting-agent] ${agentId} backend=${backend} autorun=${autorun} api=${api}`);
+primeConversationTail();
+setInterval(() => {
+  pollConversationStream();
+}, 750);
 setInterval(() => {
   void tick();
 }, 1500);
+pollConversationStream();
 void tick();
 
 async function tick(): Promise<void> {
@@ -43,9 +66,11 @@ async function tick(): Promise<void> {
 async function processTask(taskKey: string, workingDir: string, task: Record<string, unknown>): Promise<void> {
   const title = String(task.title || taskKey);
   const details = typeof task.details === "string" ? task.details : "";
-  const prompt = typeof task.implementationPrompt === "string" && task.implementationPrompt.trim()
+  const basePrompt = typeof task.implementationPrompt === "string" && task.implementationPrompt.trim()
     ? task.implementationPrompt
     : buildPrompt(title, details, task);
+  const meetingContext = buildMeetingContextBlock();
+  const prompt = [basePrompt, meetingContext].filter(Boolean).join("\n\n");
 
   await postEvent({
     id: newEventId("task"),
@@ -61,6 +86,7 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
     details
   } as AgentTaskEvent);
 
+  writeFileSync(resolve(workingDir, "context.md"), meetingContext.endsWith("\n") ? meetingContext : `${meetingContext}\n`, "utf8");
   writeFileSync(resolve(workingDir, "worker.json"), `${JSON.stringify({ agentId, backend, startedAt: nowIso(), prompt }, null, 2)}\n`, "utf8");
   const result = await runLocalAgent(prompt);
   const summary = summarizeResult(result);
@@ -180,7 +206,16 @@ function runProcess(command: string, args: string[]): Promise<{ ok: boolean; std
 }
 
 function ensureLayout(): void {
-  for (const dir of [implementationTaskQueuedRoot, implementationTaskWorkingRoot, implementationTaskDoneRoot, implementationTaskFailedRoot]) {
+  for (const dir of [
+    resolve(conversationRoot, "transcript"),
+    resolve(conversationRoot, "notes"),
+    resolve(conversationRoot, "hands"),
+    implementationInboxRoot,
+    implementationTaskQueuedRoot,
+    implementationTaskWorkingRoot,
+    implementationTaskDoneRoot,
+    implementationTaskFailedRoot
+  ]) {
     mkdirSync(dir, { recursive: true });
   }
 }
@@ -209,6 +244,154 @@ function buildPrompt(title: string, details: string, task: Record<string, unknow
     "Work in the current repository and improve the real app so hot reload reflects the change.",
     "Return a concise summary of what changed, verification performed, and any remaining limitations."
   ].filter(Boolean).join("\n\n");
+}
+
+function primeConversationTail(): void {
+  tailOffsets = {
+    transcript: fileSize(conversationTranscriptJsonlPath),
+    events: fileSize(conversationEventsPath),
+    tasks: fileSize(conversationTasksPath),
+    hands: fileSize(conversationHandsPath)
+  };
+  console.log(`[meeting-agent] tailing Realtime/Whisper conversation stream from ${conversationRoot}`);
+  const recentTranscript = tailTextFile(conversationTranscriptMdPath, 6).join("\n");
+  if (recentTranscript) console.log(`[meeting-agent:context] recent transcript\n${recentTranscript}`);
+  const currentCanvas = compact(readTextIfExists(conversationCurrentNotePath), 900);
+  if (currentCanvas) console.log(`[meeting-agent:context] current canvas\n${currentCanvas}`);
+}
+
+function pollConversationStream(): void {
+  const transcript = readAppendedLines(conversationTranscriptJsonlPath, tailOffsets.transcript);
+  tailOffsets.transcript = transcript.offset;
+  for (const line of transcript.lines) handleConversationRecord(line, "transcript");
+
+  const events = readAppendedLines(conversationEventsPath, tailOffsets.events);
+  tailOffsets.events = events.offset;
+  for (const line of events.lines) handleConversationRecord(line, "event");
+
+  const tasks = readAppendedLines(conversationTasksPath, tailOffsets.tasks);
+  tailOffsets.tasks = tasks.offset;
+  for (const line of tasks.lines) handleConversationRecord(line, "task");
+
+  const hands = readAppendedLines(conversationHandsPath, tailOffsets.hands);
+  tailOffsets.hands = hands.offset;
+  for (const line of hands.lines) handleConversationRecord(line, "hand");
+}
+
+function handleConversationRecord(line: string, source: "transcript" | "event" | "task" | "hand"): void {
+  const event = parseJsonLine(line);
+  if (!event) return;
+  if (source === "transcript") {
+    if (event.type === "utterance.partial") {
+      maybeLogPartial(event);
+      return;
+    }
+    if (event.type === "utterance.final") {
+      const speaker = typeof event.speakerLabel === "string" ? event.speakerLabel : "Host";
+      const text = typeof event.text === "string" ? event.text : "";
+      console.log(`[meeting-agent:transcript] ${speaker}: ${compact(text, 420)}`);
+      appendConversationInbox("transcript", event);
+      return;
+    }
+  }
+  if (source === "event" && event.type === "agent.message") {
+    const text = typeof event.text === "string" ? event.text : "";
+    console.log(`[meeting-agent:canvas] ${compact(text.replace(/\s+/g, " "), 420)}`);
+    appendConversationInbox("canvas", event);
+    return;
+  }
+  if (source === "task" && event.type === "agent.task") {
+    console.log(`[meeting-agent:task] ${event.status || "queued"} ${event.title || event.taskKey || "untitled task"}`);
+    appendConversationInbox("task", event);
+    return;
+  }
+  if (source === "hand" && event.type === "agent.hand_raise") {
+    console.log(`[meeting-agent:hand] ${compact(String(event.reason || ""), 420)}`);
+    appendConversationInbox("hand", event);
+  }
+}
+
+function maybeLogPartial(event: Record<string, unknown>): void {
+  const itemId = typeof event.id === "string" ? event.id : "partial";
+  const text = typeof event.text === "string" ? event.text : "";
+  if (!text.trim()) return;
+  const previous = partialLogState.get(itemId);
+  const now = Date.now();
+  if (previous && text.length - previous.text.length < 48 && now - previous.loggedAt < 2500) return;
+  partialLogState.set(itemId, { text, loggedAt: now });
+  const speaker = typeof event.speakerLabel === "string" ? event.speakerLabel : "Host";
+  console.log(`[meeting-agent:partial] ${speaker}: ${compact(text, 240)}`);
+}
+
+function appendConversationInbox(kind: string, event: Record<string, unknown>): void {
+  appendFileSync(implementationConversationInboxPath, `${JSON.stringify({ recordedAt: nowIso(), kind, event })}\n`, "utf8");
+}
+
+function buildMeetingContextBlock(): string {
+  const currentCanvas = clampText(readTextIfExists(conversationCurrentNotePath).trim(), 4000);
+  const recentTranscript = tailTextFile(conversationTranscriptMdPath, 32).join("\n");
+  const recentTasks = tailJsonl(conversationTasksPath, 12)
+    .filter((event) => event.type === "agent.task")
+    .map((event) => `- ${event.status || "queued"}: ${event.title || event.taskKey || "untitled task"}`)
+    .join("\n");
+  const recentHands = tailJsonl(conversationHandsPath, 6)
+    .filter((event) => event.type === "agent.hand_raise")
+    .map((event) => `- ${event.reason || "hand raised"}`)
+    .join("\n");
+  return [
+    "## Recent Meeting Context",
+    "This context is mirrored from the Realtime/Whisper conversation stream for pi-agent.",
+    currentCanvas ? `### Current Canvas\n${currentCanvas}` : "",
+    recentTranscript ? `### Recent Transcript\n${recentTranscript}` : "",
+    recentTasks ? `### Conversation Tasks\n${recentTasks}` : "",
+    recentHands ? `### Raised Hands\n${recentHands}` : "",
+    `### Inbox\nConversation records are mirrored to ${implementationConversationInboxPath}.`
+  ].filter(Boolean).join("\n\n");
+}
+
+function readAppendedLines(path: string, offset: number): { lines: string[]; offset: number } {
+  if (!existsSync(path)) return { lines: [], offset: 0 };
+  const buffer = readFileSync(path);
+  const safeOffset = offset > buffer.length ? 0 : offset;
+  const text = buffer.subarray(safeOffset).toString("utf8");
+  return {
+    lines: text.split("\n").map((line) => line.trim()).filter(Boolean),
+    offset: buffer.length
+  };
+}
+
+function fileSize(path: string): number {
+  if (!existsSync(path)) return 0;
+  return readFileSync(path).byteLength;
+}
+
+function readTextIfExists(path: string): string {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
+}
+
+function tailTextFile(path: string, count: number): string[] {
+  return readTextIfExists(path).split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-count);
+}
+
+function tailJsonl(path: string, count: number): Array<Record<string, unknown>> {
+  return tailTextFile(path, count).map(parseJsonLine).filter((event): event is Record<string, unknown> => Boolean(event));
+}
+
+function parseJsonLine(line: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function compact(text: string, maxLength: number): string {
+  return clampText(text.trim().replace(/\s+/g, " "), maxLength);
+}
+
+function clampText(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 }
 
 function summarizeResult(result: { ok: boolean; stdout: string; stderr: string; code: number | null }): string {
