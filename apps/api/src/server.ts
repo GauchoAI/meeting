@@ -1,4 +1,4 @@
-import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
@@ -163,13 +163,26 @@ function appendEvent(event: MeetingEvent, persist = true): void {
 
 function loadEventLog(): void {
   if (!existsSync(eventLogPath)) return;
-  const lines = readFileSync(eventLogPath, "utf8").split("\n").filter(Boolean);
-  for (const line of lines) {
-    try {
-      events.push(JSON.parse(line) as MeetingEvent);
-    } catch {
-      // Ignore malformed historical lines so one bad write does not prevent startup.
+  const maxStartupBytes = 25 * 1024 * 1024;
+  const size = statSync(eventLogPath).size;
+  const start = Math.max(0, size - maxStartupBytes);
+  const length = size - start;
+  const fd = openSync(eventLogPath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    readSync(fd, buffer, 0, length, start);
+    const text = buffer.toString("utf8");
+    const lines = text.split("\n").filter(Boolean);
+    if (start > 0) lines.shift();
+    for (const line of lines) {
+      try {
+        events.push(JSON.parse(line) as MeetingEvent);
+      } catch {
+        // Ignore malformed historical lines so one bad write does not prevent startup.
+      }
     }
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -755,6 +768,19 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
         taskClass: "conversation",
         details: message,
         implementationPrompt: directMessagePrompt({ intent, message })
+      } as MeetingEvent);
+      appendEvent({
+        id: newEventId("utt"),
+        type: "utterance.final",
+        stream: "implementation",
+        meetingId,
+        createdAt: nowIso(),
+        speakerId: "realtime-direct-message",
+        speakerLabel: "Realtime coordination",
+        text: directMessageForTerminal({ intent, message }),
+        startMs: Date.now() % 3_600_000,
+        endMs: (Date.now() % 3_600_000) + 1,
+        taskClass: "conversation"
       } as MeetingEvent);
       appendTrace("agent", "Direct message sent to pi-agent", { intent, taskKey: directTaskKey, message: compactText(message, 500) }, "implementation");
       output = { ok: true, path: piDirectMessagesPath, intent, taskKey: directTaskKey, delegatedTo: "pi-agent" };
@@ -1649,6 +1675,15 @@ function directMessagePrompt(input: { intent: string; message: string }): string
     `Context: Intent=${input.intent}. Message: ${input.message}`,
     "Constraints: Keep the response concise. Do not update or steal the canvas. If the message only needs acknowledgment, reply with a short status/hand-ready note.",
     "Output: Brief pi-agent response visible in the implementation stream, with no canvas update."
+  ].join("\n");
+}
+
+function directMessageForTerminal(input: { intent: string; message: string }): string {
+  return [
+    "Task: Respond to Realtime coordination message",
+    `Context: intent=${input.intent}; message=${input.message}`,
+    "Constraints: Keep it concise; do not update or steal the canvas.",
+    "Output: Brief reply/status for the voice agent."
   ].join("\n");
 }
 

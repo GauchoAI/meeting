@@ -27,7 +27,7 @@ Example:
 }
 ```
 
-The message is appended to `.meeting/pipeline/implementation/inbox/pi-direct-messages.jsonl`, logged by the pi-agent worker with a distinct tag such as `[pi-agent:direct:inform]`, marked processed in `.meeting/pipeline/implementation/inbox/pi-direct-messages.seen.jsonl`, and queued as a lightweight `conversation` implementation task so it is injected into pi-agent/Codex just like `run_codex_task`.
+The message is appended to `.meeting/pipeline/implementation/inbox/pi-direct-messages.jsonl`, logged by the pi-agent worker with a distinct tag such as `[pi-agent:direct:inform]`, mirrored to the same implementation handoff/terminal stream used by `run_codex_task`, marked processed in `.meeting/pipeline/implementation/inbox/pi-direct-messages.seen.jsonl`, and queued as a lightweight `conversation` implementation task so it is injected into pi-agent/Codex just like `run_codex_task`.
 
 ## Pi-agent → voice agent
 
