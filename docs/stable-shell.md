@@ -3,15 +3,18 @@
 Open the meeting through:
 
 ```text
-http://localhost:5173/stable.html
+http://localhost:5175/stable.html
 ```
 
 `stable.html` is the long-lived tier. It owns:
 
 - microphone permission
-- push-to-talk state
-- audio recording
-- upload to `/audio/chunk`
+- the OpenAI Realtime WebRTC peer connection
+- the Realtime data channel and function-call loop
+- room transcript persistence
+- Realtime-to-pi-agent handoffs
+- pi-agent result injection back into the voice agent
+- audio output and mute/unmute state
 
 The React app inside the iframe is the editable tier. It owns:
 
@@ -19,6 +22,7 @@ The React app inside the iframe is the editable tier. It owns:
 - transcript rendering
 - Markdown/artifacts
 - experiments
+- command controls that talk to the stable shell through `postMessage`
 
 During live development, do **not** edit or sync `apps/web/public/stable.html` into the running runtime. `scripts/sync-runtime.sh` intentionally excludes it so the browser tab holding the live microphone does not reload.
 

@@ -25,7 +25,7 @@ bash scripts/install-daemon.sh
 bash scripts/install-mcp-clients.sh
 ```
 
-Open `http://localhost:5175`.
+Open `http://localhost:5175/stable.html`.
 
 For the Realtime voice-to-Codex demo added in this repo, open
 `http://localhost:5175/realtime.html` after setting `OPENAI_API_KEY` in `.env`.
@@ -79,14 +79,18 @@ developer tool, not a production-safe remote execution surface.
 
 ## Realtime Listener Mode
 
-The main Meeting UI at `http://localhost:5175/` now supports a Realtime agent
-in the existing layout.
+The main Meeting UI should be opened through `http://localhost:5175/stable.html`.
+That stable parent page owns microphone permission, the OpenAI Realtime WebRTC
+call, the data channel, transcript persistence, tool calls, and Pi/Codex update
+injection. The React app runs inside the iframe and can hot reload without
+dropping the voice session.
 
 Behavior:
 
 - the Realtime agent connects as an **audio responder** by default;
-- joining a meeting automatically starts the Realtime voice agent and it
-  reconnects after transient WebRTC/data-channel failures;
+- clicking **Join meeting** in the stable shell starts the voice agent; there is
+  no separate "connect voice agent" step;
+- the stable shell auto-reconnects after transient WebRTC/data-channel failures;
 - muting the Realtime agent keeps it listening silently so it can update notes,
   declare tasks, and raise a hand before speaking;
 - reconnect injects a concise resume context message into the Realtime session

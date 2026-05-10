@@ -20,6 +20,7 @@
     button.speak { background: #16a34a; min-width: 160px; }
     button.speak[disabled] { opacity: 0.5; cursor: not-allowed; }
     button.speak.active { background: #dc2626; }
+    audio { display: none; }
     kbd { border: 1px solid rgba(148, 163, 184, 0.45); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; background: rgba(15, 23, 42, 0.9); color: #e2e8f0; font-size: 12px; }
     iframe { display: block; width: 100%; height: calc(100% - 52px); border: 0; background: #050816; }
     .spacer { flex: 1 1 auto; min-width: 0; }
@@ -31,186 +32,967 @@
     <div class="brand">Meeting</div>
     <div class="status"><span id="dot" class="dot"></span><span id="status">stable shell idle</span></div>
     <div class="spacer"></div>
-    <div class="hint">Hold <kbd>Space</kbd> to speak. UI below can reload safely.</div>
+    <div class="hint">Voice runs in this stable shell. UI below can reload safely.</div>
     <button id="join">Join meeting</button>
-    <button id="speak" class="speak" disabled>Hold to speak</button>
+    <button id="mute" class="secondary" disabled>Mute agent</button>
+    <button id="speak" class="speak" disabled hidden>Send Whisper clip</button>
     <button id="leave" class="secondary" hidden>Leave</button>
   </div>
+  <audio id="remoteAudio" autoplay></audio>
   <iframe id="ui" src="/?embedded=1"></iframe>
 
   <script type="module">
     const api = localStorage.getItem("meeting.api") || "http://localhost:4317";
     const meetingId = localStorage.getItem("meeting.id") || "local-demo";
+    const autoJoinKey = "meeting.stable.autoJoin";
+    const legacyAutoJoinKey = "meeting.autoJoin";
+    const realtimeAgentId = "realtime-codex";
+    const piAgentId = "pi-agent";
+
     const statusEl = document.getElementById("status");
     const dotEl = document.getElementById("dot");
     const joinButton = document.getElementById("join");
     const leaveButton = document.getElementById("leave");
+    const muteButton = document.getElementById("mute");
     const speakButton = document.getElementById("speak");
+    const remoteAudio = document.getElementById("remoteAudio");
+    const uiFrame = document.getElementById("ui");
 
     let localStream = null;
-    let audioOnlyStream = null;
-    let recorder = null;
     let joined = false;
-    let speaking = false;
-    let spaceDown = false;
+    let realtimePeer = null;
+    let realtimeChannel = null;
+    let realtimeState = "idle";
+    let realtimeDesired = true;
+    let realtimeMuted = false;
+    let realtimeResponseMode = "speak";
+    let realtimeReconnectTimer = null;
+    let realtimeReconnectAttempt = 0;
+    let assistantDraft = "";
+    let assistantDraftMessageId = null;
+    let assistantDraftFlushTimer = null;
+    let analysisTimer = null;
+    let liveAnalysisTimer = null;
+    let lastAnalysisAt = 0;
+    let lastPiAgentNoticeId = null;
+    let eventsSource = null;
+    const transcriptDraftIds = new Map();
+    const transcriptDraftText = new Map();
 
     joinButton.addEventListener("click", () => join().catch((error) => {
       console.warn(error);
-      setStatus(`join failed: ${error.message || error}`, "idle");
+      void postRealtimeTrace("error", "Stable shell join failed", { error: error?.message || String(error) });
+      renderStatus(`join failed: ${error?.message || error}`, "idle");
     }));
     leaveButton.addEventListener("click", leave);
-
-    speakButton.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      startSpeaking();
-    });
-    speakButton.addEventListener("pointerup", stopSpeaking);
-    speakButton.addEventListener("pointerleave", stopSpeaking);
-    speakButton.addEventListener("pointercancel", stopSpeaking);
-
-    window.addEventListener("keydown", (event) => {
-      if (event.code !== "Space" || event.repeat || isEditableTarget(event.target)) return;
-      event.preventDefault();
-      spaceDown = true;
-      startSpeaking();
-    });
-    window.addEventListener("keyup", (event) => {
-      if (event.code !== "Space") return;
-      event.preventDefault();
-      spaceDown = false;
-      stopSpeaking();
-    });
+    muteButton.addEventListener("click", () => setRealtimeAgentMuted(!realtimeMuted));
+    uiFrame.addEventListener("load", publishShellState);
 
     window.addEventListener("message", (event) => {
       if (event.origin !== window.location.origin) return;
-      if (event.data?.type === "meeting:push-to-talk:start") startSpeaking();
-      if (event.data?.type === "meeting:push-to-talk:stop") stopSpeaking();
+      const data = event.data || {};
+      if (data.type === "meeting:shell-state:request") publishShellState();
+      if (data.type === "meeting:realtime:restart") restartRealtimeAgent();
+      if (data.type === "meeting:realtime:mute") setRealtimeAgentMuted(Boolean(data.muted));
+      if (data.type === "meeting:realtime:prompt") sendRealtimePrompt(String(data.text || ""));
+      if (data.type === "meeting:realtime:floor") requestAgentFloor(String(data.reason || ""));
+      if (data.type === "meeting:realtime:text-floor") requestAgentTextFloor(String(data.mode || "show"), String(data.reason || ""));
     });
 
+    connectEventStream();
+    if (sessionStorage.getItem(autoJoinKey) === "true" || sessionStorage.getItem(legacyAutoJoinKey) === "true") {
+      void join().catch((error) => {
+        console.warn("stable shell auto-join failed", error);
+        sessionStorage.removeItem(autoJoinKey);
+        renderStatus("click Join meeting to restore mic permission", "idle");
+      });
+    } else {
+      renderStatus("stable shell idle", "idle");
+    }
+
     async function join() {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      audioOnlyStream = new MediaStream(localStream.getAudioTracks());
+      if (joined) {
+        ensureRealtimeConnected("join requested while already joined");
+        return;
+      }
+      localStream = await getMeetingMediaStream();
       joined = true;
+      realtimeDesired = true;
+      sessionStorage.setItem(autoJoinKey, "true");
+      sessionStorage.setItem(legacyAutoJoinKey, "true");
       joinButton.hidden = true;
       leaveButton.hidden = false;
-      speakButton.disabled = false;
-      setStatus("ready — hold Space to speak", "ready");
+      muteButton.disabled = false;
+      speakButton.disabled = true;
+      renderStatus("voice agent connecting", "ready");
+      publishShellState();
+      void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", undefined);
+      connectRealtimeAgent(localStream);
+    }
+
+    async function getMeetingMediaStream() {
+      try {
+        return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      } catch (error) {
+        await postRealtimeTrace("debug", "Video capture failed; falling back to audio-only meeting stream", { error: error?.message || String(error) });
+        return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      }
     }
 
     function leave() {
-      stopSpeaking();
       joined = false;
+      realtimeDesired = false;
+      sessionStorage.removeItem(autoJoinKey);
+      sessionStorage.removeItem(legacyAutoJoinKey);
+      clearRealtimeReconnect();
+      disconnectRealtimeAgent({ intentional: true });
       localStream?.getTracks().forEach((track) => track.stop());
       localStream = null;
-      audioOnlyStream = null;
-      recorder = null;
       joinButton.hidden = false;
       leaveButton.hidden = true;
-      speakButton.disabled = true;
-      setStatus("stable shell idle", "idle");
+      muteButton.disabled = true;
+      renderStatus("stable shell idle", "idle");
+      publishShellState();
+      void postRealtimeTrace("agent", "Stable shell left meeting", undefined);
     }
 
-    function startSpeaking() {
-      if (!joined || speaking || !audioOnlyStream) return;
-      speaking = true;
-      speakButton.classList.add("active");
-      speakButton.textContent = "Recording… release to send";
-      setStatus("recording speech — release to send", "speaking");
-      startUtteranceRecorder();
+    function connectRealtimeAgent(stream) {
+      if (!joined || !stream || realtimeState !== "idle") return;
+      clearRealtimeReconnect();
+      realtimeDesired = true;
+      setRealtimeState("connecting");
+      beginRealtimeResponse(baseRealtimeMode());
+      assistantDraft = "";
+
+      void (async () => {
+        try {
+          const peer = new RTCPeerConnection();
+          realtimePeer = peer;
+          peer.ontrack = (event) => {
+            remoteAudio.srcObject = event.streams[0];
+            remoteAudio.muted = realtimeMuted;
+            void remoteAudio.play().catch((error) => {
+              void postRealtimeTrace("debug", "Remote audio playback is waiting for browser permission", { error: error?.message || String(error) });
+            });
+          };
+          peer.addEventListener("connectionstatechange", () => {
+            if (realtimePeer !== peer) return;
+            if (peer.connectionState === "failed" || peer.connectionState === "disconnected" || peer.connectionState === "closed") {
+              handleRealtimeUnexpectedClose(`peer ${peer.connectionState}`);
+            }
+          });
+
+          const audioTrack = stream.getAudioTracks()[0];
+          if (!audioTrack || audioTrack.readyState !== "live") throw new Error("No live microphone track is available");
+          peer.addTrack(audioTrack, stream);
+
+          const channel = peer.createDataChannel("oai-events");
+          realtimeChannel = channel;
+          channel.addEventListener("open", () => {
+            setRealtimeState("connected");
+            realtimeReconnectAttempt = 0;
+            configureRealtimeSession();
+            void requestBootstrapContextSync();
+            void postMeetingEvent({
+              id: newEventId("msg"),
+              type: "agent.message",
+              stream: "conversation",
+              meetingId,
+              createdAt: nowIso(),
+              agentId: realtimeAgentId,
+              format: "markdown",
+              surface: "status",
+              lifecycle: "final",
+              text: `Realtime agent connected through the stable shell. Mode: **${realtimeMuted ? "muted listener" : "audio responder"}**.`
+            });
+          });
+          channel.addEventListener("message", (event) => {
+            void handleRealtimeEvent(String(event.data));
+          });
+          channel.addEventListener("close", () => {
+            if (realtimeChannel === channel) handleRealtimeUnexpectedClose("data channel closed");
+          });
+          channel.addEventListener("error", () => {
+            if (realtimeChannel === channel) handleRealtimeUnexpectedClose("data channel error");
+          });
+
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+
+          const response = await fetch(`${api}/realtime/call`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sdp: offer.sdp })
+          });
+          const answerSdp = await response.text();
+          if (!response.ok) throw new Error(answerSdp || `Realtime call failed with ${response.status}`);
+          await peer.setRemoteDescription({ type: "answer", sdp: answerSdp });
+        } catch (error) {
+          disconnectRealtimeAgent({ intentional: true });
+          setRealtimeState("idle");
+          await postRealtimeTrace("error", error instanceof Error ? error.message : String(error), undefined);
+          scheduleRealtimeReconnect(undefined, "connect failed");
+        }
+      })();
     }
 
-    function stopSpeaking() {
-      if (!speaking) return;
-      speaking = false;
-      if (recorder?.state === "recording") recorder.stop();
-      speakButton.classList.remove("active");
-      speakButton.textContent = "Hold to speak";
-      if (joined) setStatus("processing speech…", "ready");
+    function disconnectRealtimeAgent(options = {}) {
+      if (analysisTimer !== null) {
+        window.clearTimeout(analysisTimer);
+        analysisTimer = null;
+      }
+      if (liveAnalysisTimer !== null) {
+        window.clearTimeout(liveAnalysisTimer);
+        liveAnalysisTimer = null;
+      }
+      if (assistantDraftFlushTimer !== null) {
+        window.clearTimeout(assistantDraftFlushTimer);
+        assistantDraftFlushTimer = null;
+      }
+      const channel = realtimeChannel;
+      const peer = realtimePeer;
+      realtimeChannel = null;
+      realtimePeer = null;
+      channel?.close();
+      peer?.close();
+      remoteAudio.srcObject = null;
+      assistantDraft = "";
+      assistantDraftMessageId = null;
+      transcriptDraftIds.clear();
+      transcriptDraftText.clear();
+      restoreRealtimeBaseMode();
+      setRealtimeState("idle");
+      if (!options.intentional) scheduleRealtimeReconnect(undefined, "unexpected disconnect");
     }
 
-    function startUtteranceRecorder() {
-      if (!audioOnlyStream) return;
-      if (!audioOnlyStream.getAudioTracks().some((track) => track.readyState === "live")) {
-        leave();
+    function handleRealtimeUnexpectedClose(reason) {
+      if (!realtimeDesired || !joined) return;
+      void postRealtimeTrace("debug", "Realtime connection closed; reconnecting from stable shell", { reason });
+      disconnectRealtimeAgent({ intentional: true });
+      scheduleRealtimeReconnect(undefined, reason);
+    }
+
+    function scheduleRealtimeReconnect(delayMs, reason = "scheduled reconnect") {
+      if (!realtimeDesired || !joined || realtimeReconnectTimer !== null) return;
+      const attempt = realtimeReconnectAttempt;
+      const delay = delayMs ?? Math.min(15000, 750 * 2 ** Math.min(attempt, 5));
+      realtimeReconnectTimer = window.setTimeout(() => {
+        realtimeReconnectTimer = null;
+        if (!realtimeDesired || !joined || realtimeState !== "idle") return;
+        realtimeReconnectAttempt += 1;
+        void postRealtimeTrace("agent", "Realtime auto-reconnect from stable shell", { attempt: realtimeReconnectAttempt, reason });
+        connectRealtimeAgent(localStream);
+      }, delay);
+      renderStatus(`voice reconnecting in ${Math.round(delay / 1000)}s`, "ready");
+      publishShellState();
+    }
+
+    function clearRealtimeReconnect() {
+      if (realtimeReconnectTimer !== null) {
+        window.clearTimeout(realtimeReconnectTimer);
+        realtimeReconnectTimer = null;
+      }
+    }
+
+    function restartRealtimeAgent() {
+      if (!joined) {
+        void join();
+        return;
+      }
+      realtimeDesired = true;
+      realtimeReconnectAttempt = 0;
+      clearRealtimeReconnect();
+      disconnectRealtimeAgent({ intentional: true });
+      scheduleRealtimeReconnect(100, "manual restart");
+    }
+
+    function ensureRealtimeConnected(reason) {
+      if (!joined || realtimeState !== "idle") return;
+      scheduleRealtimeReconnect(0, reason);
+    }
+
+    function configureRealtimeSession() {
+      sendRealtimeEvent({
+        type: "session.update",
+        session: {
+          type: "realtime",
+          audio: {
+            input: {
+              transcription: {
+                model: "gpt-4o-mini-transcribe",
+                language: "en"
+              },
+              turn_detection: {
+                type: "server_vad",
+                create_response: !realtimeMuted,
+                interrupt_response: !realtimeMuted,
+                prefix_padding_ms: 300,
+                silence_duration_ms: 900
+              }
+            }
+          }
+        }
+      });
+    }
+
+    async function requestBootstrapContextSync() {
+      const context = await readRealtimeMeetingContext().catch(() => undefined);
+      if (context) {
+        sendRealtimeTextMessage(summarizeMeetingContextForRealtime(context, "reconnect"));
+        await postRealtimeTrace("agent", "Resume context injected into stable Realtime agent", { source: "read_meeting_context" });
+      }
+      beginRealtimeResponse("silent");
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: ["text"],
+          instructions: [
+            "Bootstrap silently.",
+            context
+              ? "Internalize the resume context message that was just injected into the conversation."
+              : "Call read_meeting_context immediately and internalize the current canvas, transcript, tasks, and implementation queue.",
+            "Do not explore the repo to learn the current project status.",
+            "Do not speak audio.",
+            "If there is nothing urgent after syncing, respond with exactly NO_ACTION."
+          ].join("\n")
+        }
+      });
+    }
+
+    async function handleRealtimeEvent(raw) {
+      let event;
+      try {
+        event = JSON.parse(raw);
+      } catch {
+        await postRealtimeTrace("error", "Invalid Realtime event payload", { raw });
         return;
       }
 
-      const mimeType = preferredMimeType();
-      recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
-      const chunks = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
-      };
-      recorder.onstop = () => {
-        if (chunks.length > 0) {
-          const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
-          void sendAudioChunk(blob).finally(() => {
-            if (joined && !speaking) setStatus("ready — hold Space to speak", "ready");
-          });
-        } else if (joined) {
-          setStatus("ready — hold Space to speak", "ready");
+      const type = String(event.type || "");
+      if (type === "session.created" || type === "session.updated") {
+        await postRealtimeTrace("debug", type, event);
+        return;
+      }
+      if (type === "response.created") {
+        const mode = responseModeFromEvent(event);
+        if (mode) beginRealtimeResponse(mode);
+        return;
+      }
+      if (type === "conversation.item.input_audio_transcription.delta") {
+        await persistRealtimeTranscriptDelta(event);
+        return;
+      }
+      if (type === "conversation.item.input_audio_transcription.completed") {
+        await persistRealtimeTranscriptCompleted(event);
+        if (realtimeMuted) {
+          scheduleSilentAnalysis("user_turn_completed");
+        } else {
+          beginRealtimeResponse("speak");
         }
-      };
-      recorder.onerror = (event) => console.warn("stable shell recorder failed", event);
-      recorder.start();
-    }
-
-    async function sendAudioChunk(blob) {
-      const extension = blob.type.includes("mp4") ? "mp4" : "webm";
-      const arrayBuffer = await blob.arrayBuffer();
-      const uploadStartedAt = Date.now();
-      void postTrace("audio.upload.start", { bytes: arrayBuffer.byteLength, mimeType: blob.type, extension, uploadStartedAt });
-      try {
-        const response = await fetch(`${api}/audio/chunk?extension=${extension}&speaker=Host&clientStartedAt=${uploadStartedAt}`, {
+        return;
+      }
+      if ((isRealtimeTextDelta(type) && realtimeResponseMode === "silent")
+        || (isRealtimeAudioTranscriptDelta(type) && realtimeResponseMode === "speak")) {
+        assistantDraft += String(event.delta || "");
+        scheduleAssistantDraftPersist();
+        publishShellState();
+        return;
+      }
+      if ((isRealtimeTextDone(type) && realtimeResponseMode === "silent")
+        || (isRealtimeAudioTranscriptDone(type) && realtimeResponseMode === "speak")) {
+        const completedText = String(event.transcript || event.text || "").trim();
+        if (!assistantDraft.trim() && completedText) assistantDraft = completedText;
+        if (assistantDraft.trim() && assistantDraft.trim() !== "NO_ACTION") {
+          await postMeetingEvent({
+            id: assistantDraftMessageId || newEventId("msg"),
+            type: "agent.message",
+            stream: "conversation",
+            meetingId,
+            createdAt: nowIso(),
+            agentId: realtimeAgentId,
+            format: "markdown",
+            surface: "status",
+            lifecycle: "final",
+            text: assistantDraft.trim()
+          });
+        }
+        assistantDraftMessageId = null;
+        if (assistantDraftFlushTimer !== null) {
+          window.clearTimeout(assistantDraftFlushTimer);
+          assistantDraftFlushTimer = null;
+        }
+        assistantDraft = "";
+        publishShellState();
+        return;
+      }
+      if (type === "response.function_call_arguments.done") {
+        const name = String(event.name || "");
+        const argsText = String(event.arguments || "{}");
+        const callId = String(event.call_id || "");
+        await postRealtimeTrace("tool", `Tool requested: ${name}`, argsText, implementationToolName(name) ? "implementation" : "conversation");
+        let parsedArgs = {};
+        try {
+          parsedArgs = JSON.parse(argsText);
+        } catch {
+          parsedArgs = { raw: argsText };
+        }
+        const toolResponse = await fetch(`${api}/realtime/tool`, {
           method: "POST",
-          headers: { "Content-Type": blob.type || "application/octet-stream" },
-          body: arrayBuffer,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, arguments: parsedArgs })
+        }).then((res) => res.json());
+        await postRealtimeTrace(toolResponse.ok ? "tool" : "error", `Tool result: ${name}`, toolResponse, implementationToolName(name) ? "implementation" : "conversation");
+        sendRealtimeEvent({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify(toolResponse)
+          }
         });
-        const uploadEndedAt = Date.now();
-        void postTrace("audio.upload.end", { status: response.status, elapsedMs: uploadEndedAt - uploadStartedAt, uploadStartedAt, uploadEndedAt });
-      } catch (error) {
-        void postTrace("audio.upload.error", { elapsedMs: Date.now() - uploadStartedAt, error: error?.message || String(error) });
-        console.warn("audio chunk failed", error);
+        sendFollowupResponse();
+        return;
+      }
+      if (type === "error") {
+        await postRealtimeTrace("error", "Realtime error", event);
+        return;
+      }
+      if (type === "response.done") {
+        restoreRealtimeBaseMode();
       }
     }
 
-    async function postTrace(text, details) {
+    function sendRealtimeEvent(event) {
+      if (!realtimeChannel || realtimeChannel.readyState !== "open") return;
+      realtimeChannel.send(JSON.stringify(event));
+    }
+
+    function sendRealtimeTextMessage(text) {
+      sendRealtimeEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text }]
+        }
+      });
+    }
+
+    async function readRealtimeMeetingContext() {
+      const response = await fetch(`${api}/realtime/tool`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "read_meeting_context", arguments: {} })
+      }).then((res) => res.json());
+      if (!response.ok) throw new Error(response.error || "read_meeting_context failed");
+      return response.output;
+    }
+
+    function setRealtimeAgentMuted(muted) {
+      realtimeMuted = muted;
+      remoteAudio.muted = muted;
+      restoreRealtimeBaseMode();
+      if (realtimeState === "connected") {
+        configureRealtimeSession();
+        void postRealtimeTrace("agent", muted ? "Realtime agent muted in stable shell" : "Realtime agent unmuted in stable shell", { audioResponses: !muted });
+      }
+      renderStatus();
+      publishShellState();
+    }
+
+    function sendRealtimePrompt(text) {
+      const clean = text.trim();
+      if (!clean) return;
+      if (realtimeState !== "connected") {
+        void postRealtimeTrace("error", "Prompt could not be sent because stable Realtime is not connected", { text: clean });
+        ensureRealtimeConnected("prompt while disconnected");
+        return;
+      }
+      sendRealtimeTextMessage(clean);
+      beginRealtimeResponse("silent");
+      sendRealtimeEvent({
+        type: "response.create",
+        response: { output_modalities: ["text"] }
+      });
+      void postRealtimeTrace("input", "Prompt sent to stable Realtime agent", { text: clean });
+    }
+
+    function requestAgentFloor(reason) {
+      if (realtimeState !== "connected") {
+        ensureRealtimeConnected("floor requested while disconnected");
+        return;
+      }
+      clearAnalysisTimers();
+      remoteAudio.muted = false;
+      beginRealtimeResponse("speak");
+      void postMeetingEvent({
+        id: newEventId("floor"),
+        type: "agent.floor",
+        stream: "conversation",
+        meetingId,
+        createdAt: nowIso(),
+        agentId: realtimeAgentId,
+        granted: true,
+        mode: "speak",
+        note: reason || undefined
+      });
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: ["audio"],
+          instructions: [
+            "The host granted you the floor.",
+            reason ? `Your current raised-hand reason is: ${reason}` : "Speak about the most useful proposal or issue you detected recently.",
+            "Speak concisely and only about your current proposal or the most useful thing you noticed in the recent conversation.",
+            "Keep it to at most two short sentences unless the user explicitly asks for more.",
+            "If you have no meaningful contribution, say so briefly."
+          ].join("\n")
+        }
+      });
+      void postRealtimeTrace("agent", "Floor granted to stable Realtime agent", undefined);
+    }
+
+    function requestAgentTextFloor(mode, reason) {
+      if (realtimeState !== "connected") {
+        ensureRealtimeConnected("text floor requested while disconnected");
+        return;
+      }
+      clearAnalysisTimers();
+      beginRealtimeResponse("silent");
+      void postMeetingEvent({
+        id: newEventId("floor"),
+        type: "agent.floor",
+        stream: "conversation",
+        meetingId,
+        createdAt: nowIso(),
+        agentId: realtimeAgentId,
+        granted: true,
+        mode: mode === "work" || mode === "review" ? mode : "show",
+        note: reason
+      });
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: ["text"],
+          instructions: [
+            "The host asked you to respond in the UI as text, not audio.",
+            "This path is for Codex/pi-agent results, work review, and visual show-and-tell.",
+            "Do not speak audio.",
+            "Call read_meeting_context and inspect piAgent.messages, piAgent.raisedHands, currentCanvas, and implementationQueue.",
+            reason ? `The current raised-hand reason is: ${reason}` : "",
+            "Post a concise text response. If there is a visual result to show, use post_meeting_markdown with surface=canvas.",
+            "Keep the status text short unless the user explicitly asks for more detail."
+          ].filter(Boolean).join("\n")
+        }
+      });
+      void postRealtimeTrace("agent", "Text floor granted to stable Realtime agent", { mode });
+    }
+
+    function scheduleSilentAnalysis(trigger) {
+      if (realtimeState !== "connected" || !realtimeMuted) return;
+      if (analysisTimer !== null) window.clearTimeout(analysisTimer);
+      analysisTimer = window.setTimeout(() => {
+        analysisTimer = null;
+        void requestSilentAnalysis(trigger);
+      }, 1800);
+    }
+
+    function scheduleLiveSilentAnalysis(trigger) {
+      if (realtimeState !== "connected" || !realtimeMuted) return;
+      if (liveAnalysisTimer !== null) return;
+      liveAnalysisTimer = window.setTimeout(() => {
+        liveAnalysisTimer = null;
+        void requestSilentAnalysis(trigger);
+      }, 2600);
+    }
+
+    async function requestSilentAnalysis(trigger) {
+      if (realtimeState !== "connected" || !realtimeMuted) return;
+      const now = Date.now();
+      if (now - lastAnalysisAt < 6000) return;
+      lastAnalysisAt = now;
+      beginRealtimeResponse("silent");
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: ["text"],
+          instructions: [
+            "You are in silent background-listener mode.",
+            "Analyze the recent conversation turns.",
+            "Do not speak audio.",
+            "The current canvas is first-class context, not a side document.",
+            "If you need current state, call read_meeting_context first.",
+            "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
+            "If durable artifact work is needed, create a visible implementation task if helpful, then call run_codex_task with your concise handoff for pi-agent.",
+            "Be eager to use run_codex_task when the conversation asks for diagrams, architecture, project plans, documentation, code changes, repo improvements, or durable artifacts.",
+            "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
+            "If you have something useful, prefer silent actions: deliver_assistant_output, post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
+            "Maintain a living meeting document on the main canvas with post_meeting_markdown using surface=canvas and documentId=realtime-live-canvas.",
+            "Raise your hand with requestedMode=speak only for Realtime conversation contributions that should be spoken aloud.",
+            "Keep any text response to at most one short sentence."
+          ].join("\n")
+        }
+      });
+      await postRealtimeTrace("agent", "Silent analysis requested from stable shell", { trigger });
+    }
+
+    function clearAnalysisTimers() {
+      if (analysisTimer !== null) {
+        window.clearTimeout(analysisTimer);
+        analysisTimer = null;
+      }
+      if (liveAnalysisTimer !== null) {
+        window.clearTimeout(liveAnalysisTimer);
+        liveAnalysisTimer = null;
+      }
+    }
+
+    function sendFollowupResponse() {
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: realtimeResponseMode === "speak" ? ["audio"] : ["text"]
+        }
+      });
+    }
+
+    function baseRealtimeMode() {
+      return realtimeMuted ? "silent" : "speak";
+    }
+
+    function restoreRealtimeBaseMode() {
+      beginRealtimeResponse(baseRealtimeMode());
+      remoteAudio.muted = realtimeMuted;
+    }
+
+    function beginRealtimeResponse(mode) {
+      assistantDraft = "";
+      assistantDraftMessageId = null;
+      realtimeResponseMode = mode;
+      publishShellState();
+    }
+
+    function responseModeFromEvent(event) {
+      const response = event.response && typeof event.response === "object" ? event.response : {};
+      const modalities = Array.isArray(response.output_modalities) ? response.output_modalities.map(String) : [];
+      if (modalities.includes("audio")) return "speak";
+      if (modalities.includes("text")) return "silent";
+      return undefined;
+    }
+
+    function scheduleAssistantDraftPersist() {
+      if (assistantDraftFlushTimer !== null) return;
+      assistantDraftFlushTimer = window.setTimeout(() => {
+        assistantDraftFlushTimer = null;
+        void persistAssistantDraft();
+      }, 450);
+    }
+
+    async function persistAssistantDraft() {
+      const text = assistantDraft.trim();
+      if (!text || text === "NO_ACTION") return;
+      if (!assistantDraftMessageId) assistantDraftMessageId = newEventId("msg");
+      await postMeetingEvent({
+        id: assistantDraftMessageId,
+        type: "agent.message",
+        stream: "conversation",
+        meetingId,
+        createdAt: nowIso(),
+        agentId: realtimeAgentId,
+        format: "markdown",
+        surface: "status",
+        lifecycle: "draft",
+        streaming: true,
+        text
+      });
+    }
+
+    async function persistRealtimeTranscriptDelta(event) {
+      const itemId = String(event.item_id || "");
+      const delta = String(event.delta || "");
+      if (!itemId || !delta) return;
+      const nextText = `${transcriptDraftText.get(itemId) || ""}${delta}`;
+      transcriptDraftText.set(itemId, nextText);
+      const draftId = transcriptDraftIds.get(itemId) || newEventId("utp");
+      transcriptDraftIds.set(itemId, draftId);
+      await postMeetingEvent({
+        id: draftId,
+        type: "utterance.partial",
+        stream: "conversation",
+        meetingId,
+        createdAt: nowIso(),
+        speakerId: "room",
+        speakerLabel: "Room (Realtime)",
+        text: nextText,
+        startMs: Date.now() % 3600000
+      });
+      if (nextText.trim().length >= 120) scheduleLiveSilentAnalysis("user_turn_live");
+    }
+
+    async function persistRealtimeTranscriptCompleted(event) {
+      const itemId = String(event.item_id || "");
+      const transcriptText = String(event.transcript || transcriptDraftText.get(itemId) || "").trim();
+      if (!transcriptText) return;
+      transcriptDraftIds.delete(itemId);
+      transcriptDraftText.delete(itemId);
+      const now = Date.now();
+      await postMeetingEvent({
+        id: newEventId("utt"),
+        type: "utterance.final",
+        stream: "conversation",
+        meetingId,
+        createdAt: nowIso(),
+        speakerId: "room",
+        speakerLabel: "Room (Realtime)",
+        text: transcriptText,
+        startMs: now % 3600000,
+        endMs: (now % 3600000) + 1
+      });
+    }
+
+    function connectEventStream() {
+      if (eventsSource) return;
+      eventsSource = new EventSource(`${api}/events/stream`);
+      eventsSource.addEventListener("meeting", (message) => {
+        let event;
+        try {
+          event = JSON.parse(message.data);
+        } catch {
+          return;
+        }
+        if (isPiAgentReviewEvent(event)) {
+          void notifyRealtimeOfPiAgentUpdate(event);
+        }
+      });
+      eventsSource.onerror = () => {
+        eventsSource?.close();
+        eventsSource = null;
+        window.setTimeout(connectEventStream, 2000);
+      };
+    }
+
+    async function notifyRealtimeOfPiAgentUpdate(event) {
+      if (event.id === lastPiAgentNoticeId || realtimeState !== "connected") return;
+      lastPiAgentNoticeId = event.id;
+      sendRealtimeTextMessage(formatPiAgentUpdateForRealtime(event));
+      await postRealtimeTrace("agent", "Pi-agent update injected into stable Realtime agent", { eventId: event.id, type: event.type, muted: realtimeMuted });
+      if (!realtimeMuted) {
+        beginRealtimeResponse("speak");
+        sendRealtimeEvent({
+          type: "response.create",
+          response: {
+            output_modalities: ["audio"],
+            instructions: [
+              "A pi-agent/Codex update was just injected into your conversation context.",
+              "Speak one concise sentence only if the update is useful for the host right now.",
+              "Mention that Codex/pi-agent produced or updated the UI/artifact if that is what happened.",
+              "Do not read long content aloud. Do not create durable artifacts."
+            ].join("\n")
+          }
+        });
+        return;
+      }
+      beginRealtimeResponse("silent");
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: ["text"],
+          instructions: [
+            "A pi-agent/Codex update was just injected into your conversation context.",
+            "Do not speak audio now.",
+            "If the result is useful to show or explain, call raise_meeting_hand with requestedMode=show or requestedMode=review and a concise reason.",
+            "Never use requestedMode=speak for Codex/pi-agent output; Codex speaks through text in the UI.",
+            "If there is nothing to add, respond with exactly NO_ACTION.",
+            "Do not create durable artifacts; pi-agent owns durable artifacts."
+          ].join("\n")
+        }
+      });
+    }
+
+    function isPiAgentReviewEvent(event) {
+      if (!event || event.agentId !== piAgentId) return false;
+      if (event.type === "agent.hand_raise") return true;
+      if (event.type !== "agent.message" || event.lifecycle !== "final") return false;
+      const text = String(event.text || "").trim();
+      if (!text || /^(ok|okay|noted|thanks|you.?re welcome|i.?m here)[.!]*$/i.test(text)) return false;
+      if (event.surface === "status" && !event.documentId && event.stream !== "implementation") return false;
+      return event.surface === "canvas" || event.stream === "implementation" || Boolean(event.documentId);
+    }
+
+    function formatPiAgentUpdateForRealtime(event) {
+      const lines = [
+        "Direct Pi/Codex update for the Realtime voice agent.",
+        "Treat this as first-class current meeting context. The UI/canvas may already show the artifact or response.",
+        "If unmuted, you may briefly tell the host what changed. If muted, raise a hand for show/review only when useful.",
+        ""
+      ];
+      if (event.type === "agent.hand_raise") {
+        lines.push(`kind: hand_raise`, `requestedMode: ${event.requestedMode}`, `reason: ${event.reason}`);
+      } else {
+        lines.push(
+          "kind: message",
+          `surface: ${event.surface || "status"}`,
+          `stream: ${event.stream || "conversation"}`,
+          event.documentId ? `documentId: ${event.documentId}` : "",
+          "",
+          clipText(String(event.text || ""), 3000)
+        );
+      }
+      return lines.filter(Boolean).join("\n");
+    }
+
+    function summarizeMeetingContextForRealtime(context, source) {
+      const root = asRecordValue(context);
+      const currentCanvas = asRecordValue(root.currentCanvas);
+      const tasks = arrayValue(root.tasks).map(asRecordValue).slice(0, 8);
+      const implementationQueue = asRecordValue(root.implementationQueue);
+      const piAgent = asRecordValue(root.piAgent);
+      const piMessages = arrayValue(piAgent.messages).map(asRecordValue).slice(-4);
+      const piHands = arrayValue(piAgent.raisedHands).map(asRecordValue).slice(-4);
+      const transcript = arrayValue(root.transcript).map(asRecordValue).slice(-8);
+      const lines = [
+        `Direct resume context for the Realtime voice agent (${source}).`,
+        "Continue from this state; do not treat reconnect as a new meeting.",
+        "The current canvas and Pi/Codex outputs are first-class context.",
+        ""
+      ];
+      const canvasText = stringValue(currentCanvas.text);
+      if (canvasText) {
+        lines.push(
+          "Current canvas:",
+          `documentId: ${stringValue(currentCanvas.documentId) || "current"}`,
+          clipText(canvasText.replace(/\s+/g, " "), 900),
+          ""
+        );
+      }
+      if (tasks.length) {
+        lines.push("Current tasks:");
+        for (const task of tasks) {
+          lines.push(`- ${stringValue(task.status) || "unknown"}: ${stringValue(task.title) || "untitled"}${stringValue(task.taskClass) ? ` [${stringValue(task.taskClass)}]` : ""}`);
+        }
+        lines.push("");
+      }
+      lines.push(
+        `Implementation queue: queued=${arrayValue(implementationQueue.queued).length}, working=${arrayValue(implementationQueue.working).length}, done=${arrayValue(implementationQueue.done).length}`,
+        ""
+      );
+      if (piMessages.length || piHands.length) {
+        lines.push("Recent Pi/Codex outputs:");
+        for (const message of piMessages) lines.push(`- ${clipText(stringValue(message.text).replace(/\s+/g, " "), 360)}`);
+        for (const hand of piHands) lines.push(`- hand ${stringValue(hand.requestedMode) || "review"}: ${clipText(stringValue(hand.reason).replace(/\s+/g, " "), 260)}`);
+        lines.push("");
+      }
+      if (transcript.length) {
+        lines.push("Recent transcript:");
+        for (const turn of transcript) lines.push(`- ${stringValue(turn.speakerLabel) || "speaker"}: ${clipText(stringValue(turn.text).replace(/\s+/g, " "), 220)}`);
+      }
+      return clipText(lines.filter(Boolean).join("\n"), 6000);
+    }
+
+    async function postRealtimeTrace(channel, text, details, stream = "conversation") {
+      await postMeetingEvent({
+        id: newEventId("trace"),
+        type: "agent.trace",
+        stream,
+        meetingId,
+        createdAt: nowIso(),
+        agentId: realtimeAgentId,
+        channel,
+        text,
+        details
+      });
+    }
+
+    async function postMeetingEvent(event) {
       try {
         await fetch(`${api}/events`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: `trace_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-            type: "agent.trace",
-            meetingId,
-            createdAt: new Date().toISOString(),
-            agentId: "stable-shell",
-            channel: "latency",
-            text,
-            details,
-          }),
+          body: JSON.stringify(event)
         });
-      } catch {
-        // Tracing must never break push-to-talk.
+      } catch (error) {
+        console.warn("meeting event failed", error);
       }
     }
 
-    function preferredMimeType() {
-      for (const type of ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"]) {
-        if (MediaRecorder.isTypeSupported(type)) return type;
-      }
-      return "";
+    function setRealtimeState(next) {
+      realtimeState = next;
+      renderStatus();
+      publishShellState();
     }
 
-    function setStatus(text, state) {
-      statusEl.textContent = text;
+    function renderStatus(text, forcedState) {
+      if (text) {
+        statusEl.textContent = text;
+      } else if (!joined) {
+        statusEl.textContent = "stable shell idle";
+      } else if (realtimeState === "connected") {
+        statusEl.textContent = `voice agent live (${realtimeMuted ? "muted listener" : "audio responder"})`;
+      } else if (realtimeState === "connecting") {
+        statusEl.textContent = "voice agent connecting";
+      } else {
+        statusEl.textContent = realtimeDesired ? "voice agent retrying" : "voice agent idle";
+      }
+      const state = forcedState || (!joined ? "idle" : realtimeState === "connected" && !realtimeMuted ? "speaking" : "ready");
       dotEl.className = `dot ${state === "ready" ? "ready" : state === "speaking" ? "speaking" : ""}`;
+      muteButton.textContent = realtimeMuted ? "Unmute agent" : "Mute agent";
+      muteButton.disabled = !joined;
     }
 
-    function isEditableTarget(target) {
-      if (!(target instanceof HTMLElement)) return false;
-      const tag = target.tagName.toLowerCase();
-      return tag === "input" || tag === "textarea" || target.isContentEditable;
+    function publishShellState() {
+      uiFrame.contentWindow?.postMessage({
+        type: "meeting:shell-state",
+        joined,
+        realtimeState,
+        realtimeMuted,
+        realtimeResponseMode,
+        reconnectAttempt: realtimeReconnectAttempt
+      }, window.location.origin);
+    }
+
+    function implementationToolName(name) {
+      return name === "run_codex_task" || name === "publish_task_result" || name === "deliver_assistant_output";
+    }
+
+    function isRealtimeTextDelta(type) {
+      return type === "response.output_text.delta" || type === "response.text.delta";
+    }
+
+    function isRealtimeTextDone(type) {
+      return type === "response.output_text.done" || type === "response.text.done";
+    }
+
+    function isRealtimeAudioTranscriptDelta(type) {
+      return type === "response.output_audio_transcript.delta" || type === "response.audio_transcript.delta";
+    }
+
+    function isRealtimeAudioTranscriptDone(type) {
+      return type === "response.output_audio_transcript.done" || type === "response.audio_transcript.done";
+    }
+
+    function newEventId(prefix) {
+      return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function nowIso() {
+      return new Date().toISOString();
+    }
+
+    function asRecordValue(value) {
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    }
+
+    function arrayValue(value) {
+      return Array.isArray(value) ? value : [];
+    }
+
+    function stringValue(value) {
+      return typeof value === "string" ? value.trim() : "";
+    }
+
+    function clipText(text, maxLength) {
+      const normalized = String(text || "").trim();
+      return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
     }
   </script>
 </body>

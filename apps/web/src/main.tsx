@@ -39,6 +39,14 @@ interface RenderSample {
   at: number;
 }
 
+interface ShellRealtimeState {
+  joined: boolean;
+  realtimeState: RealtimeState;
+  realtimeMuted: boolean;
+  realtimeResponseMode: RealtimeResponseMode;
+  reconnectAttempt?: number;
+}
+
 const realtimeAgentId = "realtime-codex";
 const piAgentId = "pi-agent";
 const realtimeLiveCanvasDocumentId = "realtime-live-canvas";
@@ -80,6 +88,7 @@ function App() {
   const [realtimeResponseMode, setRealtimeResponseMode] = useState<RealtimeResponseMode>("speak");
   const [realtimePrompt, setRealtimePrompt] = useState("");
   const [realtimeDraftText, setRealtimeDraftText] = useState("");
+  const [shellRealtimeState, setShellRealtimeState] = useState<ShellRealtimeState | null>(null);
   const [dismissedHandIds, setDismissedHandIds] = useState<string[]>([]);
   const realtimePeerRef = useRef<RTCPeerConnection | null>(null);
   const realtimeChannelRef = useRef<RTCDataChannel | null>(null);
@@ -162,6 +171,28 @@ function App() {
       sessionStorage.removeItem(autoJoinKey);
       console.warn("auto-join failed", error);
     });
+  }, []);
+
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as Partial<ShellRealtimeState> & { type?: string };
+      if (data?.type !== "meeting:shell-state") return;
+      const nextState = data.realtimeState;
+      const nextMode = data.realtimeResponseMode;
+      if (nextState !== "idle" && nextState !== "connecting" && nextState !== "connected") return;
+      setShellRealtimeState({
+        joined: Boolean(data.joined),
+        realtimeState: nextState,
+        realtimeMuted: Boolean(data.realtimeMuted),
+        realtimeResponseMode: nextMode === "silent" || nextMode === "speak" ? nextMode : "speak",
+        reconnectAttempt: typeof data.reconnectAttempt === "number" ? data.reconnectAttempt : undefined
+      });
+    };
+    window.addEventListener("message", onMessage);
+    window.parent.postMessage({ type: "meeting:shell-state:request" }, window.location.origin);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   useEffect(() => {
@@ -424,6 +455,7 @@ function App() {
   }
 
   function restartRealtimeAgent() {
+    if (postShellRealtimeCommand({ type: "meeting:realtime:restart" })) return;
     realtimeDesiredRef.current = true;
     realtimeReconnectAttemptRef.current = 0;
     clearRealtimeReconnect();
@@ -643,6 +675,10 @@ function App() {
   }
 
   function setRealtimeAgentMuted(muted: boolean) {
+    if (postShellRealtimeCommand({ type: "meeting:realtime:mute", muted })) {
+      setShellRealtimeState((current) => current ? { ...current, realtimeMuted: muted, realtimeResponseMode: muted ? "silent" : "speak" } : current);
+      return;
+    }
     realtimeMutedRef.current = muted;
     setRealtimeMuted(muted);
     if (remoteAudioRef.current) remoteAudioRef.current.muted = muted;
@@ -655,7 +691,12 @@ function App() {
 
   function sendRealtimePrompt() {
     const text = realtimePrompt.trim();
-    if (!text || realtimeState !== "connected") return;
+    if (!text) return;
+    if (postShellRealtimeCommand({ type: "meeting:realtime:prompt", text })) {
+      setRealtimePrompt("");
+      return;
+    }
+    if (realtimeState !== "connected") return;
     sendRealtimeEvent({
       type: "conversation.item.create",
       item: {
@@ -694,6 +735,7 @@ function App() {
   }
 
   function requestAgentFloor(reason?: string) {
+    if (postShellRealtimeCommand({ type: "meeting:realtime:floor", reason })) return;
     if (realtimeState !== "connected") return;
     if (analysisTimeoutRef.current !== null) {
       window.clearTimeout(analysisTimeoutRef.current);
@@ -733,6 +775,7 @@ function App() {
   }
 
   function requestAgentTextFloor(mode: Exclude<AgentRequestedMode, "speak">, reason: string) {
+    if (postShellRealtimeCommand({ type: "meeting:realtime:text-floor", mode, reason })) return;
     if (realtimeState !== "connected") return;
     if (analysisTimeoutRef.current !== null) {
       window.clearTimeout(analysisTimeoutRef.current);
@@ -1019,10 +1062,30 @@ function App() {
     setRecording(false);
   }
 
+  function postShellRealtimeCommand(message: Record<string, unknown>): boolean {
+    if (!isEmbedded) return false;
+    window.parent.postMessage(message, window.location.origin);
+    return true;
+  }
+
   function pushToTalk(active: boolean) {
     if (!isEmbedded) return;
     window.parent.postMessage({ type: active ? "meeting:push-to-talk:start" : "meeting:push-to-talk:stop" }, window.location.origin);
   }
+
+  const effectiveRealtimeState = isEmbedded ? shellRealtimeState?.realtimeState || "idle" : realtimeState;
+  const effectiveRealtimeMuted = isEmbedded ? shellRealtimeState?.realtimeMuted || false : realtimeMuted;
+  const effectiveRealtimeResponseMode = isEmbedded ? shellRealtimeState?.realtimeResponseMode || "speak" : realtimeResponseMode;
+  const effectiveRealtimeConnected = effectiveRealtimeState === "connected";
+  const effectiveRealtimeLabel = effectiveRealtimeConnected
+    ? `${effectiveRealtimeMuted ? "Muted listener" : "Audio responder"} · ${effectiveRealtimeResponseMode}`
+    : effectiveRealtimeState === "connecting"
+      ? "Connecting"
+      : isEmbedded && shellRealtimeState?.joined
+        ? "Retrying in stable shell"
+        : isEmbedded
+          ? "Waiting for stable shell"
+          : "Disconnected";
 
   return (
     <main className="shell">
@@ -1045,18 +1108,24 @@ function App() {
           ) : (
             <button onClick={leaveMeeting}><Phone size={16} /> Leave meeting</button>
           ))}
-          {!isEmbedded && (
+          {(isEmbedded || connected) && (
             <>
-              <div className={`status realtimeStatus realtime-${realtimeState}`}>
-                <Radio size={16} /> {realtimeState === "connected" ? `Realtime agent connected (${realtimeMuted ? "muted" : "audio on"})` : realtimeState === "connecting" ? "Realtime agent connecting" : "Realtime agent idle"}
+              <div className={`status realtimeStatus realtime-${effectiveRealtimeState}`}>
+                <Radio size={16} /> {isEmbedded
+                  ? `Stable voice: ${effectiveRealtimeLabel}`
+                  : realtimeState === "connected"
+                    ? `Realtime agent connected (${realtimeMuted ? "muted" : "audio on"})`
+                    : realtimeState === "connecting"
+                      ? "Realtime agent connecting"
+                      : "Realtime agent idle"}
               </div>
-              {connected && realtimeState !== "connecting" && (
-                <button className="secondary" onClick={restartRealtimeAgent}>{realtimeState === "connected" ? "Restart voice agent" : "Retry voice agent"}</button>
+              {effectiveRealtimeState !== "connecting" && (
+                <button className="secondary" onClick={restartRealtimeAgent}>{effectiveRealtimeState === "connected" ? "Restart voice agent" : "Retry voice agent"}</button>
               )}
-              {realtimeState === "connected" && (
-                <button className="secondary" onClick={() => setRealtimeAgentMuted(!realtimeMuted)}>{realtimeMuted ? "Unmute agent" : "Mute agent"}</button>
+              {effectiveRealtimeConnected && (
+                <button className="secondary" onClick={() => setRealtimeAgentMuted(!effectiveRealtimeMuted)}>{effectiveRealtimeMuted ? "Unmute agent" : "Mute agent"}</button>
               )}
-              {realtimeState === "connected" && (
+              {effectiveRealtimeConnected && (
                 <button onClick={() => handleAgentHandAction(activeHandRaises[0])}>{handActionLabel(activeHandRaises[0])}</button>
               )}
               <div className="realtimePromptBox">
@@ -1065,7 +1134,7 @@ function App() {
                   onChange={(event) => setRealtimePrompt(event.target.value)}
                   placeholder="Ask the voice agent to inspect or improve the existing app with Codex."
                 />
-                <button onClick={sendRealtimePrompt} disabled={realtimeState !== "connected"}>Send prompt</button>
+                <button onClick={sendRealtimePrompt} disabled={!effectiveRealtimeConnected}>Send prompt</button>
               </div>
             </>
           )}
@@ -1125,11 +1194,11 @@ function App() {
           <div className="controlCenterHeader">
             <div>
               <strong>Realtime Agent</strong>
-              <p>{realtimeState === "connected" ? `${realtimeMuted ? "Muted listener" : "Audio responder"} · ${realtimeResponseMode}` : "Disconnected"}</p>
+              <p>{effectiveRealtimeLabel}</p>
             </div>
             <div className="opsActions">
-              {realtimeState === "connected" && (
-                <button className="secondary" onClick={() => setRealtimeAgentMuted(!realtimeMuted)}>{realtimeMuted ? "Unmute" : "Mute"}</button>
+              {effectiveRealtimeConnected && (
+                <button className="secondary" onClick={() => setRealtimeAgentMuted(!effectiveRealtimeMuted)}>{effectiveRealtimeMuted ? "Unmute" : "Mute"}</button>
               )}
               <button className="secondary" onClick={() => setSelectedCanvasDocumentId(realtimeLiveCanvasDocumentId)}>Live notes</button>
               <button className="secondary" onClick={() => setSelectedCanvasDocumentId(null)}>Auto</button>

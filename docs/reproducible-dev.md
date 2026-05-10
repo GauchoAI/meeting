@@ -14,10 +14,11 @@ pnpm dev
 Open:
 
 ```text
-http://localhost:5173/stable.html
+http://localhost:5175/stable.html
 ```
 
-Click **Join meeting** once, then hold **Space** to speak.
+Click **Join meeting** once. The stable shell starts the Realtime voice agent
+immediately and keeps it alive while the iframe hot reloads.
 
 ## Pi extensions
 
@@ -73,7 +74,7 @@ Avoid editing `apps/web/public/stable.html` during a live meeting unless doing d
 
 ```bash
 pnpm typecheck
-node scripts/browser-screenshot.mjs http://localhost:5173/stable.html .pi/screenshots/check.png
+node scripts/browser-screenshot.mjs http://localhost:5175/stable.html .pi/screenshots/check.png
 ```
 
 The screenshot command launches/reuses a Chrome DevTools instance and writes the image to `.pi/screenshots/`.
