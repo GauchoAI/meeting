@@ -6,6 +6,7 @@ import { formatAssistantCanvasMarkdown, formatAssistantStatusMarkdown, firstMark
 import { speechProviderStatus } from "./speech.js";
 import { loadDotEnv, loadLocalConfig } from "./env.js";
 import { transcribeLocalAudio } from "./local-stt.js";
+import { synthesizeSpeech, TtsProviderError } from "./tts.js";
 
 loadLocalConfig();
 loadDotEnv();
@@ -624,37 +625,36 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
 async function synthesizeLocalSpeech(text: string, res: ServerResponse): Promise<void> {
   const compact = compactText(text, 700);
   if (!compact) return sendJson(res, { ok: false, error: "missing text" }, 400);
-  const endpoint = process.env.CHATTERBOX_TTS_URL || process.env.MEETING_TTS_URL || "http://127.0.0.1:8791/synthesize";
   const startedAt = Date.now();
-  appendTrace("latency", "tts.start", { provider: "chatterbox-turbo", endpoint, textChars: compact.length });
+  appendTrace("latency", "tts.start", { provider: process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo", textChars: compact.length });
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: compact })
-    });
-    const contentTypeHeader = response.headers.get("content-type") || "";
-    const elapsedMs = Date.now() - startedAt;
-    if (!response.ok) {
-      const body = await response.text();
-      appendTrace("error", "tts.failed", { provider: "chatterbox-turbo", status: response.status, elapsedMs, body: body.slice(0, 1000) });
-      return sendJson(res, { ok: false, error: body || `local TTS returned ${response.status}` }, 502);
-    }
-    const audio = Buffer.from(await response.arrayBuffer());
+    const result = await synthesizeSpeech(compact);
     appendTrace("latency", "tts.end", {
-      provider: "chatterbox-turbo",
-      elapsedMs,
-      bytes: audio.length,
-      upstreamElapsedMs: response.headers.get("x-tts-elapsed-ms")
+      provider: result.provider,
+      elapsedMs: result.elapsedMs,
+      totalElapsedMs: Date.now() - startedAt,
+      bytes: result.audio.length,
+      endpoint: result.endpoint,
+      model: result.model,
+      responseFormat: result.responseFormat,
+      upstreamElapsedMs: result.upstreamElapsedMs
     });
-    sendBinary(res, audio, contentTypeHeader.includes("audio/") ? contentTypeHeader : "audio/wav", {
-      "X-TTS-Provider": response.headers.get("x-tts-provider") || "chatterbox-turbo",
-      "X-TTS-Elapsed-Ms": response.headers.get("x-tts-elapsed-ms") || String(elapsedMs)
+    sendBinary(res, result.audio, result.contentType, {
+      "X-TTS-Provider": result.provider,
+      "X-TTS-Elapsed-Ms": result.upstreamElapsedMs || String(result.elapsedMs),
+      ...(result.model ? { "X-TTS-Model": result.model } : {}),
+      ...(result.responseFormat ? { "X-TTS-Format": result.responseFormat } : {})
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    appendTrace("error", "tts.failed", { provider: "chatterbox-turbo", endpoint, message });
-    sendJson(res, { ok: false, error: message }, 503);
+    const providerError = error instanceof TtsProviderError ? error : undefined;
+    appendTrace("error", "tts.failed", {
+      provider: providerError?.provider || process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo",
+      status: providerError?.status,
+      elapsedMs: providerError?.elapsedMs,
+      message
+    });
+    sendJson(res, { ok: false, error: message }, providerError?.status && providerError.status >= 400 ? 502 : 503);
   }
 }
 

@@ -1,16 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ttsProviderStatus, type TtsProviderStatus } from "./tts.js";
 
 export interface SpeechProviderStatus {
   provider: "local-whisper" | "deepgram" | "voxtral-http" | "moshi-http";
   configured: boolean;
   streamingStt: boolean;
   streamingTts: boolean;
-  localTts?: {
-    provider: "chatterbox-turbo";
-    configured: boolean;
-    endpoint: string;
-  };
+  localTts?: TtsProviderStatus;
   settingsPath?: string;
   listenModel?: string;
   speakModel?: string;
@@ -36,12 +33,7 @@ export function speechProviderStatus(): SpeechProviderStatus {
 }
 
 function localTtsStatus(): SpeechProviderStatus["localTts"] {
-  const endpoint = process.env.CHATTERBOX_TTS_URL || process.env.MEETING_TTS_URL || "http://127.0.0.1:8791/synthesize";
-  return {
-    provider: "chatterbox-turbo",
-    configured: true,
-    endpoint
-  };
+  return ttsProviderStatus();
 }
 
 function speechProvider(): SpeechProviderStatus["provider"] {
