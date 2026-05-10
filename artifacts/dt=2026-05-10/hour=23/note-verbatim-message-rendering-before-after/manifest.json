@@ -1,0 +1,15 @@
+{
+  "kind": "note",
+  "slug": "verbatim-message-rendering-before-after",
+  "title": "Verbatim Message Rendering: Current vs Preferred",
+  "createdAt": "2026-05-10T02:03:37.263Z",
+  "updatedAt": "2026-05-10T02:03:37.263Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "voice-agent",
+    "prompt-rendering",
+    "terminal",
+    "before-after"
+  ],
+  "summary": "Concise verbatim before/after examples for rendering voice-agent handoffs while preserving actionable tasks."
+}
