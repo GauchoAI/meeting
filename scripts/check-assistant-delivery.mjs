@@ -19,9 +19,11 @@ const checks = [
   [api.includes('!isTaskResultWrapperMessage(event)') && web.includes('documentId.startsWith("task-result:")'), "Task-result wrappers do not override artifact canvas selection"],
   [web.includes('event.surface === "status" && !event.documentId && event.stream !== "implementation"') && !web.includes('text.length >= 40'), "Realtime notification ignores status-only pi-agent wrappers"],
   [web.includes('Task: Review latest Pi/Codex output.') && web.includes('status-only updates should not replace it') && !web.includes('Context: surface='), "Realtime Pi updates use preferred message format without routing metadata"],
-  [api.includes('name: "message_pi_agent"') && api.includes('pi-direct-messages.jsonl'), "Realtime exposes direct voice-agent to pi-agent messaging without canvas output"],
-  [worker.includes('handlePiDirectMessage') && worker.includes('[meeting-agent:direct:'), "Pi-agent worker tails direct messages"],
+  [api.includes('name: "message_pi_agent"') && api.includes('pi-direct-messages.jsonl') && api.includes('piDirectMessagesSeenPath'), "Realtime exposes direct voice-agent to pi-agent messaging without canvas output"],
+  [api.includes('type: "agent.task"') && api.includes('status: "queued"') && api.includes('implementationPrompt: prompt.trim()'), "run_codex_task enqueues an implementation task directly"],
+  [worker.includes('handlePiDirectMessage') && worker.includes('[meeting-agent:direct:') && worker.includes('piDirectMessagesSeenPath'), "Pi-agent worker tails and marks direct messages seen"],
   [mcp.includes('meeting_message_voice_agent') && mcp.includes('voice-message:'), "Pi-agent can message voice agent without canvas updates"],
+  [api.includes('shouldPublishTaskCanvas') && worker.includes('shouldPublishTaskCanvas'), "Code-change implementation results avoid stealing the canvas"],
   [docs.includes('deliver_assistant_output') && docs.includes('Status: <one-line current state>') && docs.includes('status-only delivery replace'), "Delivery workflow docs describe command and template"],
   [directDocs.includes('Task: <actionable request>') && directDocs.includes('message_pi_agent') && directDocs.includes('meeting_message_voice_agent'), "Direct messaging docs describe low-noise handoffs"]
 ];

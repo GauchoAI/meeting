@@ -22,6 +22,7 @@ const implementationInboxRoot = resolve(pipelineRoot, "implementation/inbox");
 const implementationConversationInboxPath = resolve(implementationInboxRoot, "conversation.jsonl");
 const piHandoffsPath = resolve(implementationInboxRoot, "pi-handoffs.jsonl");
 const piDirectMessagesPath = resolve(implementationInboxRoot, "pi-direct-messages.jsonl");
+const piDirectMessagesSeenPath = resolve(implementationInboxRoot, "pi-direct-messages.seen.jsonl");
 const implementationTaskQueuedRoot = resolve(pipelineRoot, "implementation/tasks/queued");
 const implementationTaskWorkingRoot = resolve(pipelineRoot, "implementation/tasks/working");
 const implementationTaskDoneRoot = resolve(pipelineRoot, "implementation/tasks/done");
@@ -171,34 +172,36 @@ async function processTask(taskKey: string, workingDir: string, task: Record<str
       lifecycle: "final",
       text: `Pi agent completed **${title}**.${selectedArtifactPath ? ` Artifact: \`${selectedArtifactPath}\`.` : ""}`
     } as MeetingEvent);
-    if (selectedArtifactPath && selectedArtifactMarkdown) {
-      await postEvent({
-        id: newEventId("msg"),
-        type: "agent.message",
-        stream: "implementation",
-        meetingId,
-        createdAt: nowIso(),
-        agentId,
-        format: "markdown",
-        surface: "canvas",
-        lifecycle: "final",
-        documentId: selectedArtifactPath,
-        text: selectedArtifactMarkdown
-      } as MeetingEvent);
-    } else {
-      await postEvent({
-        id: newEventId("msg"),
-        type: "agent.message",
-        stream: "implementation",
-        meetingId,
-        createdAt: nowIso(),
-        agentId,
-        format: "markdown",
-        surface: "canvas",
-        lifecycle: "final",
-        documentId: `task-result:${taskKey}`,
-        text: `# ${title}\n\n${summary}${artifactResult.path ? `\n\nArtifact path: \`${artifactResult.path}\`` : ""}`
-      } as MeetingEvent);
+    if (shouldPublishTaskCanvas(normalizeTaskClass(task.taskClass))) {
+      if (selectedArtifactPath && selectedArtifactMarkdown) {
+        await postEvent({
+          id: newEventId("msg"),
+          type: "agent.message",
+          stream: "implementation",
+          meetingId,
+          createdAt: nowIso(),
+          agentId,
+          format: "markdown",
+          surface: "canvas",
+          lifecycle: "final",
+          documentId: selectedArtifactPath,
+          text: selectedArtifactMarkdown
+        } as MeetingEvent);
+      } else {
+        await postEvent({
+          id: newEventId("msg"),
+          type: "agent.message",
+          stream: "implementation",
+          meetingId,
+          createdAt: nowIso(),
+          agentId,
+          format: "markdown",
+          surface: "canvas",
+          lifecycle: "final",
+          documentId: `task-result:${taskKey}`,
+          text: `# ${title}\n\n${summary}${artifactResult.path ? `\n\nArtifact path: \`${artifactResult.path}\`` : ""}`
+        } as MeetingEvent);
+      }
     }
     await postEvent({
       id: newEventId("hand"),
@@ -497,6 +500,16 @@ function handlePiDirectMessage(line: string): void {
   const text = typeof message.text === "string" ? message.text : "";
   const taskKey = typeof message.taskKey === "string" ? ` task=${message.taskKey}` : "";
   console.log(`[meeting-agent:direct:${intent}]${taskKey} ${compact(text, 800)}`);
+  if (directMessageAlreadySeen(message)) return;
+  mkdirSync(dirname(piDirectMessagesSeenPath), { recursive: true });
+  writeFileSync(piDirectMessagesSeenPath, `${JSON.stringify({ ...message, seenAt: nowIso(), seenBy: agentId })}\n`, { encoding: "utf8", flag: "a" });
+}
+
+function directMessageAlreadySeen(message: Record<string, unknown>): boolean {
+  const ts = typeof message.ts === "string" ? message.ts : "";
+  const text = typeof message.text === "string" ? message.text : "";
+  if (!ts || !text || !existsSync(piDirectMessagesSeenPath)) return false;
+  return tailJsonl(piDirectMessagesSeenPath, 50).some((record) => record.ts === ts && record.text === text && record.seenBy === agentId);
 }
 
 function maybeLogPartial(event: Record<string, unknown>): void {
@@ -509,6 +522,10 @@ function maybeLogPartial(event: Record<string, unknown>): void {
   partialLogState.set(itemId, { text, loggedAt: now });
   const speaker = typeof event.speakerLabel === "string" ? event.speakerLabel : "Host";
   console.log(`[meeting-agent:partial] ${speaker}: ${compact(text, 240)}`);
+}
+
+function shouldPublishTaskCanvas(taskClass: string | undefined): boolean {
+  return taskClass === "artifact.render" || taskClass === "artifact.edit" || taskClass === "critique.review";
 }
 
 function buildHandoffContextBlock(workingDir?: string): string {
