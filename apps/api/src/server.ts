@@ -131,8 +131,8 @@ const server = createServer(async (req, res) => {
 
 function shouldIgnoreLegacyAudioChunk(client: string): boolean {
   if (process.env.MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS === "true") return false;
-  const provider = process.env.STT_PROVIDER;
-  if (provider !== "voxtral-http" && provider !== "moshi-http") return false;
+  const provider = process.env.STT_PROVIDER || "local-whisper";
+  if (provider !== "local-whisper" && provider !== "voxtral-http" && provider !== "moshi-http") return false;
   return client !== "stable-vad-v1";
 }
 
@@ -608,7 +608,8 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
 
 function shouldBlockOpenAiRealtime(): boolean {
   if (process.env.MEETING_ALLOW_OPENAI_REALTIME === "true") return false;
-  return process.env.STT_PROVIDER === "voxtral-http" || process.env.STT_PROVIDER === "moshi-http";
+  const provider = process.env.STT_PROVIDER || "local-whisper";
+  return provider === "local-whisper" || provider === "voxtral-http" || provider === "moshi-http";
 }
 
 async function runRealtimeTool(name: string, input: unknown, res: ServerResponse): Promise<void> {

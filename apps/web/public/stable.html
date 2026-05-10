@@ -36,7 +36,7 @@
     <div class="hint">Voice runs in this stable shell. UI below can reload safely.</div>
     <select id="voiceMode" aria-label="Voice mode">
       <option value="realtime">OpenAI voice</option>
-      <option value="local">Local Voxtral</option>
+      <option value="local">Local Whisper</option>
       <option value="hybrid">Hybrid</option>
     </select>
     <button id="join">Join meeting</button>
@@ -636,7 +636,7 @@
 
     function preferLocalVoiceForLocalProvider() {
       if (hasExplicitVoiceMode || voiceModeManuallySelected) return;
-      if ((speechProvider === "voxtral-http" || speechProvider === "moshi-http") && voiceMode === "realtime") {
+      if ((speechProvider === "local-whisper" || speechProvider === "voxtral-http" || speechProvider === "moshi-http") && voiceMode === "realtime") {
         setVoiceMode("local", { persist: true, trace: false });
       }
     }

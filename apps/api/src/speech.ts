@@ -19,7 +19,7 @@ export function speechProviderStatus(): SpeechProviderStatus {
   return {
     provider,
     configured: speechProviderConfigured(provider),
-    streamingStt: true,
+    streamingStt: streamingSttSupported(provider),
     streamingTts: false,
     settingsPath: settings.path,
     listenModel: localListenModel(provider) || settings.listenModel,
@@ -40,6 +40,10 @@ function speechProviderConfigured(provider: SpeechProviderStatus["provider"]): b
   if (provider === "voxtral-http") return Boolean(process.env.VOXTRAL_STT_URL || process.env.STT_PROVIDER === "voxtral-http");
   if (provider === "moshi-http") return Boolean(process.env.MOSHI_STT_URL || process.env.STT_PROVIDER === "moshi-http");
   return Boolean(process.env.WHISPER_CPP_BIN && process.env.WHISPER_MODEL_PATH);
+}
+
+function streamingSttSupported(provider: SpeechProviderStatus["provider"]): boolean {
+  return provider === "deepgram" || provider === "moshi-http";
 }
 
 function localListenModel(provider: SpeechProviderStatus["provider"]): string | undefined {
