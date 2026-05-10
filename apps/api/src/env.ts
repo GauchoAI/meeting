@@ -38,7 +38,6 @@ export function loadDotEnv(): void {
       continue;
     }
     const [key, ...rest] = trimmed.split("=");
-    process.env[key] ||= rest.join("=").replace(/^['"]|['"]$/g, "");
+    process.env[key] = rest.join("=").replace(/^['"]|['"]$/g, "");
   }
 }
-
