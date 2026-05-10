@@ -6,7 +6,7 @@ import { formatAssistantCanvasMarkdown, formatAssistantStatusMarkdown, firstMark
 import { speechProviderStatus } from "./speech.js";
 import { loadDotEnv, loadLocalConfig } from "./env.js";
 import { transcribeLocalAudio } from "./local-stt.js";
-import { synthesizeSpeech, TtsProviderError } from "./tts.js";
+import { streamSpeech, synthesizeSpeech, TtsProviderError } from "./tts.js";
 
 loadLocalConfig();
 loadDotEnv();
@@ -80,6 +80,10 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/tts/synthesize") {
     const payload = await readJson<{ text?: string }>(req);
     return synthesizeLocalSpeech(payload.text || "", res);
+  }
+  if (req.method === "POST" && url.pathname === "/tts/stream") {
+    const payload = await readJson<{ text?: string }>(req);
+    return streamLocalSpeech(payload.text || "", res);
   }
   if (req.method === "POST" && url.pathname === "/audio/chunk") {
     const extension = url.searchParams.get("extension") || "webm";
@@ -655,6 +659,62 @@ async function synthesizeLocalSpeech(text: string, res: ServerResponse): Promise
       message
     });
     sendJson(res, { ok: false, error: message }, providerError?.status && providerError.status >= 400 ? 502 : 503);
+  }
+}
+
+async function streamLocalSpeech(text: string, res: ServerResponse): Promise<void> {
+  const compact = compactText(text, 700);
+  if (!compact) return sendJson(res, { ok: false, error: "missing text" }, 400);
+  const startedAt = Date.now();
+  appendTrace("latency", "tts.stream.start", { provider: process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo", textChars: compact.length });
+  try {
+    const result = await streamSpeech(compact);
+    sendCorsHeaders(res);
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-TTS-Provider": result.provider,
+      "X-TTS-Model": result.model,
+      "X-TTS-Format": result.responseFormat,
+      "X-TTS-Encoding": "pcm_f32le",
+      "X-TTS-Sample-Rate": String(result.pcmSampleRate),
+      "X-TTS-First-Byte-Ms": String(result.elapsedMs)
+    });
+
+    let bytes = 0;
+    const reader = result.stream.getReader();
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytes += chunk.value.byteLength;
+        res.write(Buffer.from(chunk.value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    res.end();
+    appendTrace("latency", "tts.stream.end", {
+      provider: result.provider,
+      elapsedMs: Date.now() - startedAt,
+      firstByteMs: result.elapsedMs,
+      bytes,
+      endpoint: result.endpoint,
+      model: result.model,
+      responseFormat: result.responseFormat,
+      pcmSampleRate: result.pcmSampleRate
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const providerError = error instanceof TtsProviderError ? error : undefined;
+    appendTrace("error", "tts.stream.failed", {
+      provider: providerError?.provider || process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo",
+      status: providerError?.status,
+      elapsedMs: providerError?.elapsedMs,
+      message
+    });
+    sendJson(res, { ok: false, error: message }, providerError?.status === 409 ? 409 : 503);
   }
 }
 

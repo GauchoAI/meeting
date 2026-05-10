@@ -77,6 +77,7 @@ The browser shell never uses `speechSynthesis`. All speech output goes through t
 
 ```bash
 POST http://localhost:4317/tts/synthesize
+POST http://localhost:4317/tts/stream
 ```
 
 By default this proxies to the local Chatterbox Turbo worker:
@@ -93,6 +94,7 @@ MEETING_TTS_PROVIDER=mistral-voxtral
 MISTRAL_API_KEY=...
 MISTRAL_TTS_MODEL=voxtral-mini-tts-2603
 MISTRAL_TTS_RESPONSE_FORMAT=wav
+MISTRAL_TTS_PCM_SAMPLE_RATE=24000
 ```
 
 Optional voice controls:
@@ -103,7 +105,7 @@ MISTRAL_TTS_REF_AUDIO_PATH=voice-reference.wav
 MISTRAL_TTS_BASE_URL=https://api.mistral.ai/v1
 ```
 
-Use `wav` for the current stable UI because it returns browser-playable audio with no client-side decoding work. Voxtral also exposes `pcm`, but the current shell waits for the complete `/tts/synthesize` response before playback, so `pcm` does not yet deliver the low-latency first-audio behavior by itself. To exploit Voxtral's lowest-latency path, add a separate streaming TTS route that forwards `text/event-stream` audio deltas and plays them incrementally in the stable shell.
+Use `wav` for `/tts/synthesize` because it returns browser-playable audio with no client-side decoding work. Use `/tts/stream` for the Voxtral low-latency path: the API requests `stream=true` and `response_format=pcm`, relays Mistral `speech.audio.delta` events, and the stable shell schedules PCM float32 chunks through WebAudio as they arrive. If streaming fails, the shell falls back to `/tts/synthesize`; it still never falls back to browser `speechSynthesis`.
 
 ## Voxtral TTS notes from `voxtral-demo.txt`
 
@@ -114,7 +116,9 @@ The pasted talk transcript describes the current Voxtral TTS shape:
 - True streaming text input, where the TTS model speaks while the LLM is still generating text tokens, is described as future/uncertain architecture work.
 - Open weights are available, but the voice-cloning encoder is not fully open in the talk; hosted voice/reference-audio paths remain provider-specific.
 
-For this project that means the practical v1 path is sentence/utterance chunking: Pi/Codex produces concise text, `/tts/synthesize` speaks that text, and a later streaming route can lower latency without giving the voice model artifact/tool responsibility.
+For this project that means the practical v1 path is sentence/utterance chunking: Pi/Codex produces concise text, `/tts/synthesize` can speak that text as a completed audio response, and `/tts/stream` can lower perceived latency without giving the voice model artifact/tool responsibility.
+
+That streaming route now exists as `/tts/stream`. It still operates on complete utterance text, which matches the transcript: Voxtral emits early audio packets for a supplied text segment, but Pi/Codex remains responsible for deciding what text should be spoken.
 
 ## Sources
 

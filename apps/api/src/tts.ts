@@ -9,6 +9,9 @@ export interface TtsProviderStatus {
   endpoint: string;
   model?: string;
   responseFormat?: string;
+  streaming?: boolean;
+  streamingResponseFormat?: string;
+  pcmSampleRate?: number;
   note?: string;
 }
 
@@ -21,6 +24,16 @@ export interface TtsSynthesisResult {
   upstreamElapsedMs?: string | null;
   model?: string;
   responseFormat?: string;
+}
+
+export interface TtsStreamResult {
+  stream: ReadableStream<Uint8Array>;
+  provider: TtsProvider;
+  endpoint: string;
+  model: string;
+  responseFormat: "pcm";
+  pcmSampleRate: number;
+  elapsedMs: number;
 }
 
 export function ttsProvider(): TtsProvider {
@@ -41,6 +54,9 @@ export function ttsProviderStatus(): TtsProviderStatus {
       endpoint: config.endpoint,
       model: config.model,
       responseFormat: config.responseFormat,
+      streaming: Boolean(config.apiKey) || isLocalEndpoint(config.endpoint),
+      streamingResponseFormat: "pcm",
+      pcmSampleRate: config.pcmSampleRate,
       note: config.apiKey
         ? "Mistral Voxtral TTS API key detected."
         : "Set MISTRAL_API_KEY for hosted Voxtral TTS, or point MISTRAL_TTS_BASE_URL at a local compatible server."
@@ -50,14 +66,28 @@ export function ttsProviderStatus(): TtsProviderStatus {
     provider,
     configured: true,
     endpoint: chatterboxEndpoint(),
+    streaming: false,
     note: "Local Chatterbox Turbo TTS HTTP worker."
   };
+}
+
+export function streamingTtsSupported(): boolean {
+  const status = ttsProviderStatus();
+  return status.provider === "mistral-voxtral" && status.configured && Boolean(status.streaming);
 }
 
 export async function synthesizeSpeech(text: string): Promise<TtsSynthesisResult> {
   const provider = ttsProvider();
   if (provider === "mistral-voxtral") return synthesizeMistralVoxtral(text);
   return synthesizeChatterbox(text);
+}
+
+export async function streamSpeech(text: string): Promise<TtsStreamResult> {
+  const provider = ttsProvider();
+  if (provider !== "mistral-voxtral") {
+    throw new TtsProviderError(provider, 409, "Streaming TTS requires MEETING_TTS_PROVIDER=mistral-voxtral.", 0);
+  }
+  return streamMistralVoxtral(text);
 }
 
 function chatterboxEndpoint(): string {
@@ -159,6 +189,53 @@ async function synthesizeMistralVoxtral(text: string): Promise<TtsSynthesisResul
     elapsedMs,
     model: config.model,
     responseFormat: config.responseFormat
+  };
+}
+
+async function streamMistralVoxtral(text: string): Promise<TtsStreamResult> {
+  const config = mistralTtsConfig();
+  if (!config.apiKey && !isLocalEndpoint(config.endpoint)) {
+    throw new TtsProviderError("mistral-voxtral", 0, "MISTRAL_API_KEY is required for hosted Voxtral TTS streaming.", 0);
+  }
+
+  const startedAt = Date.now();
+  const body: Record<string, unknown> = {
+    model: config.model,
+    input: text,
+    response_format: "pcm",
+    stream: true
+  };
+  if (config.voiceId) body.voice_id = config.voiceId;
+  if (config.refAudio) body.ref_audio = config.refAudio;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream"
+  };
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+
+  const response = await fetch(config.endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body)
+  });
+  const elapsedMs = Date.now() - startedAt;
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new TtsProviderError("mistral-voxtral", response.status, errorBody || `Mistral streaming TTS returned ${response.status}`, elapsedMs);
+  }
+  if (!response.body) {
+    throw new TtsProviderError("mistral-voxtral", 502, "Mistral streaming TTS response did not include a stream body.", elapsedMs);
+  }
+
+  return {
+    stream: response.body,
+    provider: "mistral-voxtral",
+    endpoint: config.endpoint,
+    elapsedMs,
+    model: config.model,
+    responseFormat: "pcm",
+    pcmSampleRate: config.pcmSampleRate
   };
 }
 

@@ -85,6 +85,8 @@
     let lastRealtimeWakeAt = 0;
     let realtimeReconnectTimer = null;
     let realtimeReconnectAttempt = 0;
+    let localTtsProvider = "unknown";
+    let localStreamingTts = false;
     let assistantDraft = "";
     let assistantDraftMessageId = null;
     let assistantDraftFlushTimer = null;
@@ -105,6 +107,7 @@
     let localPushToTalkActive = false;
     let localSpeechAudio = null;
     let localSpeechAudioUrl = null;
+    let localSpeechStreamPlayback = null;
     let localSpeechStartedAt = 0;
     let localSpeechBargeInStartedAt = 0;
     let localSpeechResumeTimer = null;
@@ -604,6 +607,8 @@
     async function loadSpeechStatus() {
       const health = await fetch(`${api}/health`).then((res) => res.json());
       speechProvider = String(health?.speech?.provider || "unknown");
+      localTtsProvider = String(health?.speech?.localTts?.provider || "unknown");
+      localStreamingTts = Boolean(health?.speech?.streamingTts);
       preferLocalVoiceForLocalProvider();
       return health;
     }
@@ -1297,25 +1302,107 @@
       stopLocalSpeechAudio();
       renderStatus("preparing local voice", "speaking");
       try {
-        const response = await fetch(`${api}/tts/synthesize`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text })
-        });
-        if (generation !== localSpeechGeneration) return;
-        if (!response.ok) {
-          const body = await response.text();
-          throw new Error(body || `local TTS returned ${response.status}`);
+        if (localStreamingTts) {
+          try {
+            await playLocalSpeechStream(text, generation);
+            return;
+          } catch (error) {
+            if (generation !== localSpeechGeneration) return;
+            stopLocalSpeechAudio();
+            await postRealtimeTrace("error", "Streaming local TTS failed; falling back to full audio response", { error: error?.message || String(error), provider: localTtsProvider });
+          }
         }
-        const blob = await response.blob();
-        if (generation !== localSpeechGeneration) return;
-        await playLocalSpeechBlob(blob, generation);
+        await synthesizeAndPlayLocalSpeechBlob(text, generation);
       } catch (error) {
         if (generation !== localSpeechGeneration) return;
         await postRealtimeTrace("error", "Local TTS failed; browser speech fallback is disabled", { error: error?.message || String(error) });
         renderStatus("local TTS unavailable; speech skipped", "ready");
         resumeLocalSttAfterSpeech();
       }
+    }
+
+    async function synthesizeAndPlayLocalSpeechBlob(text, generation) {
+      const response = await fetch(`${api}/tts/synthesize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+      if (generation !== localSpeechGeneration) return;
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || `local TTS returned ${response.status}`);
+      }
+      const blob = await response.blob();
+      if (generation !== localSpeechGeneration) return;
+      await playLocalSpeechBlob(blob, generation);
+    }
+
+    async function playLocalSpeechStream(text, generation) {
+      stopLocalSpeechAudio();
+      const controller = new AbortController();
+      const response = await fetch(`${api}/tts/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: controller.signal
+      });
+      if (generation !== localSpeechGeneration) {
+        controller.abort();
+        return;
+      }
+      if (!response.ok || !response.body) {
+        const body = await response.text().catch(() => "");
+        throw new Error(body || `streaming local TTS returned ${response.status}`);
+      }
+
+      const sampleRate = Number(response.headers.get("x-tts-sample-rate") || "24000") || 24000;
+      const playback = createLocalSpeechStreamPlayback(sampleRate);
+      playback.abortController = controller;
+      localSpeechStreamPlayback = playback;
+      renderStatus("local voice streaming", "speaking");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      let audioChunks = 0;
+      try {
+        await playback.context.resume();
+        while (generation === localSpeechGeneration) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+          let separator = pending.indexOf("\n\n");
+          while (separator >= 0) {
+            const block = pending.slice(0, separator);
+            pending = pending.slice(separator + 2);
+            const audioData = speechAudioDataFromSseBlock(block);
+            if (audioData) {
+              schedulePcmFloat32Speech(audioData, sampleRate, playback);
+              audioChunks += 1;
+            }
+            separator = pending.indexOf("\n\n");
+          }
+        }
+        if (pending.trim()) {
+          const audioData = speechAudioDataFromSseBlock(pending);
+          if (audioData) {
+            schedulePcmFloat32Speech(audioData, sampleRate, playback);
+            audioChunks += 1;
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      if (!audioChunks) {
+        if (localSpeechStreamPlayback === playback) localSpeechStreamPlayback = null;
+        playback.stop();
+        throw new Error("streaming local TTS produced no audio chunks");
+      }
+      await waitForStreamingSpeechTail(playback, generation);
+      if (localSpeechStreamPlayback === playback) localSpeechStreamPlayback = null;
+      playback.stop();
+      if (generation === localSpeechGeneration) resumeLocalSttAfterSpeech();
     }
 
     function playLocalSpeechBlob(blob, generation) {
@@ -1344,11 +1431,96 @@
       });
     }
 
+    function createLocalSpeechStreamPlayback(sampleRate) {
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) throw new Error("WebAudio is unavailable in this browser");
+      const context = new AudioContextCtor({ sampleRate });
+      const playback = {
+        context,
+        nextStart: 0,
+        playing: true,
+        sources: new Set(),
+        stop() {
+          playback.playing = false;
+          playback.abortController?.abort();
+          for (const source of playback.sources) {
+            try {
+              source.stop();
+            } catch {}
+          }
+          playback.sources.clear();
+          void context.close().catch(() => undefined);
+        }
+      };
+      playback.nextStart = context.currentTime + 0.035;
+      return playback;
+    }
+
+    function speechAudioDataFromSseBlock(block) {
+      const lines = String(block || "").split("\n").map((line) => line.replace(/\r$/, ""));
+      const dataLines = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart());
+      const rawData = (dataLines.length ? dataLines.join("\n") : lines.join("\n")).trim();
+      if (!rawData || rawData === "[DONE]") return "";
+      try {
+        const parsed = JSON.parse(rawData);
+        const payload = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+        if (payload?.type === "speech.audio.done" || parsed?.event === "speech.audio.done") return "";
+        if (payload?.audio_data && (payload.type === "speech.audio.delta" || parsed?.event === "speech.audio.delta" || !payload.type)) {
+          return String(payload.audio_data);
+        }
+      } catch {}
+      return "";
+    }
+
+    function schedulePcmFloat32Speech(base64Audio, sampleRate, playback) {
+      const samples = pcmFloat32FromBase64(base64Audio);
+      if (!samples.length || !playback.playing) return;
+      const audioBuffer = playback.context.createBuffer(1, samples.length, sampleRate);
+      audioBuffer.copyToChannel(samples, 0);
+      const source = playback.context.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(playback.context.destination);
+      source.onended = () => playback.sources.delete(source);
+      playback.sources.add(source);
+      const startAt = Math.max(playback.nextStart, playback.context.currentTime + 0.015);
+      source.start(startAt);
+      playback.nextStart = startAt + audioBuffer.duration;
+    }
+
+    function pcmFloat32FromBase64(base64Audio) {
+      const binary = window.atob(base64Audio);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      const sampleCount = Math.floor(bytes.byteLength / 4);
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const samples = new Float32Array(sampleCount);
+      for (let index = 0; index < sampleCount; index += 1) {
+        samples[index] = view.getFloat32(index * 4, true);
+      }
+      return samples;
+    }
+
+    async function waitForStreamingSpeechTail(playback, generation) {
+      while (generation === localSpeechGeneration && playback.playing && playback.context.currentTime < playback.nextStart + 0.08) {
+        await waitMs(35);
+      }
+    }
+
+    function waitMs(ms) {
+      return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
     function localSpeechAudioPlaying() {
-      return Boolean(localSpeechAudio && !localSpeechAudio.paused && !localSpeechAudio.ended);
+      return Boolean(localSpeechStreamPlayback?.playing || (localSpeechAudio && !localSpeechAudio.paused && !localSpeechAudio.ended));
     }
 
     function stopLocalSpeechAudio() {
+      if (localSpeechStreamPlayback) {
+        localSpeechStreamPlayback.stop();
+        localSpeechStreamPlayback = null;
+      }
       if (localSpeechAudio) {
         localSpeechAudio.pause();
         localSpeechAudio.removeAttribute("src");
@@ -1703,6 +1875,8 @@
         voiceMode,
         localSttActive,
         speechProvider,
+        localTtsProvider,
+        localStreamingTts,
         reconnectAttempt: realtimeReconnectAttempt
       }, window.location.origin);
     }

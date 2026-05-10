@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ttsProviderStatus, type TtsProviderStatus } from "./tts.js";
+import { streamingTtsSupported, ttsProviderStatus, type TtsProviderStatus } from "./tts.js";
 
 export interface SpeechProviderStatus {
   provider: "local-whisper" | "deepgram" | "voxtral-http" | "moshi-http";
@@ -22,7 +22,7 @@ export function speechProviderStatus(): SpeechProviderStatus {
     provider,
     configured: speechProviderConfigured(provider),
     streamingStt: streamingSttSupported(provider),
-    streamingTts: false,
+    streamingTts: streamingTtsSupported(),
     localTts: localTtsStatus(),
     settingsPath: settings.path,
     listenModel: localListenModel(provider) || settings.listenModel,
