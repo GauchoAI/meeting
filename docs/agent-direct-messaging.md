@@ -33,6 +33,8 @@ The Pi extension must pass these direct coordination utterances through without 
 
 Direct voice-agent requests should tell Pi to reply with `meeting_message_voice_agent`. That keeps the back-and-forth in the voice-agent channel instead of pushing a canvas/status update that the Realtime agent may ignore.
 
+For autonomous back-and-forth, each side should send one concise turn at a time. Pi should use `intent=question` or `intent=speak` only when it expects another voice-agent turn; otherwise it should use `intent=inform`. The Realtime side should answer a `voice-message:*` event by calling `message_pi_agent` at most once, or by returning `NO_ACTION` when the exchange is complete.
+
 ## Pi-agent → voice agent
 
 Use `meeting_message_voice_agent` instead of `meeting_post_markdown` when the goal is to ask the voice agent to raise its hand or speak a short summary. This emits a status-surface coordination message with a `voice-message:*` document id so the voice agent can observe it, but it does not update the canvas.

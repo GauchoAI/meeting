@@ -1674,7 +1674,7 @@ function directMessagePrompt(input: { intent: string; message: string }): string
     "Task: Reply to the Realtime voice agent.",
     `Context: Voice agent ${input.intent}: ${input.message}`,
     "Constraints: Reply quickly and concisely. Do not update or steal the canvas. Do not create or edit artifacts unless explicitly requested.",
-    "Output: Use meeting_message_voice_agent so the Realtime voice agent receives the reply directly."
+    "Output: Use meeting_message_voice_agent so the Realtime voice agent receives the reply directly. Use intent=question or intent=speak only if you need another voice-agent turn; otherwise use intent=inform."
   ].join("\n");
 }
 
@@ -1685,6 +1685,7 @@ function directMessageForTerminal(input: { intent: string; message: string }): s
     `${label}:`,
     `${tag}${input.message}`,
     "Reply now with meeting_message_voice_agent. Keep it to one or two sentences.",
+    "Use intent=question or intent=speak only if you need another voice-agent turn; otherwise use intent=inform.",
     "Do not use meeting_post_markdown or artifact tools unless the message explicitly asks for canvas/artifact work."
   ].join("\n");
 }

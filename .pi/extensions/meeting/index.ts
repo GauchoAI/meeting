@@ -417,7 +417,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "meeting_message_voice_agent",
 		label: "Message Voice Agent",
-		description: "Send a concise coordination reply to the Realtime voice agent without updating the canvas. Use this for direct voice-agent questions or requests.",
+		description: "Send a concise coordination reply to the Realtime voice agent without updating the canvas. Use this for direct voice-agent questions or requests. Use intent=question/speak only when you expect another voice-agent turn; otherwise use intent=inform.",
 		parameters: Type.Object({
 			message: Type.String({ description: "One or two sentence reply for the Realtime voice agent." }),
 			intent: Type.Optional(Type.String({ description: "inform, raise-hand, speak, or question. Defaults to inform." })),

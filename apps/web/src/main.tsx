@@ -939,6 +939,24 @@ function App() {
     const updateText = formatPiAgentUpdateForRealtime(event);
     sendRealtimeTextMessage(updateText);
     await postRealtimeTrace("agent", "Pi-agent update injected into Realtime agent", { eventId: event.id, type: event.type, muted: realtimeMutedRef.current });
+    if (isVoiceAgentDirectMessage(event)) {
+      beginRealtimeResponse("silent");
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: ["text"],
+          instructions: [
+            "This is a direct Pi/Codex message addressed to you, the Realtime voice agent.",
+            "Treat it as one agent-to-agent dialogue turn, not as a host-facing announcement.",
+            "If the message expects a reply or is part of an active back-and-forth protocol, call message_pi_agent exactly once with the next concise turn.",
+            "If the exchange is complete, if the message says stop, or if no reply is needed, respond exactly NO_ACTION.",
+            "Do not speak audio for this internal turn. Do not use canvas, artifact, or markdown tools.",
+            "For counting or turn-taking tests, send only the next required token/number and preserve the stop condition."
+          ].join("\n")
+        }
+      });
+      return;
+    }
     if (!realtimeMutedRef.current) {
       beginRealtimeResponse("speak");
       sendRealtimeEvent({
@@ -2666,7 +2684,24 @@ function isPiAgentReviewEvent(event: MeetingEvent): event is AgentMessageEvent |
   return event.surface === "canvas" || event.stream === "implementation" || Boolean(event.documentId);
 }
 
+function isVoiceAgentDirectMessage(event: AgentMessageEvent | AgentHandRaiseEvent): boolean {
+  return event.type === "agent.message" && Boolean(event.documentId?.startsWith("voice-message:"));
+}
+
 function formatPiAgentUpdateForRealtime(event: AgentMessageEvent | AgentHandRaiseEvent): string {
+  if (event.type === "agent.message" && isVoiceAgentDirectMessage(event)) {
+    return [
+      "Direct Pi/Codex message for the Realtime voice agent.",
+      "This is an agent-to-agent dialogue turn. Continue with message_pi_agent only if a reply is needed.",
+      "Do not speak to the host unless explicitly asked; keep internal replies in the Pi coordination channel.",
+      "",
+      "kind: voice_agent_message",
+      `documentId: ${event.documentId}`,
+      "",
+      clipText(event.text, 3000)
+    ].join("\n");
+  }
+
   if (event.type === "agent.hand_raise") {
     return [
       "Task: Review Pi/Codex hand raise.",

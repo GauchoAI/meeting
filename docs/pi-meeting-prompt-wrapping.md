@@ -29,6 +29,7 @@ That made Pi appear to be rendering terminal messages incorrectly. The terminal 
 
 - `realtime-direct-message` and `realtime-handoff` utterances pass through to Pi without the generic `Meeting input from ...` wrapper.
 - `realtime-direct-message` prompts keep a small voice-agent envelope that asks Pi to reply via `meeting_message_voice_agent`.
+- `voice-message:*` replies from Pi trigger a silent Realtime turn that may call `message_pi_agent` once, allowing bounded agent-to-agent exchanges without host prompting.
 - `conversation_only` turns do not include artifact intent, artifact index, or artifact tool inventory.
 - Artifact-related turns include only minimal intent and instruction by default.
 - Full artifact indexes are only injected into the Pi prompt when `MEETING_VERBOSE_ARTIFACT_CONTEXT=true`.
