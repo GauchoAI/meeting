@@ -102,6 +102,8 @@
     let localSttDiscardCurrentChunk = false;
     let localSttSuppressUploadsUntil = 0;
     let localSttPausedForSpeech = false;
+    let localSpeechStartedAt = 0;
+    let localSpeechBargeInStartedAt = 0;
     let localSpeechResumeTimer = null;
     let localSpeechGeneration = 0;
     let directVoiceTurnActive = false;
@@ -1031,6 +1033,22 @@
         return;
       }
       const now = Date.now();
+      if (localSttPausedForSpeech) {
+        const level = currentLocalMicLevel();
+        const canInterrupt = now - localSpeechStartedAt >= localSpeechBargeInGraceMs();
+        if (canInterrupt && window.speechSynthesis?.speaking && level >= localBargeInThreshold()) {
+          if (!localSpeechBargeInStartedAt) localSpeechBargeInStartedAt = now;
+          if (now - localSpeechBargeInStartedAt >= localBargeInHoldMs()) {
+            interruptLocalSpeechForBargeIn(level);
+          }
+        } else {
+          localSpeechBargeInStartedAt = 0;
+        }
+        localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, now + 450);
+        if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
+        scheduleLocalVadTick();
+        return;
+      }
       if (now < localSttSuppressUploadsUntil) {
         if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
         scheduleLocalVadTick();
@@ -1129,6 +1147,18 @@
       return 0.018;
     }
 
+    function localBargeInThreshold() {
+      return Math.max(0.045, localVoiceThreshold() * 2.5);
+    }
+
+    function localBargeInGraceMs() {
+      return 700;
+    }
+
+    function localBargeInHoldMs() {
+      return 240;
+    }
+
     function localSpeechSilenceMs() {
       return 2400;
     }
@@ -1197,9 +1227,11 @@
         localSpeechResumeTimer = null;
       }
       localSttPausedForSpeech = true;
-      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 1800);
-      if (localSttActive) stopLocalSttCapture({ suppressUploads: true, suppressMs: 2200 });
-      renderStatus("local voice speaking; mic paused", "speaking");
+      localSpeechStartedAt = Date.now();
+      localSpeechBargeInStartedAt = 0;
+      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 900);
+      if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
+      renderStatus("local voice speaking; listening for interruption", "speaking");
       publishShellState();
     }
 
@@ -1210,8 +1242,23 @@
         localSpeechResumeTimer = null;
         if (!localSttPausedForSpeech) return;
         localSttPausedForSpeech = false;
+        localSpeechStartedAt = 0;
+        localSpeechBargeInStartedAt = 0;
         if (joined && localStream && usesLocalStt()) startLocalSttCapture(localStream);
       }, 700);
+    }
+
+    function interruptLocalSpeechForBargeIn(level) {
+      localSpeechGeneration += 1;
+      localSttPausedForSpeech = false;
+      localSpeechStartedAt = 0;
+      localSpeechBargeInStartedAt = 0;
+      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 220);
+      window.speechSynthesis?.cancel();
+      if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
+      renderStatus("local voice interrupted; listening", "ready");
+      publishShellState();
+      void postRealtimeTrace("agent", "Local voice speech interrupted by mic activity", { level });
     }
 
     async function notifyRealtimeOfPiAgentUpdate(event) {
