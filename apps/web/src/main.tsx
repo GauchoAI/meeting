@@ -163,14 +163,12 @@ function App() {
 
   useEffect(() => {
     if (realtimeState !== "connected") return;
-    const latestPiAgentEvent = events.find((event) =>
-      (event.type === "agent.message" || event.type === "agent.hand_raise") && event.agentId === piAgentId
-    );
+    const latestPiAgentEvent = events.find(isPiAgentReviewEvent);
     if (!latestPiAgentEvent || latestPiAgentEvent.id === lastPiAgentNoticeIdRef.current) return;
     lastPiAgentNoticeIdRef.current = latestPiAgentEvent.id;
     const createdAt = Date.parse(latestPiAgentEvent.createdAt);
     if (Number.isFinite(createdAt) && Date.now() - createdAt > 45_000) return;
-    void requestPiAgentResultReview(latestPiAgentEvent);
+    void notifyRealtimeOfPiAgentUpdate(latestPiAgentEvent);
   }, [events, realtimeState]);
 
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
@@ -266,7 +264,7 @@ function App() {
       channel.addEventListener("open", () => {
         setRealtimeState("connected");
         configureRealtimeSession();
-        requestBootstrapContextSync();
+        void requestBootstrapContextSync();
         void postMeetingEvent({
           id: newEventId("msg"),
           type: "agent.message",
@@ -365,7 +363,12 @@ function App() {
     });
   }
 
-  function requestBootstrapContextSync() {
+  async function requestBootstrapContextSync() {
+    const context = await readRealtimeMeetingContext().catch(() => undefined);
+    if (context) {
+      sendRealtimeTextMessage(summarizeMeetingContextForRealtime(context, "reconnect"));
+      await postRealtimeTrace("agent", "Resume context injected into Realtime agent", { source: "read_meeting_context" });
+    }
     beginRealtimeResponse("silent");
     sendRealtimeEvent({
       type: "response.create",
@@ -373,7 +376,9 @@ function App() {
         output_modalities: ["text"],
         instructions: [
           "Bootstrap silently.",
-          "Call read_meeting_context immediately and internalize the current canvas, transcript, tasks, and implementation queue.",
+          context
+            ? "Internalize the resume context message that was just injected into the conversation."
+            : "Call read_meeting_context immediately and internalize the current canvas, transcript, tasks, and implementation queue.",
           "Do not explore the repo to learn the current project status.",
           "Do not speak audio.",
           "If there is nothing urgent after syncing, respond with exactly NO_ACTION."
@@ -495,6 +500,27 @@ function App() {
     const channel = realtimeChannelRef.current;
     if (!channel || channel.readyState !== "open") return;
     channel.send(JSON.stringify(event));
+  }
+
+  function sendRealtimeTextMessage(text: string) {
+    sendRealtimeEvent({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text }]
+      }
+    });
+  }
+
+  async function readRealtimeMeetingContext(): Promise<unknown> {
+    const response = await fetch(`${api}/realtime/tool`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "read_meeting_context", arguments: {} })
+    }).then((res) => res.json() as Promise<{ ok?: boolean; output?: unknown; error?: string }>);
+    if (!response.ok) throw new Error(response.error || "read_meeting_context failed");
+    return response.output;
   }
 
   function baseRealtimeMode(): RealtimeResponseMode {
@@ -693,6 +719,8 @@ function App() {
           "If you need to understand the current plan, notes, or on-screen state, call read_meeting_context first.",
           "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
           "If durable artifact work is needed, create a visible implementation task if helpful, then call run_codex_task with your concise handoff for pi-agent.",
+          "Be eager to use run_codex_task when the conversation asks for diagrams, architecture, project plans, documentation, code changes, repo improvements, or durable artifacts.",
+          "Do not wait for the host to say the exact word Codex if the work clearly belongs to pi-agent.",
           "When pi-agent has published a result, read meeting context and raise your hand with requestedMode=show or requestedMode=review. Codex/pi-agent results should be shown as text, not spoken audio.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
           "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
@@ -714,16 +742,34 @@ function App() {
     await postRealtimeTrace("agent", "Silent analysis requested", { trigger });
   }
 
-  async function requestPiAgentResultReview(event: MeetingEvent) {
+  async function notifyRealtimeOfPiAgentUpdate(event: AgentMessageEvent | AgentHandRaiseEvent) {
+    const updateText = formatPiAgentUpdateForRealtime(event);
+    sendRealtimeTextMessage(updateText);
+    await postRealtimeTrace("agent", "Pi-agent update injected into Realtime agent", { eventId: event.id, type: event.type, muted: realtimeMutedRef.current });
+    if (!realtimeMutedRef.current) {
+      beginRealtimeResponse("speak");
+      sendRealtimeEvent({
+        type: "response.create",
+        response: {
+          output_modalities: ["audio"],
+          instructions: [
+            "A pi-agent/Codex update was just injected into your conversation context.",
+            "Speak one concise sentence only if the update is useful for the host right now.",
+            "Mention that Codex/pi-agent produced or updated the UI/artifact if that is what happened.",
+            "Do not read long content aloud. Do not create durable artifacts."
+          ].join("\n")
+        }
+      });
+      return;
+    }
     beginRealtimeResponse("silent");
     sendRealtimeEvent({
       type: "response.create",
       response: {
         output_modalities: ["text"],
         instructions: [
-          "A pi-agent/Codex result just arrived in the meeting stream.",
+          "A pi-agent/Codex update was just injected into your conversation context.",
           "Do not speak audio now.",
-          "Call read_meeting_context and inspect piAgent.messages and piAgent.raisedHands.",
           "If the result is useful to show or explain, call raise_meeting_hand with requestedMode=show or requestedMode=review and a concise reason.",
           "Never use requestedMode=speak for Codex/pi-agent output; Codex speaks through text in the UI.",
           "If there is nothing to add, respond with exactly NO_ACTION.",
@@ -731,7 +777,6 @@ function App() {
         ].join("\n")
       }
     });
-    await postRealtimeTrace("agent", "Pi-agent result review requested", { eventId: event.id, type: event.type });
   }
 
   function sendFollowupResponse() {
@@ -2377,6 +2422,115 @@ function dedupeTasks(events: AgentTaskEvent[]): AgentTaskEvent[] {
 
 function implementationToolName(name: string): boolean {
   return name === "run_codex_task" || name === "publish_task_result";
+}
+
+function isPiAgentReviewEvent(event: MeetingEvent): event is AgentMessageEvent | AgentHandRaiseEvent {
+  if (!("agentId" in event) || event.agentId !== piAgentId) return false;
+  if (event.type === "agent.hand_raise") return true;
+  if (event.type !== "agent.message" || event.lifecycle !== "final") return false;
+  const text = event.text.trim();
+  if (!text || /^(ok|okay|noted|thanks|you.?re welcome|i.?m here)[.!]*$/i.test(text)) return false;
+  return event.surface === "canvas" || event.stream === "implementation" || Boolean(event.documentId) || text.length >= 40;
+}
+
+function formatPiAgentUpdateForRealtime(event: AgentMessageEvent | AgentHandRaiseEvent): string {
+  const lines = [
+    "Direct Pi/Codex update for the Realtime voice agent.",
+    "Treat this as first-class current meeting context. The UI/canvas may already show the artifact or response.",
+    "If unmuted, you may briefly tell the host what changed. If muted, raise a hand for show/review only when useful.",
+    ""
+  ];
+  if (event.type === "agent.hand_raise") {
+    lines.push(`kind: hand_raise`, `requestedMode: ${event.requestedMode}`, `reason: ${event.reason}`);
+  } else {
+    lines.push(
+      "kind: message",
+      `surface: ${event.surface || "status"}`,
+      `stream: ${event.stream || "conversation"}`,
+      event.documentId ? `documentId: ${event.documentId}` : "",
+      "",
+      clipText(event.text, 3000)
+    );
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
+function summarizeMeetingContextForRealtime(context: unknown, source: "reconnect" | "manual"): string {
+  const root = asRecordValue(context);
+  const currentCanvas = asRecordValue(root.currentCanvas);
+  const tasks = arrayValue(root.tasks).map(asRecordValue).slice(0, 8);
+  const implementationQueue = asRecordValue(root.implementationQueue);
+  const piAgent = asRecordValue(root.piAgent);
+  const piMessages = arrayValue(piAgent.messages).map(asRecordValue).slice(-4);
+  const piHands = arrayValue(piAgent.raisedHands).map(asRecordValue).slice(-4);
+  const transcript = arrayValue(root.transcript).map(asRecordValue).slice(-8);
+
+  const lines = [
+    `Direct resume context for the Realtime voice agent (${source}).`,
+    "Continue from this state; do not treat reconnect as a new meeting.",
+    "The current canvas and Pi/Codex outputs are first-class context.",
+    ""
+  ];
+
+  const canvasText = stringValue(currentCanvas.text);
+  if (canvasText) {
+    lines.push(
+      "Current canvas:",
+      `documentId: ${stringValue(currentCanvas.documentId) || "current"}`,
+      clipText(canvasText.replace(/\s+/g, " "), 900),
+      ""
+    );
+  }
+
+  if (tasks.length) {
+    lines.push("Current tasks:");
+    for (const task of tasks) {
+      lines.push(`- ${stringValue(task.status) || "unknown"}: ${stringValue(task.title) || "untitled"}${stringValue(task.taskClass) ? ` [${stringValue(task.taskClass)}]` : ""}`);
+    }
+    lines.push("");
+  }
+
+  const queued = arrayValue(implementationQueue.queued).length;
+  const working = arrayValue(implementationQueue.working).length;
+  const done = arrayValue(implementationQueue.done).length;
+  lines.push(`Implementation queue: queued=${queued}, working=${working}, done=${done}`, "");
+
+  if (piMessages.length || piHands.length) {
+    lines.push("Recent Pi/Codex outputs:");
+    for (const message of piMessages) {
+      lines.push(`- ${clipText(stringValue(message.text).replace(/\s+/g, " "), 360)}`);
+    }
+    for (const hand of piHands) {
+      lines.push(`- hand ${stringValue(hand.requestedMode) || "review"}: ${clipText(stringValue(hand.reason).replace(/\s+/g, " "), 260)}`);
+    }
+    lines.push("");
+  }
+
+  if (transcript.length) {
+    lines.push("Recent transcript:");
+    for (const turn of transcript) {
+      lines.push(`- ${stringValue(turn.speakerLabel) || "speaker"}: ${clipText(stringValue(turn.text).replace(/\s+/g, " "), 220)}`);
+    }
+  }
+
+  return clipText(lines.filter(Boolean).join("\n"), 6000);
+}
+
+function asRecordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function clipText(text: string, maxLength: number): string {
+  const normalized = text.trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
 }
 
 function isRealtimeTextDelta(type: string): boolean {

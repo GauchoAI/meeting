@@ -87,6 +87,8 @@ Behavior:
 - the Realtime agent connects as an **audio responder** by default;
 - muting the Realtime agent keeps it listening silently so it can update notes,
   declare tasks, and raise a hand before speaking;
+- reconnect injects a concise resume context message into the Realtime session
+  so it continues from the current canvas, transcript, tasks, and Pi outputs;
 - room speech is transcribed and persisted into `.meeting/events.jsonl`,
   `.meeting/session.md`, and `.meeting/pipeline/implementation/inbox/conversation.jsonl`;
 - the agent can silently react by raising a hand, posting Markdown, creating
@@ -96,8 +98,9 @@ Behavior:
   sends concise JSONL handoffs with `run_codex_task`;
 - `pi-agent` receives those handoffs through the existing meeting extension,
   invokes local Codex, and answers back through Meeting tools/artifacts;
-- Realtime watches `pi-agent` messages and raised hands, then can raise its own
-  hand for text review;
+- Realtime watches `pi-agent` messages and raised hands, injects them directly
+  into the voice-agent conversation, then can speak when unmuted or raise a
+  hand for text review when muted;
 - unmuted human speech uses audio for Realtime conversation, while
   Codex/pi-agent results use UI text or canvas artifacts;
 - if muted, the host can explicitly grant the floor with **Let agent speak**;
