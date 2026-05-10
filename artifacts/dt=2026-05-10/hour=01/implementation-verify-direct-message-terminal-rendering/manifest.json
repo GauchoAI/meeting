@@ -1,0 +1,10 @@
+{
+  "kind": "implementation",
+  "slug": "verify-direct-message-terminal-rendering",
+  "title": "Direct message from Realtime agent",
+  "createdAt": "2026-05-10T04:28:50.114Z",
+  "updatedAt": "2026-05-10T04:28:50.114Z",
+  "artifact": "artifact.smart.md",
+  "tags": [],
+  "summary": "Pi agent implementation output for Direct message from Realtime agent"
+}
