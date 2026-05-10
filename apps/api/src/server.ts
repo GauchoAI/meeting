@@ -528,7 +528,7 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       {
         type: "function",
         name: "message_pi_agent",
-        description: "Send a concise direct coordination message to pi-agent without creating a task, artifact, or canvas update. Use for lightweight questions, acknowledgments, or requests to coordinate with the voice agent.",
+        description: "Send a concise direct coordination message to pi-agent without creating an artifact or canvas update. Use for lightweight questions, acknowledgments, or requests; pi-agent should reply through meeting_message_voice_agent.",
         parameters: {
           type: "object",
           properties: {
@@ -878,7 +878,7 @@ function buildRealtimeInstructions(): string {
     "run_shell_command is for quick inspection and lightweight terminal tasks.",
     "Maintain a stable living canvas document with post_meeting_markdown using documentId=realtime-live-canvas.",
     "For assistant results that need both canvas visibility and Realtime/status delivery, prefer deliver_assistant_output: canvas uses structured Markdown, status uses exactly Status/Confidence/Next.",
-    "Use message_pi_agent for lightweight direct coordination with pi-agent; it must not create artifacts or canvas updates.",
+    "Use message_pi_agent for lightweight direct coordination with pi-agent; it must not create artifacts or canvas updates. Pi-agent should answer these through meeting_message_voice_agent.",
     "For completed or milestone work, use publish_task_result to put a polished result on the main canvas before or while raising your hand.",
     "read_rendered_html and write_rendered_html are specifically for the isolated browser preview file and are not the main path for improving the app.",
     "You have tool access to inspect the local workspace, queue Codex work through pi-agent, and write a complete index.html preview that renders on screen.",
@@ -1671,16 +1671,22 @@ function directMessageTitle(intent: string): string {
 
 function directMessagePrompt(input: { intent: string; message: string }): string {
   return [
-    "Task: Respond to a direct Realtime voice-agent coordination message.",
-    `Context: Intent=${input.intent}. Message: ${input.message}`,
-    "Constraints: Keep the response concise. Do not update or steal the canvas. If the message only needs acknowledgment, reply with a short status/hand-ready note.",
-    "Output: Brief pi-agent response visible in the implementation stream, with no canvas update."
+    "Task: Reply to the Realtime voice agent.",
+    `Context: Voice agent ${input.intent}: ${input.message}`,
+    "Constraints: Reply quickly and concisely. Do not update or steal the canvas. Do not create or edit artifacts unless explicitly requested.",
+    "Output: Use meeting_message_voice_agent so the Realtime voice agent receives the reply directly."
   ].join("\n");
 }
 
 function directMessageForTerminal(input: { intent: string; message: string }): string {
   const tag = input.intent && input.intent !== "inform" ? `[${input.intent}] ` : "";
-  return `${tag}${input.message}`;
+  const label = input.intent === "question" ? "Voice agent question" : input.intent === "request" ? "Voice agent request" : "Voice agent message";
+  return [
+    `${label}:`,
+    `${tag}${input.message}`,
+    "Reply now with meeting_message_voice_agent. Keep it to one or two sentences.",
+    "Do not use meeting_post_markdown or artifact tools unless the message explicitly asks for canvas/artifact work."
+  ].join("\n");
 }
 
 function buildPiHandoffJsonl(input: { taskKey: string; title: string; prompt: string; hints: string[]; cwd: string; sourceDocumentId?: string; taskClass: string }): string {

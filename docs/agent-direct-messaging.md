@@ -15,7 +15,7 @@ Full routing metadata, JSONL, artifact indexes, and tool inventories should rema
 
 ## Voice agent → pi-agent
 
-Use the Realtime tool `message_pi_agent` for lightweight coordination that should not create a task, durable artifact, or canvas update.
+Use the Realtime tool `message_pi_agent` for lightweight coordination that should not create a durable artifact or canvas update. It may create a lightweight conversation task so the exchange has lifecycle visibility.
 
 Example:
 
@@ -27,9 +27,11 @@ Example:
 }
 ```
 
-The message is appended to `.meeting/pipeline/implementation/inbox/pi-direct-messages.jsonl`, logged by the pi-agent worker with a distinct tag such as `[pi-agent:direct:inform]`, mirrored concisely to the same implementation handoff/terminal stream used by `run_codex_task` as just the message text plus an optional `[intent]` tag, marked processed in `.meeting/pipeline/implementation/inbox/pi-direct-messages.seen.jsonl`, and queued as a lightweight `conversation` implementation task so it is injected into pi-agent/Codex just like `run_codex_task`.
+The message is appended to `.meeting/pipeline/implementation/inbox/pi-direct-messages.jsonl`, logged by the pi-agent worker with a distinct tag such as `[pi-agent:direct:inform]`, mirrored concisely to the same implementation handoff/terminal stream used by `run_codex_task` as a short voice-agent request, marked processed in `.meeting/pipeline/implementation/inbox/pi-direct-messages.seen.jsonl`, and queued as a lightweight `conversation` implementation task so it is injected into pi-agent/Codex just like `run_codex_task`.
 
 The Pi extension must pass these direct coordination utterances through without adding the generic Meeting prompt wrapper or artifact index context. See `docs/pi-meeting-prompt-wrapping.md`.
+
+Direct voice-agent requests should tell Pi to reply with `meeting_message_voice_agent`. That keeps the back-and-forth in the voice-agent channel instead of pushing a canvas/status update that the Realtime agent may ignore.
 
 ## Pi-agent → voice agent
 

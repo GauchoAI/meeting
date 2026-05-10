@@ -414,8 +414,50 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerTool({
+		name: "meeting_message_voice_agent",
+		label: "Message Voice Agent",
+		description: "Send a concise coordination reply to the Realtime voice agent without updating the canvas. Use this for direct voice-agent questions or requests.",
+		parameters: Type.Object({
+			message: Type.String({ description: "One or two sentence reply for the Realtime voice agent." }),
+			intent: Type.Optional(Type.String({ description: "inform, raise-hand, speak, or question. Defaults to inform." })),
+			when: Type.Optional(Type.String({ description: "Optional timing note for the voice agent." })),
+		}),
+		async execute(_toolCallId, params) {
+			const message = typeof params.message === "string" ? params.message.trim() : "";
+			if (!message) throw new Error("message is required");
+			const intent = voiceAgentIntent(params.intent);
+			const when = typeof params.when === "string" && params.when.trim() ? params.when.trim() : undefined;
+			await postMeetingEvent({
+				id: newEventId("msg"),
+				type: "agent.message",
+				stream: "conversation",
+				meetingId,
+				createdAt: nowIso(),
+				agentId,
+				format: "plain",
+				surface: "status",
+				lifecycle: "final",
+				documentId: `voice-message:${newEventId("voice")}`,
+				text: [
+					"For voice agent:",
+					`Intent: ${intent}`,
+					`Message: ${message}`,
+					when ? `When: ${when}` : "",
+				].filter(Boolean).join("\n"),
+			});
+			markVoiceToolSatisfied();
+			return { content: [{ type: "text" as const, text: "Sent voice-agent message without updating the canvas." }], details: { intent } };
+		},
+	});
+
 	function markCanvasToolSatisfied() {
 		canvasToolSatisfiedTurn = true;
+		pendingMeetingResponses = 0;
+		currentMeetingMessageId = undefined;
+	}
+
+	function markVoiceToolSatisfied() {
 		pendingMeetingResponses = 0;
 		currentMeetingMessageId = undefined;
 	}
@@ -716,6 +758,10 @@ function isRealtimeHandoff(event: UtteranceFinalEvent): boolean {
 
 function isRealtimeDirectMessage(event: UtteranceFinalEvent): boolean {
 	return event.speakerId === "realtime-direct-message";
+}
+
+function voiceAgentIntent(value: unknown): "inform" | "raise-hand" | "speak" | "question" {
+	return value === "raise-hand" || value === "speak" || value === "question" ? value : "inform";
 }
 
 function isIgnorableTranscript(text: string): boolean {

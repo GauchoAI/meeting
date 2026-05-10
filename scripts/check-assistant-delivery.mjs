@@ -23,8 +23,9 @@ const checks = [
   [web.includes('Task: Review latest Pi/Codex output.') && web.includes('status-only updates should not replace it') && !web.includes('Context: surface='), "Realtime Pi updates use preferred message format without routing metadata"],
   [api.includes('name: "message_pi_agent"') && api.includes('pi-direct-messages.jsonl') && api.includes('piDirectMessagesSeenPath'), "Realtime exposes direct voice-agent to pi-agent messaging without canvas output"],
   [api.includes('directMessagePrompt') && api.includes('taskClass: "conversation"') && api.includes('delegatedTo: "pi-agent"'), "Direct voice-agent messages are injected into pi-agent like Codex tasks"],
-  [api.includes('speakerId: "realtime-direct-message"') && api.includes('directMessageForTerminal') && api.includes('return `${tag}${input.message}`') && !api.includes('Task: Respond to Realtime coordination message'), "Direct voice-agent messages are mirrored concisely to the pi terminal handoff stream"],
+  [api.includes('speakerId: "realtime-direct-message"') && api.includes('directMessageForTerminal') && api.includes('Voice agent request') && api.includes('Reply now with meeting_message_voice_agent') && !api.includes('Task: Respond to Realtime coordination message'), "Direct voice-agent messages are mirrored as concise reply-oriented pi prompts"],
   [piMeeting.includes('isRealtimeDirectMessage') && piMeeting.includes('passthrough: isRealtimeInjectedMessage') && piMeeting.includes('? text'), "Pi extension passes Realtime direct/handoff messages through without re-wrapping"],
+  [piMeeting.includes('name: "meeting_message_voice_agent"') && piMeeting.includes('voice-message:${newEventId("voice")}') && piMeeting.includes('markVoiceToolSatisfied'), "Pi extension exposes direct voice-agent reply tool"],
   [piMeeting.includes('intent.decision === "conversation_only"') && piMeeting.includes('MEETING_VERBOSE_ARTIFACT_CONTEXT') && piMeeting.includes('artifactIndex:'), "Pi extension hides artifact indexes by default and keeps them behind verbose prompt context"],
   [api.includes('type: "agent.task"') && api.includes('status: "queued"') && api.includes('implementationPrompt: prompt.trim()'), "run_codex_task enqueues an implementation task directly"],
   [worker.includes('handlePiDirectMessage') && worker.includes('[pi-agent:direct:') && worker.includes('piDirectMessagesSeenPath'), "Pi-agent worker tails and visibly logs direct messages"],
@@ -32,7 +33,7 @@ const checks = [
   [mcp.includes('meeting_message_voice_agent') && mcp.includes('voice-message:'), "Pi-agent can message voice agent without canvas updates"],
   [api.includes('shouldPublishTaskCanvas') && worker.includes('shouldPublishTaskCanvas'), "Code-change implementation results avoid stealing the canvas"],
   [docs.includes('deliver_assistant_output') && docs.includes('Status: <one-line current state>') && docs.includes('status-only delivery replace'), "Delivery workflow docs describe command and template"],
-  [directDocs.includes('Task: <actionable request>') && directDocs.includes('message_pi_agent') && directDocs.includes('meeting_message_voice_agent'), "Direct messaging docs describe low-noise handoffs"],
+  [directDocs.includes('Task: <actionable request>') && directDocs.includes('message_pi_agent') && directDocs.includes('meeting_message_voice_agent') && directDocs.includes('back-and-forth in the voice-agent channel'), "Direct messaging docs describe low-noise handoffs"],
   [promptDocs.includes('Root Cause') && promptDocs.includes('injectMeetingPrompt') && promptDocs.includes('MEETING_VERBOSE_ARTIFACT_CONTEXT'), "Prompt wrapper docs capture the coordination metadata regression and fix"]
 ];
 
