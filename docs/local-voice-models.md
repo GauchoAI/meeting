@@ -120,6 +120,8 @@ For this project that means the practical v1 path is sentence/utterance chunking
 
 That streaming route now exists as `/tts/stream`. It still operates on complete utterance text, which matches the transcript: Voxtral emits early audio packets for a supplied text segment, but Pi/Codex remains responsible for deciding what text should be spoken.
 
+The stable shell also watches Pi/Codex `agent.message` draft updates. For status-surface drafts, it extracts complete speech-sized sentences and queues them immediately, so local voice can begin speaking while Codex is still writing the rest of the answer. Canvas/artifact markdown is not read aloud as a stream; final canvas updates remain summarized instead of narrating raw diagrams or code blocks.
+
 ## Sources
 
 - Voxtral Realtime model card: https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602
