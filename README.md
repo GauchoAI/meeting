@@ -85,6 +85,8 @@ in the existing layout.
 Behavior:
 
 - the Realtime agent connects as an **audio responder** by default;
+- joining a meeting automatically starts the Realtime voice agent and it
+  reconnects after transient WebRTC/data-channel failures;
 - muting the Realtime agent keeps it listening silently so it can update notes,
   declare tasks, and raise a hand before speaking;
 - reconnect injects a concise resume context message into the Realtime session

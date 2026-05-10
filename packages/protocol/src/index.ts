@@ -128,3 +128,71 @@ export function newEventId(prefix: string): string {
 export function nowIso(): string {
   return new Date().toISOString();
 }
+
+export interface AssistantStatusTemplateInput {
+  status?: string;
+  confidence?: string;
+  next?: string;
+  statusMarkdown?: string;
+}
+
+export function formatAssistantStatusMarkdown(input: AssistantStatusTemplateInput): string {
+  const explicit = cleanText(input.statusMarkdown);
+  if (explicit) {
+    assertAssistantStatusTemplate(explicit);
+    return explicit;
+  }
+
+  const status = cleanText(input.status);
+  const confidence = cleanText(input.confidence);
+  const next = cleanText(input.next);
+  if (!status && !confidence && !next) return "";
+  if (!status || !confidence || !next) {
+    throw new Error("status, confidence, and next are required for assistant status delivery");
+  }
+
+  return [
+    `Status: ${status}`,
+    `Confidence: ${confidence}`,
+    `Next: ${next}`
+  ].join("\n");
+}
+
+export function isAssistantStatusTemplate(markdown: string): boolean {
+  const lines = terminalStatusLines(markdown);
+  return lines.length === 3
+    && lines[0].startsWith("Status: ")
+    && lines[1].startsWith("Confidence: ")
+    && lines[2].startsWith("Next: ");
+}
+
+export function assertAssistantStatusTemplate(markdown: string): void {
+  if (!isAssistantStatusTemplate(markdown)) {
+    throw new Error("assistant status must use exactly three lines: Status, Confidence, Next");
+  }
+}
+
+export function formatAssistantCanvasMarkdown(title: string | undefined, markdown: string): string {
+  const body = markdown.trim();
+  if (!body) return "";
+  const cleanTitle = cleanText(title);
+  if (!cleanTitle || firstMarkdownLine(body).startsWith("# ")) return body;
+  return `# ${cleanTitle}\n\n${body}`;
+}
+
+export function firstMarkdownHeading(markdown: string): string | undefined {
+  const match = markdown.match(/^#\s+(.+)$/m);
+  return match?.[1]?.trim();
+}
+
+function terminalStatusLines(markdown: string): string[] {
+  return markdown.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function firstMarkdownLine(markdown: string): string {
+  return markdown.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+}
+
+function cleanText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}

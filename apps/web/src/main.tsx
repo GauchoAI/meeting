@@ -47,6 +47,7 @@ const availableRealtimeTools = [
   "read_repo_guide: read the curated repo guide for app layout and pi-agent delegation",
   "raise_meeting_hand: signal that the agent has a proposal without speaking yet",
   "post_meeting_markdown: silently post summaries, diagrams, or plans into the meeting UI, including the living canvas document",
+  "deliver_assistant_output: one command for canvas + Realtime/status delivery using structured canvas Markdown and 3-line terminal status",
   "publish_task_result: publish a polished completed-task result on the main canvas before review",
   "create_meeting_task: create visible task cards for proposed work",
   "run_codex_task: send a concise handoff to pi-agent, which invokes local Codex and answers back into the meeting",
@@ -62,6 +63,8 @@ function App() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [connected, setConnected] = useState(false);
   const [recording, setRecording] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const connectedRef = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const whisperActiveRef = useRef(false);
   const chunkTimeoutRef = useRef<number | null>(null);
@@ -80,6 +83,10 @@ function App() {
   const [dismissedHandIds, setDismissedHandIds] = useState<string[]>([]);
   const realtimePeerRef = useRef<RTCPeerConnection | null>(null);
   const realtimeChannelRef = useRef<RTCDataChannel | null>(null);
+  const realtimeStateRef = useRef<RealtimeState>("idle");
+  const realtimeDesiredRef = useRef(true);
+  const realtimeReconnectTimeoutRef = useRef<number | null>(null);
+  const realtimeReconnectAttemptRef = useRef(0);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const assistantDraftRef = useRef("");
   const assistantDraftMessageIdRef = useRef<string | null>(null);
@@ -128,6 +135,25 @@ function App() {
     document.documentElement.dataset.fontSize = appearance.fontSize;
     localStorage.setItem(appearanceKey, JSON.stringify(appearance));
   }, [appearance]);
+
+  useEffect(() => {
+    localStreamRef.current = localStream;
+  }, [localStream]);
+
+  useEffect(() => {
+    connectedRef.current = connected;
+  }, [connected]);
+
+  useEffect(() => {
+    realtimeStateRef.current = realtimeState;
+  }, [realtimeState]);
+
+  useEffect(() => {
+    if (isEmbedded || !connected || realtimeState !== "idle" || !realtimeDesiredRef.current) return;
+    scheduleRealtimeReconnect(0, "meeting active");
+  }, [connected, localStream, realtimeState]);
+
+  useEffect(() => () => clearRealtimeReconnect(), []);
 
   useEffect(() => {
     if (isEmbedded || autoJoinAttemptedRef.current || sessionStorage.getItem(autoJoinKey) !== "true") return;
@@ -211,40 +237,52 @@ function App() {
   }, [activeHandRaises.length]);
 
   useEffect(() => {
-    const latestCanvasResult = canvasMessages.find((event) => event.documentId?.startsWith("task-result:"));
-    if (!latestCanvasResult) return;
-    if (selectedCanvasDocumentId === latestCanvasResult.documentId) return;
-    const matchingHandRaise = activeHandRaises.find((event) => event.requestedMode === "show");
-    if (matchingHandRaise) setSelectedCanvasDocumentId(latestCanvasResult.documentId || null);
-  }, [activeHandRaises, canvasMessages, selectedCanvasDocumentId]);
+    const latestCanvas = canvasMessages[0];
+    if (!latestCanvas?.documentId) return;
+    if (selectedCanvasDocumentId === latestCanvas.documentId) return;
+    setSelectedCanvasDocumentId(latestCanvas.documentId);
+  }, [canvasMessages, selectedCanvasDocumentId]);
 
   async function joinMeeting() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     sessionStorage.setItem(autoJoinKey, "true");
+    realtimeDesiredRef.current = true;
+    localStreamRef.current = stream;
+    connectedRef.current = true;
     setLocalStream(stream);
     setConnected(true);
     startWhisperCapture(stream);
+    void connectRealtimeAgent(stream);
   }
 
   function leaveMeeting() {
     sessionStorage.removeItem(autoJoinKey);
-    disconnectRealtimeAgent();
+    realtimeDesiredRef.current = false;
+    connectedRef.current = false;
+    clearRealtimeReconnect();
+    disconnectRealtimeAgent({ intentional: true });
     stopWhisperCapture();
-    localStream?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current = null;
     setLocalStream(null);
     setConnected(false);
   }
 
-  async function connectRealtimeAgent() {
-    if (realtimeState !== "idle") return;
+  async function connectRealtimeAgent(streamOverride?: MediaStream) {
+    if (realtimeStateRef.current !== "idle") return;
+    clearRealtimeReconnect();
+    realtimeDesiredRef.current = true;
+    realtimeStateRef.current = "connecting";
     setRealtimeState("connecting");
     restoreRealtimeBaseMode();
     assistantDraftRef.current = "";
     setRealtimeDraftText("");
     try {
-      const stream = localStream || await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      if (!localStream) {
+      const stream = streamOverride || localStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      if (!localStreamRef.current) {
         sessionStorage.setItem(autoJoinKey, "true");
+        localStreamRef.current = stream;
+        connectedRef.current = true;
         setLocalStream(stream);
         setConnected(true);
       }
@@ -255,6 +293,12 @@ function App() {
       peer.ontrack = (event) => {
         if (remoteAudioRef.current) remoteAudioRef.current.srcObject = event.streams[0];
       };
+      peer.addEventListener("connectionstatechange", () => {
+        if (realtimePeerRef.current !== peer) return;
+        if (peer.connectionState === "failed" || peer.connectionState === "disconnected") {
+          handleRealtimeUnexpectedClose(`peer ${peer.connectionState}`);
+        }
+      });
 
       const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) peer.addTrack(audioTrack, stream);
@@ -262,6 +306,7 @@ function App() {
       const channel = peer.createDataChannel("oai-events");
       realtimeChannelRef.current = channel;
       channel.addEventListener("open", () => {
+        realtimeStateRef.current = "connected";
         setRealtimeState("connected");
         configureRealtimeSession();
         void requestBootstrapContextSync();
@@ -288,6 +333,12 @@ function App() {
       channel.addEventListener("message", (event) => {
         void handleRealtimeEvent(String(event.data));
       });
+      channel.addEventListener("close", () => {
+        if (realtimeChannelRef.current === channel) handleRealtimeUnexpectedClose("data channel closed");
+      });
+      channel.addEventListener("error", () => {
+        if (realtimeChannelRef.current === channel) handleRealtimeUnexpectedClose("data channel error");
+      });
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
@@ -300,8 +351,10 @@ function App() {
       const answerSdp = await response.text();
       if (!response.ok) throw new Error(answerSdp || `Realtime call failed with ${response.status}`);
       await peer.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      realtimeReconnectAttemptRef.current = 0;
     } catch (error) {
-      disconnectRealtimeAgent();
+      disconnectRealtimeAgent({ intentional: true });
+      realtimeStateRef.current = "idle";
       setRealtimeState("idle");
       await postMeetingEvent({
         id: newEventId("trace"),
@@ -313,10 +366,11 @@ function App() {
         channel: "error",
         text: error instanceof Error ? error.message : String(error)
       });
+      scheduleRealtimeReconnect(undefined, "connect failed");
     }
   }
 
-  function disconnectRealtimeAgent() {
+  function disconnectRealtimeAgent(options: { intentional?: boolean } = {}) {
     if (analysisTimeoutRef.current !== null) {
       window.clearTimeout(analysisTimeoutRef.current);
       analysisTimeoutRef.current = null;
@@ -335,8 +389,46 @@ function App() {
     transcriptDraftIdsRef.current.clear();
     transcriptDraftTextRef.current.clear();
     setRealtimeDraftText("");
+    realtimeStateRef.current = "idle";
     setRealtimeState("idle");
     setDismissedHandIds([]);
+    if (!options.intentional) scheduleRealtimeReconnect(undefined, "unexpected disconnect");
+  }
+
+  function handleRealtimeUnexpectedClose(reason: string) {
+    if (!realtimeDesiredRef.current || !connectedRef.current) return;
+    void postRealtimeTrace("debug", "Realtime connection closed; reconnecting", { reason });
+    disconnectRealtimeAgent({ intentional: true });
+    scheduleRealtimeReconnect(undefined, reason);
+  }
+
+  function scheduleRealtimeReconnect(delayMs?: number, reason = "scheduled reconnect") {
+    if (isEmbedded || !realtimeDesiredRef.current || !connectedRef.current) return;
+    if (realtimeReconnectTimeoutRef.current !== null) return;
+    const attempt = realtimeReconnectAttemptRef.current;
+    const delay = delayMs ?? Math.min(15000, 750 * 2 ** Math.min(attempt, 5));
+    realtimeReconnectTimeoutRef.current = window.setTimeout(() => {
+      realtimeReconnectTimeoutRef.current = null;
+      if (!realtimeDesiredRef.current || !connectedRef.current || realtimeStateRef.current !== "idle") return;
+      realtimeReconnectAttemptRef.current += 1;
+      void postRealtimeTrace("agent", "Realtime auto-reconnect", { attempt: realtimeReconnectAttemptRef.current, reason });
+      void connectRealtimeAgent(localStreamRef.current || undefined);
+    }, delay);
+  }
+
+  function clearRealtimeReconnect() {
+    if (realtimeReconnectTimeoutRef.current !== null) {
+      window.clearTimeout(realtimeReconnectTimeoutRef.current);
+      realtimeReconnectTimeoutRef.current = null;
+    }
+  }
+
+  function restartRealtimeAgent() {
+    realtimeDesiredRef.current = true;
+    realtimeReconnectAttemptRef.current = 0;
+    clearRealtimeReconnect();
+    disconnectRealtimeAgent({ intentional: true });
+    scheduleRealtimeReconnect(100, "manual restart");
   }
 
   function configureRealtimeSession(muted = realtimeMutedRef.current) {
@@ -723,7 +815,7 @@ function App() {
           "Do not wait for the host to say the exact word Codex if the work clearly belongs to pi-agent.",
           "When pi-agent has published a result, read meeting context and raise your hand with requestedMode=show or requestedMode=review. Codex/pi-agent results should be shown as text, not spoken audio.",
           "If there is nothing useful to contribute right now, respond with exactly NO_ACTION.",
-          "If you have something useful, prefer silent actions: post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
+          "If you have something useful, prefer silent actions: deliver_assistant_output, post_meeting_markdown, create_meeting_task, publish_task_result, raise_meeting_hand, run_shell_command, or run_codex_task.",
           `Maintain a living meeting document on the main canvas with post_meeting_markdown using surface=canvas and documentId=${realtimeLiveCanvasDocumentId}.`,
           "Use the canvas document for notes, structure, architecture sketches, diagrams, and draft documentation that should update while the humans are speaking.",
           "Use create_meeting_task with stream=conversation for planning-side tasks.",
@@ -732,6 +824,7 @@ function App() {
           "run_codex_task sends a concise JSONL handoff to the running pi-agent session; it does not run Codex inline inside this conversation turn.",
           "Prefer implementation tasks first, and use run_codex_task only when you have a clear summary, task title, and hints for pi-agent.",
           "Do not pass raw transcript dumps to run_codex_task. Pass your proposed summary and short hints; raw user and agent communications are mirrored separately as JSONL.",
+          "Use deliver_assistant_output for one-command canvas + status delivery: structured Markdown for canvas artifacts, exactly Status/Confidence/Next for status surfaces.",
           "When a task reaches a useful milestone or is complete, publish the result to the main canvas with publish_task_result so the host can review it visually.",
           "Raise your hand with requestedMode=speak only for Realtime conversation contributions that should be spoken aloud.",
           "Use run_codex_task when the conversation implies concrete coding follow-up that should enter the pi-agent implementation lifecycle.",
@@ -957,10 +1050,8 @@ function App() {
               <div className={`status realtimeStatus realtime-${realtimeState}`}>
                 <Radio size={16} /> {realtimeState === "connected" ? `Realtime agent connected (${realtimeMuted ? "muted" : "audio on"})` : realtimeState === "connecting" ? "Realtime agent connecting" : "Realtime agent idle"}
               </div>
-              {realtimeState === "idle" ? (
-                <button onClick={() => void connectRealtimeAgent()}>Connect Realtime agent</button>
-              ) : (
-                <button onClick={disconnectRealtimeAgent}>Disconnect Realtime agent</button>
+              {connected && realtimeState !== "connecting" && (
+                <button className="secondary" onClick={restartRealtimeAgent}>{realtimeState === "connected" ? "Restart voice agent" : "Retry voice agent"}</button>
               )}
               {realtimeState === "connected" && (
                 <button className="secondary" onClick={() => setRealtimeAgentMuted(!realtimeMuted)}>{realtimeMuted ? "Unmute agent" : "Mute agent"}</button>
@@ -2421,7 +2512,7 @@ function dedupeTasks(events: AgentTaskEvent[]): AgentTaskEvent[] {
 }
 
 function implementationToolName(name: string): boolean {
-  return name === "run_codex_task" || name === "publish_task_result";
+  return name === "run_codex_task" || name === "publish_task_result" || name === "deliver_assistant_output";
 }
 
 function isPiAgentReviewEvent(event: MeetingEvent): event is AgentMessageEvent | AgentHandRaiseEvent {
@@ -2430,7 +2521,8 @@ function isPiAgentReviewEvent(event: MeetingEvent): event is AgentMessageEvent |
   if (event.type !== "agent.message" || event.lifecycle !== "final") return false;
   const text = event.text.trim();
   if (!text || /^(ok|okay|noted|thanks|you.?re welcome|i.?m here)[.!]*$/i.test(text)) return false;
-  return event.surface === "canvas" || event.stream === "implementation" || Boolean(event.documentId) || text.length >= 40;
+  if (event.surface === "status" && !event.documentId && event.stream !== "implementation") return false;
+  return event.surface === "canvas" || event.stream === "implementation" || Boolean(event.documentId);
 }
 
 function formatPiAgentUpdateForRealtime(event: AgentMessageEvent | AgentHandRaiseEvent): string {

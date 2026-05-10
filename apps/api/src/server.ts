@@ -2,7 +2,7 @@ import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, 
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
-import { newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
+import { formatAssistantCanvasMarkdown, formatAssistantStatusMarkdown, firstMarkdownHeading as firstAssistantMarkdownHeading, newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
 import { speechProviderStatus } from "./speech.js";
 import { loadDotEnv, loadLocalConfig } from "./env.js";
 import { transcribeWithLocalWhisper } from "./local-whisper.js";
@@ -413,6 +413,27 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
       },
       {
         type: "function",
+        name: "deliver_assistant_output",
+        description: "Single-command delivery workflow. Publishes structured Markdown on the canvas with a stable documentId and/or a concise 3-line status for Realtime/audio surfaces without wrapping or replacing the canvas content.",
+        parameters: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Canvas document title." },
+            markdown: { type: "string", description: "Structured canvas Markdown body. Use headings/bullets here." },
+            documentId: { type: "string", description: "Stable canvas document id. Defaults to assistant-output:<slug(title)> when markdown is provided." },
+            status: { type: "string", description: "One-line current state for status surfaces." },
+            confidence: { type: "string", description: "Confidence level and short reason, e.g. Moderate — based on meeting context only." },
+            next: { type: "string", description: "One to three concrete next actions." },
+            statusMarkdown: { type: "string", description: "Optional complete status text. If omitted, Status/Confidence/Next are formatted as three lines." },
+            postCanvas: { type: "boolean", description: "Defaults to true when markdown is supplied." },
+            postStatus: { type: "boolean", description: "Defaults to true when any status field is supplied." },
+            stream: { type: "string", enum: ["conversation", "implementation"] }
+          },
+          additionalProperties: false
+        }
+      },
+      {
+        type: "function",
         name: "publish_task_result",
         description: "Publish a completed task result to the main meeting canvas as a polished review document so the host can review it. Use this when a task reaches a meaningful milestone or is done.",
         parameters: {
@@ -590,6 +611,8 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
         text: title ? `# ${title}\n\n${markdown}` : markdown
       } as MeetingEvent);
       output = { ok: true, surface, lifecycle, documentId };
+    } else if (name === "deliver_assistant_output") {
+      output = deliverAssistantOutput(asObject(input));
     } else if (name === "publish_task_result") {
       const args = asObject(input);
       const taskKey = String(args.taskKey || "").trim();
@@ -752,7 +775,7 @@ function buildRealtimeInstructions(): string {
     "Conversation is the true branch for human discussion, live notes, diagrams, planning, and hand raises.",
     "Implementation is the Codex execution branch with task lifecycle and result review.",
     "You have ten tools and should accurately describe them when asked.",
-    "Available tools: read_meeting_context, read_repo_guide, raise_meeting_hand, post_meeting_markdown, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
+    "Available tools: read_meeting_context, read_repo_guide, raise_meeting_hand, post_meeting_markdown, deliver_assistant_output, publish_task_result, create_meeting_task, read_rendered_html, write_rendered_html, run_shell_command, run_codex_task.",
     "When you need to know what is currently on screen, what the current plan says, or what the humans are discussing, call read_meeting_context first instead of exploring the repo.",
     "When you need to understand this repository's file layout or implementation delegation path, call read_repo_guide before guessing.",
     "Durable smart artifacts belong to pi-agent, not the Realtime conversation agent.",
@@ -775,6 +798,7 @@ function buildRealtimeInstructions(): string {
     "Pi/Codex updates may also arrive as direct text messages in your conversation; treat them as current context and react according to muted/unmuted state.",
     "run_shell_command is for quick inspection and lightweight terminal tasks.",
     "Maintain a stable living canvas document with post_meeting_markdown using documentId=realtime-live-canvas.",
+    "For assistant results that need both canvas visibility and Realtime/status delivery, prefer deliver_assistant_output: canvas uses structured Markdown, status uses exactly Status/Confidence/Next.",
     "For completed or milestone work, use publish_task_result to put a polished result on the main canvas before or while raising your hand.",
     "read_rendered_html and write_rendered_html are specifically for the isolated browser preview file and are not the main path for improving the app.",
     "You have tool access to inspect the local workspace, queue Codex work through pi-agent, and write a complete index.html preview that renders on screen.",
@@ -1333,6 +1357,60 @@ function readJsonFile(path: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function deliverAssistantOutput(args: Record<string, unknown>): Record<string, unknown> {
+  const title = optionalString(args.title);
+  const markdown = String(args.markdown || "").trim();
+  const postCanvas = typeof args.postCanvas === "boolean" ? args.postCanvas : Boolean(markdown);
+  const statusMarkdown = formatAssistantStatusMarkdown({
+    status: optionalString(args.status),
+    confidence: optionalString(args.confidence),
+    next: optionalString(args.next),
+    statusMarkdown: optionalString(args.statusMarkdown)
+  });
+  const postStatus = typeof args.postStatus === "boolean" ? args.postStatus : Boolean(statusMarkdown);
+  const stream = asMeetingStream(args.stream) || "conversation";
+  const documentId = optionalString(args.documentId) || (postCanvas ? `assistant-output:${slugTaskKey(title || firstAssistantMarkdownHeading(markdown) || "canvas")}` : undefined);
+  const published: string[] = [];
+
+  if (postCanvas) {
+    if (!markdown) throw new Error("markdown is required when postCanvas is true");
+    appendEvent({
+      id: newEventId("msg"),
+      type: "agent.message",
+      stream,
+      meetingId,
+      createdAt: nowIso(),
+      agentId: "realtime-codex",
+      format: "markdown",
+      surface: "canvas",
+      lifecycle: "final",
+      documentId,
+      text: formatAssistantCanvasMarkdown(title, markdown)
+    } as MeetingEvent);
+    published.push("canvas");
+  }
+
+  if (postStatus) {
+    if (!statusMarkdown) throw new Error("status, confidence, next, or statusMarkdown is required when postStatus is true");
+    appendEvent({
+      id: newEventId("msg"),
+      type: "agent.message",
+      stream,
+      meetingId,
+      createdAt: nowIso(),
+      agentId: "realtime-codex",
+      format: "plain",
+      surface: "status",
+      lifecycle: "final",
+      text: statusMarkdown
+    } as MeetingEvent);
+    published.push("status");
+  }
+
+  if (!published.length) throw new Error("nothing to deliver; provide markdown or status fields");
+  return { ok: true, published, documentId, status: statusMarkdown };
 }
 
 function inferEventStream(event: MeetingEvent): "conversation" | "implementation" {
