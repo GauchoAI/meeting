@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Mic, Phone, Play, Radio } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 import { TranscriptBuffer } from "@meeting/transcript";
-import { newEventId, nowIso, type AgentHandRaiseEvent, type AgentMessageEvent, type AgentTaskEvent, type MeetingEvent, type PartialUtteranceEvent, type UtteranceEvent } from "@meeting/protocol";
+import { isAssistantStatusTemplate, newEventId, nowIso, type AgentHandRaiseEvent, type AgentMessageEvent, type AgentTaskEvent, type MeetingEvent, type PartialUtteranceEvent, type UtteranceEvent } from "@meeting/protocol";
 import { layoutWithLines, prepareWithSegments, measureLineStats } from "@chenglou/pretext";
 import { RoughGenerator } from "roughjs/bin/generator";
 // markdown2.html.js is intentionally a runtime JS translator file.
@@ -1478,8 +1478,11 @@ function MarkdownDocument({
   let diagramIndex = 0;
   let markdownIndex = 0;
   return (
-    <article ref={rootRef} className={expanded ? "generated expanded" : "generated"} data-inspect-root="artifact">
-      <strong>{agentId}</strong>
+    <article ref={rootRef} className={expanded ? "generated expanded" : "generated"} data-inspect-root="artifact" data-document-id={documentId || ""}>
+      <header className="documentChrome">
+        <strong>{agentId}</strong>
+        {documentId && <code title={documentId}>{documentId}</code>}
+      </header>
       {parts.map((part, index) => {
         if (part.kind === "excalidraw") {
           const currentDiagram = diagramIndex++;
@@ -2595,25 +2598,21 @@ function isPiAgentReviewEvent(event: MeetingEvent): event is AgentMessageEvent |
 }
 
 function formatPiAgentUpdateForRealtime(event: AgentMessageEvent | AgentHandRaiseEvent): string {
-  const lines = [
-    "Direct Pi/Codex update for the Realtime voice agent.",
-    "Treat this as first-class current meeting context. The UI/canvas may already show the artifact or response.",
-    "If unmuted, you may briefly tell the host what changed. If muted, raise a hand for show/review only when useful.",
-    ""
-  ];
   if (event.type === "agent.hand_raise") {
-    lines.push(`kind: hand_raise`, `requestedMode: ${event.requestedMode}`, `reason: ${event.reason}`);
-  } else {
-    lines.push(
-      "kind: message",
-      `surface: ${event.surface || "status"}`,
-      `stream: ${event.stream || "conversation"}`,
-      event.documentId ? `documentId: ${event.documentId}` : "",
-      "",
-      clipText(event.text, 3000)
-    );
+    return [
+      "Task: Review Pi/Codex hand raise.",
+      `Context: requestedMode=${event.requestedMode}; reason=${event.reason}`,
+      "Constraints: Treat as current meeting context; do not post wrapper text over the canvas.",
+      "Output: If useful, briefly tell the host or raise a show/review hand."
+    ].join("\n");
   }
-  return lines.filter(Boolean).join("\n");
+
+  return [
+    "Task: Review latest Pi/Codex output.",
+    `Context: surface=${event.surface || "status"}; stream=${event.stream || "conversation"}${event.documentId ? `; documentId=${event.documentId}` : ""}.`,
+    "Constraints: Preserve the selected artifact/canvas; do not treat status-only wrappers as primary output.",
+    `Output: ${clipText(event.text.replace(/\s+/g, " "), 1200)}`
+  ].join("\n");
 }
 
 function summarizeMeetingContextForRealtime(context: unknown, source: "reconnect" | "manual"): string {
@@ -2747,7 +2746,11 @@ function formatTerminalEvent(event: MeetingEvent): string {
 }
 
 function isCanvasMessage(event: AgentMessageEvent): boolean {
-  return event.surface === "canvas";
+  return event.surface === "canvas" && !isCanvasStatusWrapper(event);
+}
+
+function isCanvasStatusWrapper(event: AgentMessageEvent): boolean {
+  return !event.documentId && isAssistantStatusTemplate(event.text);
 }
 
 interface RenderStats {

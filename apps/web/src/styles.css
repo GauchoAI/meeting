@@ -655,8 +655,31 @@ article.partial { opacity: 0.65; }
 .generated.expanded {
   min-height: 0;
 }
-.generated.expanded > strong {
-  display: none;
+.documentChrome {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 0 0 14px;
+  padding: 0 0 10px;
+}
+.documentChrome strong {
+  color: var(--ink);
+  flex: 0 0 auto;
+  font-size: var(--font-ui);
+}
+.documentChrome code {
+  background: var(--inline-code-bg);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  max-width: min(100%, 980px);
+  overflow-wrap: anywhere;
+  padding: 4px 6px;
+  text-align: right;
 }
 .emptyCanvas {
   align-content: center;

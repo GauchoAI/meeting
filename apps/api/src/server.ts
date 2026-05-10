@@ -2,7 +2,7 @@ import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, 
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
-import { formatAssistantCanvasMarkdown, formatAssistantStatusMarkdown, firstMarkdownHeading as firstAssistantMarkdownHeading, newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
+import { formatAssistantCanvasMarkdown, formatAssistantStatusMarkdown, firstMarkdownHeading as firstAssistantMarkdownHeading, isAssistantStatusTemplate, newEventId, nowIso, type MeetingEvent } from "@meeting/protocol";
 import { speechProviderStatus } from "./speech.js";
 import { loadDotEnv, loadLocalConfig } from "./env.js";
 import { transcribeWithLocalWhisper } from "./local-whisper.js";
@@ -743,12 +743,7 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
         createdAt: nowIso(),
         speakerId: "realtime-handoff",
         speakerLabel: "Realtime handoff",
-        text: [
-          "Realtime agent handoff to pi-agent. Treat the JSONL below as the task handoff, not as a raw transcript dump.",
-          "Use the Meeting artifact tools to answer in the Meeting UI. If a durable artifact is requested, create/update it and show it.",
-          "",
-          handoffJsonl
-        ].join("\n"),
+        text: formatPiHandoffForHumans({ title, prompt, hints, sourceDocumentId, taskClass }),
         startMs: Date.now() % 3_600_000,
         endMs: (Date.now() % 3_600_000) + 1,
         taskClass
@@ -888,8 +883,8 @@ function repoGuideText(): string {
 }
 
 function readMeetingContext(): unknown {
-  const canvasMessages = events.filter((event): event is Extract<MeetingEvent, { type: "agent.message" }> => event.type === "agent.message" && event.surface === "canvas");
-  const liveCanvas = canvasMessages.find((event) => event.documentId === "realtime-live-canvas") || canvasMessages[canvasMessages.length - 1];
+  const canvasMessages = events.filter((event): event is Extract<MeetingEvent, { type: "agent.message" }> => event.type === "agent.message" && event.surface === "canvas" && !isCanvasStatusWrapper(event));
+  const latestCanvas = canvasMessages[canvasMessages.length - 1];
   const transcript = events
     .filter((event): event is Extract<MeetingEvent, { type: "utterance.final" | "utterance.partial" }> => event.type === "utterance.final" || event.type === "utterance.partial")
     .slice(-14)
@@ -930,10 +925,10 @@ function readMeetingContext(): unknown {
       "If currentCanvas exists, do not claim you need to go look for the plan elsewhere before discussing it.",
       "Durable artifacts belong to pi-agent. Use the live canvas for the current evolving conversation document and queue implementation tasks for durable artifact work."
     ],
-    currentCanvas: liveCanvas ? {
-      documentId: liveCanvas.documentId,
-      createdAt: liveCanvas.createdAt,
-      text: liveCanvas.text
+    currentCanvas: latestCanvas ? {
+      documentId: latestCanvas.documentId,
+      createdAt: latestCanvas.createdAt,
+      text: latestCanvas.text
     } : null,
     canvasDocuments: dedupeCanvasDocuments(canvasMessages).slice(0, 12),
     tasks,
@@ -1073,7 +1068,7 @@ function mirrorEventToPipeline(event: MeetingEvent): void {
   if (event.type === "agent.message" && stream === "conversation") {
     appendFileSync(resolve(conversationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
     appendConversationInboxRecord(event);
-    if (event.surface === "canvas") {
+    if (event.surface === "canvas" && !isCanvasStatusWrapper(event)) {
       const documentId = event.documentId || "live-canvas";
       const notePath = resolve(conversationPipelineRoot, "notes", `${safeFileComponent(documentId)}.md`);
       writeFileSync(notePath, event.text.endsWith("\n") ? event.text : `${event.text}\n`, "utf8");
@@ -1096,6 +1091,10 @@ function mirrorEventToPipeline(event: MeetingEvent): void {
   if ((event.type === "agent.message" || event.type === "agent.trace" || event.type === "agent.hand_raise") && stream === "implementation") {
     appendFileSync(resolve(implementationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
   }
+}
+
+function isCanvasStatusWrapper(event: Extract<MeetingEvent, { type: "agent.message" }>): boolean {
+  return !event.documentId && isAssistantStatusTemplate(event.text);
 }
 
 function appendConversationInboxRecord(event: MeetingEvent): void {
@@ -1453,6 +1452,27 @@ function optionalString(value: unknown): string | undefined {
 
 function optionalStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function formatPiHandoffForHumans(input: { title: string; prompt: string; hints: string[]; sourceDocumentId?: string; taskClass: string }): string {
+  const constraints = [
+    ...input.hints,
+    "Preserve actionable content; omit raw JSONL/routing metadata unless it changes the action.",
+    "Keep the response concise and ensure status-only messages do not steal canvas focus."
+  ];
+  return [
+    `Task: ${input.title}`,
+    `Context: ${input.sourceDocumentId ? `Source document is ${input.sourceDocumentId}; ` : ""}task class is ${input.taskClass}.`,
+    `Constraints: ${constraints.join(" ")}`,
+    `Output: ${inferHumanOutputTarget(input.taskClass, input.prompt)}`
+  ].join("\n");
+}
+
+function inferHumanOutputTarget(taskClass: string, prompt: string): string {
+  if (taskClass === "code.change") return "Code changes with verification summary.";
+  if (taskClass === "artifact.render" || /durable artifact|artifact/i.test(prompt)) return "Selectable Meeting artifact, opened on the canvas.";
+  if (taskClass === "critique.review") return "Concise review in the Meeting UI.";
+  return "Concise Meeting UI response.";
 }
 
 function buildPiHandoffJsonl(input: { taskKey: string; title: string; prompt: string; hints: string[]; cwd: string; sourceDocumentId?: string; taskClass: string }): string {
