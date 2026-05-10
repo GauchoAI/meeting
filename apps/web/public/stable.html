@@ -75,6 +75,8 @@
     let assistantDraft = "";
     let assistantDraftMessageId = null;
     let assistantDraftFlushTimer = null;
+    let directVoiceTurnActive = false;
+    let directVoiceTurnToolCalled = false;
     let analysisTimer = null;
     let liveAnalysisTimer = null;
     let lastAnalysisAt = 0;
@@ -417,19 +419,29 @@
         const completedText = String(event.transcript || event.text || "").trim();
         if (!assistantDraft.trim() && completedText) assistantDraft = completedText;
         if (assistantDraft.trim() && assistantDraft.trim() !== "NO_ACTION") {
-          await postMeetingEvent({
-            id: assistantDraftMessageId || newEventId("msg"),
-            type: "agent.message",
-            stream: "conversation",
-            meetingId,
-            createdAt: nowIso(),
-            agentId: realtimeAgentId,
-            format: "markdown",
-            surface: "status",
-            lifecycle: "final",
-            text: assistantDraft.trim()
-          });
+          if (directVoiceTurnActive) {
+            if (!directVoiceTurnToolCalled && shouldRelayDirectVoiceText(assistantDraft)) {
+              await relayDirectVoiceTextToPiAgent(assistantDraft.trim());
+            } else {
+              await postRealtimeTrace("debug", "Suppressed direct voice-agent internal text", { text: assistantDraft.trim(), toolCalled: directVoiceTurnToolCalled });
+            }
+          } else {
+            await postMeetingEvent({
+              id: assistantDraftMessageId || newEventId("msg"),
+              type: "agent.message",
+              stream: "conversation",
+              meetingId,
+              createdAt: nowIso(),
+              agentId: realtimeAgentId,
+              format: "markdown",
+              surface: "status",
+              lifecycle: "final",
+              text: assistantDraft.trim()
+            });
+          }
         }
+        directVoiceTurnActive = false;
+        directVoiceTurnToolCalled = false;
         assistantDraftMessageId = null;
         if (assistantDraftFlushTimer !== null) {
           window.clearTimeout(assistantDraftFlushTimer);
@@ -443,6 +455,8 @@
         const name = String(event.name || "");
         const argsText = String(event.arguments || "{}");
         const callId = String(event.call_id || "");
+        const isDirectVoicePiReply = directVoiceTurnActive && name === "message_pi_agent";
+        if (isDirectVoicePiReply) directVoiceTurnToolCalled = true;
         await postRealtimeTrace("tool", `Tool requested: ${name}`, argsText, implementationToolName(name) ? "implementation" : "conversation");
         let parsedArgs = {};
         try {
@@ -464,6 +478,11 @@
             output: JSON.stringify(toolResponse)
           }
         });
+        if (isDirectVoicePiReply) {
+          directVoiceTurnActive = false;
+          directVoiceTurnToolCalled = false;
+          return;
+        }
         sendFollowupResponse();
         return;
       }
@@ -500,6 +519,17 @@
       }).then((res) => res.json());
       if (!response.ok) throw new Error(response.error || "read_meeting_context failed");
       return response.output;
+    }
+
+    async function relayDirectVoiceTextToPiAgent(text) {
+      const message = clipText(String(text || ""), 1000);
+      await postRealtimeTrace("tool", "Relaying direct voice-agent text to pi-agent", { message }, "implementation");
+      const toolResponse = await fetch(`${api}/realtime/tool`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "message_pi_agent", arguments: { intent: "request", message } })
+      }).then((res) => res.json());
+      await postRealtimeTrace(toolResponse.ok ? "tool" : "error", "Relayed direct voice-agent text result", toolResponse, "implementation");
     }
 
     function setRealtimeAgentMuted(muted) {
@@ -762,6 +792,7 @@
     async function persistAssistantDraft() {
       const text = assistantDraft.trim();
       if (!text || text === "NO_ACTION") return;
+      if (directVoiceTurnActive) return;
       if (!assistantDraftMessageId) assistantDraftMessageId = newEventId("msg");
       await postMeetingEvent({
         id: assistantDraftMessageId,
@@ -845,9 +876,13 @@
     async function notifyRealtimeOfPiAgentUpdate(event) {
       if (event.id === lastPiAgentNoticeId || realtimeState !== "connected" || realtimeActivationMode === "sleeping") return;
       lastPiAgentNoticeId = event.id;
-      sendRealtimeTextMessage(formatPiAgentUpdateForRealtime(event));
+      const directVoiceMessage = isVoiceAgentDirectMessage(event);
+      const context = directVoiceMessage ? await readRealtimeMeetingContext().catch(() => undefined) : undefined;
+      sendRealtimeTextMessage(formatPiAgentUpdateForRealtime(event, context));
       await postRealtimeTrace("agent", "Pi-agent update injected into stable Realtime agent", { eventId: event.id, type: event.type, muted: realtimeMuted });
-      if (isVoiceAgentDirectMessage(event)) {
+      if (directVoiceMessage) {
+        directVoiceTurnActive = true;
+        directVoiceTurnToolCalled = false;
         beginRealtimeResponse("silent");
         sendRealtimeEvent({
           type: "response.create",
@@ -856,7 +891,9 @@
             instructions: [
               "This is a direct Pi/Codex message addressed to you, the Realtime voice agent.",
               "Treat it as one agent-to-agent dialogue turn, not as a host-facing announcement.",
+              "Use the injected recent direct-dialogue JSONL as authoritative shared memory; continue from it instead of restarting.",
               "If the message expects a reply or is part of an active back-and-forth protocol, call message_pi_agent exactly once with the next concise turn.",
+              "Do not answer an internal Pi/Codex turn as plain assistant text; use message_pi_agent for the reply.",
               "If the exchange is complete, if the message says stop, or if no reply is needed, respond exactly NO_ACTION.",
               "Do not speak audio for this internal turn. Do not use canvas, artifact, or markdown tools.",
               "For counting or turn-taking tests, send only the next required token/number and preserve the stop condition."
@@ -912,8 +949,9 @@
       return event?.type === "agent.message" && String(event.documentId || "").startsWith("voice-message:");
     }
 
-    function formatPiAgentUpdateForRealtime(event) {
+    function formatPiAgentUpdateForRealtime(event, context) {
       if (isVoiceAgentDirectMessage(event)) {
+        const dialogueJsonl = formatAgentDialogueJsonlForRealtime(context);
         return [
           "Direct Pi/Codex message for the Realtime voice agent.",
           "This is an agent-to-agent dialogue turn. Continue with message_pi_agent only if a reply is needed.",
@@ -922,8 +960,12 @@
           "kind: voice_agent_message",
           `documentId: ${event.documentId}`,
           "",
+          dialogueJsonl ? "Recent direct dialogue JSONL (authoritative shared memory):" : "",
+          dialogueJsonl,
+          dialogueJsonl ? "" : "",
+          "Current Pi/Codex message:",
           clipText(String(event.text || ""), 3000)
-        ].join("\n");
+        ].filter((line) => line !== "").join("\n");
       }
 
       const lines = [
@@ -945,6 +987,21 @@
         );
       }
       return lines.filter(Boolean).join("\n");
+    }
+
+    function formatAgentDialogueJsonlForRealtime(context) {
+      const root = asRecordValue(context);
+      const agentDialogue = asRecordValue(root.agentDialogue);
+      const recent = arrayValue(agentDialogue.recent).map(asRecordValue).slice(-16);
+      const lines = recent.map((record) => JSON.stringify({
+        ts: stringValue(record.ts),
+        direction: stringValue(record.direction),
+        role: stringValue(record.role),
+        intent: stringValue(record.intent),
+        taskKey: stringValue(record.taskKey),
+        text: clipText(stringValue(record.text).replace(/\s+/g, " "), 500)
+      }));
+      return clipText(lines.join("\n"), 7000);
     }
 
     function summarizeMeetingContextForRealtime(context, source) {
@@ -1102,6 +1159,13 @@
     function clipText(text, maxLength) {
       const normalized = String(text || "").trim();
       return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+    }
+
+    function shouldRelayDirectVoiceText(text) {
+      const normalized = String(text || "").trim();
+      if (!normalized || normalized === "NO_ACTION") return false;
+      if (/^(ok|okay|noted|thanks|done|complete|completed|stop|stopped)[.!]*$/i.test(normalized)) return false;
+      return true;
     }
   </script>
 </body>

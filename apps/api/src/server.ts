@@ -24,6 +24,7 @@ const implementationConversationInboxPath = resolve(implementationInboxRoot, "co
 const piHandoffsPath = resolve(implementationInboxRoot, "pi-handoffs.jsonl");
 const piDirectMessagesPath = resolve(implementationInboxRoot, "pi-direct-messages.jsonl");
 const piDirectMessagesSeenPath = resolve(implementationInboxRoot, "pi-direct-messages.seen.jsonl");
+const agentDialoguePath = resolve(implementationInboxRoot, "agent-dialogue.jsonl");
 const implementationTaskRoot = resolve(implementationPipelineRoot, "tasks");
 const implementationTaskQueuedRoot = resolve(implementationTaskRoot, "queued");
 const implementationTaskWorkingRoot = resolve(implementationTaskRoot, "working");
@@ -755,6 +756,10 @@ async function runRealtimeTool(name: string, input: unknown, res: ServerResponse
       const directTaskKey = taskKey || slugTaskKey(`direct-message-${newEventId("msg")}`);
       const record = { ts: nowIso(), role: "realtime-agent", kind: "direct_message", intent, taskKey: directTaskKey, text: message };
       appendPiDirectMessage(record);
+      appendAgentDialogueRecord({
+        ...record,
+        direction: "realtime_to_pi"
+      });
       appendEvent({
         id: newEventId("task"),
         type: "agent.task",
@@ -1019,6 +1024,7 @@ function readMeetingContext(): unknown {
     tasks,
     implementationQueue: readImplementationQueueState(),
     piDirectMessages: readPiDirectMessageState(),
+    agentDialogue: readAgentDialogueState(),
     piAgent: {
       messages: piAgentMessages,
       raisedHands: piAgentHands
@@ -1153,6 +1159,7 @@ function mirrorEventToPipeline(event: MeetingEvent): void {
   }
   if (event.type === "agent.message" && stream === "conversation") {
     appendFileSync(resolve(conversationPipelineRoot, "events.jsonl"), `${JSON.stringify(event)}\n`);
+    if (isVoiceAgentMessageEvent(event)) appendAgentDialogueRecord(agentDialogueRecordFromVoiceMessage(event));
     appendConversationInboxRecord(event);
     if (event.surface === "canvas" && !isCanvasStatusWrapper(event)) {
       const documentId = event.documentId || "live-canvas";
@@ -1513,6 +1520,35 @@ function inferEventStream(event: MeetingEvent): "conversation" | "implementation
   return "conversation";
 }
 
+function isVoiceAgentMessageEvent(event: MeetingEvent): event is Extract<MeetingEvent, { type: "agent.message" }> {
+  return event.type === "agent.message" && Boolean(event.documentId?.startsWith("voice-message:"));
+}
+
+function agentDialogueRecordFromVoiceMessage(event: Extract<MeetingEvent, { type: "agent.message" }>): Record<string, unknown> {
+  const parsed = parseVoiceAgentEnvelope(event.text);
+  return {
+    ts: event.createdAt || nowIso(),
+    direction: "pi_to_realtime",
+    role: event.agentId || "pi-agent",
+    kind: "direct_message",
+    intent: parsed.intent || "inform",
+    eventId: event.id,
+    documentId: event.documentId,
+    text: parsed.message || event.text
+  };
+}
+
+function parseVoiceAgentEnvelope(text: string): { intent?: string; message?: string; when?: string } {
+  const result: { intent?: string; message?: string; when?: string } = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^(Intent|Message|When):\s*(.*)$/i.exec(line.trim());
+    if (!match) continue;
+    const key = match[1].toLowerCase() as "intent" | "message" | "when";
+    result[key] = match[2].trim();
+  }
+  return result;
+}
+
 function safeFileComponent(value: string): string {
   return value.replace(/[\\/:\s]+/g, "-").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 120) || "document";
 }
@@ -1534,6 +1570,14 @@ function readPiDirectMessageState(): Record<string, unknown> {
     seenCount: countJsonlLines(piDirectMessagesSeenPath),
     latestInbox: readLastJsonlRecords(piDirectMessagesPath, 3),
     latestSeen: readLastJsonlRecords(piDirectMessagesSeenPath, 3)
+  };
+}
+
+function readAgentDialogueState(): Record<string, unknown> {
+  return {
+    path: agentDialoguePath,
+    count: countJsonlLines(agentDialoguePath),
+    recent: readLastJsonlRecords(agentDialoguePath, 20)
   };
 }
 
@@ -1674,6 +1718,7 @@ function directMessagePrompt(input: { intent: string; message: string }): string
     "Task: Reply to the Realtime voice agent.",
     `Context: Voice agent ${input.intent}: ${input.message}`,
     "Constraints: Reply quickly and concisely. Do not update or steal the canvas. Do not create or edit artifacts unless explicitly requested.",
+    "If this is a turn-taking protocol, answer with only the next required turn and preserve any stop condition.",
     "Output: Use meeting_message_voice_agent so the Realtime voice agent receives the reply directly. Use intent=question or intent=speak only if you need another voice-agent turn; otherwise use intent=inform."
   ].join("\n");
 }
@@ -1685,6 +1730,7 @@ function directMessageForTerminal(input: { intent: string; message: string }): s
     `${label}:`,
     `${tag}${input.message}`,
     "Reply now with meeting_message_voice_agent. Keep it to one or two sentences.",
+    "If this is a turn-taking protocol, send only the next required turn and preserve any stop condition.",
     "Use intent=question or intent=speak only if you need another voice-agent turn; otherwise use intent=inform.",
     "Do not use meeting_post_markdown or artifact tools unless the message explicitly asks for canvas/artifact work."
   ].join("\n");
@@ -1720,6 +1766,11 @@ function appendPiHandoff(jsonl: string): void {
 function appendPiDirectMessage(record: Record<string, unknown>): void {
   mkdirSync(dirname(piDirectMessagesPath), { recursive: true });
   appendFileSync(piDirectMessagesPath, `${JSON.stringify(record)}\n`, "utf8");
+}
+
+function appendAgentDialogueRecord(record: Record<string, unknown>): void {
+  mkdirSync(dirname(agentDialoguePath), { recursive: true });
+  appendFileSync(agentDialoguePath, `${JSON.stringify(record)}\n`, "utf8");
 }
 
 function implementationTitleFromPrompt(prompt: string): string {

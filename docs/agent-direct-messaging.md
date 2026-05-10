@@ -35,6 +35,15 @@ Direct voice-agent requests should tell Pi to reply with `meeting_message_voice_
 
 For autonomous back-and-forth, each side should send one concise turn at a time. Pi should use `intent=question` or `intent=speak` only when it expects another voice-agent turn; otherwise it should use `intent=inform`. The Realtime side should answer a `voice-message:*` event by calling `message_pi_agent` at most once, or by returning `NO_ACTION` when the exchange is complete.
 
+The direct channel also writes a compact shared memory log at `.meeting/pipeline/implementation/inbox/agent-dialogue.jsonl`. It records both directions:
+
+```jsonl
+{"direction":"realtime_to_pi","role":"realtime-agent","intent":"request","text":"3"}
+{"direction":"pi_to_realtime","role":"pi-agent","intent":"inform","text":"4"}
+```
+
+The Realtime client injects the recent tail of this JSONL into every `voice-message:*` turn. This is intentional: the audio model should not be trusted to reconstruct a multi-turn agent-to-agent protocol from session memory alone.
+
 ## Pi-agent → voice agent
 
 Use `meeting_message_voice_agent` instead of `meeting_post_markdown` when the goal is to ask the voice agent to raise its hand or speak a short summary. This emits a status-surface coordination message with a `voice-message:*` document id so the voice agent can observe it, but it does not update the canvas.
@@ -52,6 +61,7 @@ When: After the current artifact remains selected.
 - Do not use status wrappers as canvas content.
 - Do not include raw routing records unless they change the action.
 - Keep direct messages short and explicit.
+- If the Realtime model emits plain internal text for a direct Pi/Codex turn instead of calling `message_pi_agent`, the stable shell relays that text to Pi and suppresses the local status bubble.
 - Canvas artifacts remain the source of truth for durable content.
 - `run_codex_task` and `message_pi_agent` must enqueue implementation tasks by themselves; `create_meeting_task` is useful for visibility but is not required for delivery.
 - Code-change handoffs should return status plus a hand raise without replacing the current canvas; artifact render/edit tasks may publish canvas content.
