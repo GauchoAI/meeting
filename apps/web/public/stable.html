@@ -35,6 +35,7 @@
     <div class="hint">Voice runs in this stable shell. UI below can reload safely.</div>
     <button id="join">Join meeting</button>
     <button id="mute" class="secondary" disabled>Mute agent</button>
+    <button id="sleep" class="secondary" disabled>Sleep until prompted</button>
     <button id="speak" class="speak" disabled hidden>Send Whisper clip</button>
     <button id="leave" class="secondary" hidden>Leave</button>
   </div>
@@ -54,6 +55,7 @@
     const joinButton = document.getElementById("join");
     const leaveButton = document.getElementById("leave");
     const muteButton = document.getElementById("mute");
+    const sleepButton = document.getElementById("sleep");
     const speakButton = document.getElementById("speak");
     const remoteAudio = document.getElementById("remoteAudio");
     const uiFrame = document.getElementById("ui");
@@ -66,6 +68,8 @@
     let realtimeDesired = true;
     let realtimeMuted = false;
     let realtimeResponseMode = "speak";
+    let realtimeActivationMode = "active";
+    let lastRealtimeWakeAt = 0;
     let realtimeReconnectTimer = null;
     let realtimeReconnectAttempt = 0;
     let assistantDraft = "";
@@ -86,6 +90,7 @@
     }));
     leaveButton.addEventListener("click", leave);
     muteButton.addEventListener("click", () => setRealtimeAgentMuted(!realtimeMuted));
+    sleepButton.addEventListener("click", () => setRealtimeAgentActivationMode(realtimeActivationMode === "sleeping" ? "active" : "sleeping", "stable shell toggle"));
     uiFrame.addEventListener("load", publishShellState);
 
     window.addEventListener("message", (event) => {
@@ -94,6 +99,7 @@
       if (data.type === "meeting:shell-state:request") publishShellState();
       if (data.type === "meeting:realtime:restart") restartRealtimeAgent();
       if (data.type === "meeting:realtime:mute") setRealtimeAgentMuted(Boolean(data.muted));
+      if (data.type === "meeting:realtime:activation") setRealtimeAgentActivationMode(data.mode === "sleeping" ? "sleeping" : "active", String(data.reason || "embedded UI"));
       if (data.type === "meeting:realtime:prompt") sendRealtimePrompt(String(data.text || ""));
       if (data.type === "meeting:realtime:floor") requestAgentFloor(String(data.reason || ""));
       if (data.type === "meeting:realtime:text-floor") requestAgentTextFloor(String(data.mode || "show"), String(data.reason || ""));
@@ -203,7 +209,11 @@
               format: "markdown",
               surface: "status",
               lifecycle: "final",
-              text: `Realtime agent connected through the stable shell. Mode: **${realtimeMuted ? "muted listener" : "audio responder"}**.`
+              text: [
+                "Status: Realtime agent connected through the stable shell.",
+                `Confidence: High — mode is ${realtimeActivationLabel()} / ${realtimeMuted ? "muted listener" : "audio responder"}.`,
+                "Next: Use the prompt box or wake control; sleeping mode will not speak until explicitly prompted."
+              ].join("\n")
             });
           });
           channel.addEventListener("message", (event) => {
@@ -324,10 +334,10 @@
               },
               turn_detection: {
                 type: "server_vad",
-                create_response: !realtimeMuted,
-                interrupt_response: !realtimeMuted,
+                create_response: shouldCreateRealtimeResponse(),
+                interrupt_response: shouldCreateRealtimeResponse(),
                 prefix_padding_ms: 300,
-                silence_duration_ms: 900
+                silence_duration_ms: realtimeActivationMode === "sleeping" ? 1200 : 900
               }
             }
           }
@@ -384,6 +394,10 @@
       }
       if (type === "conversation.item.input_audio_transcription.completed") {
         await persistRealtimeTranscriptCompleted(event);
+        if (realtimeActivationMode === "sleeping") {
+          handleSleepingRealtimeTurn(String(event.transcript || event.text || ""));
+          return;
+        }
         if (realtimeMuted) {
           scheduleSilentAnalysis("user_turn_completed");
         } else {
@@ -494,8 +508,35 @@
       restoreRealtimeBaseMode();
       if (realtimeState === "connected") {
         configureRealtimeSession();
-        void postRealtimeTrace("agent", muted ? "Realtime agent muted in stable shell" : "Realtime agent unmuted in stable shell", { audioResponses: !muted });
+        void postRealtimeTrace("agent", muted ? "Realtime agent muted in stable shell" : "Realtime agent unmuted in stable shell", { audioResponses: shouldCreateRealtimeResponse() });
       }
+      renderStatus();
+      publishShellState();
+    }
+
+    function setRealtimeAgentActivationMode(mode, reason = "manual") {
+      realtimeActivationMode = mode === "sleeping" ? "sleeping" : "active";
+      if (realtimeActivationMode === "sleeping") {
+        clearAnalysisTimers();
+        beginRealtimeResponse("silent");
+      }
+      if (realtimeState === "connected") configureRealtimeSession();
+      void postRealtimeTrace("agent", realtimeActivationMode === "sleeping" ? "Realtime agent sleeping until prompted in stable shell" : "Realtime agent active in stable shell", { reason, muted: realtimeMuted });
+      renderStatus();
+      publishShellState();
+    }
+
+    function handleSleepingRealtimeTurn(transcriptText) {
+      const decision = decideRealtimeWake(transcriptText);
+      if (!decision.shouldWake) {
+        void postRealtimeTrace("debug", "Sleeping stable Realtime ignored VAD turn", { reason: decision.reason });
+        return;
+      }
+      lastRealtimeWakeAt = Date.now();
+      realtimeActivationMode = "active";
+      configureRealtimeSession();
+      beginRealtimeResponse("silent");
+      void postRealtimeTrace("agent", "Stable Realtime agent woke from prompt-like speech", { reason: decision.reason, muted: realtimeMuted });
       renderStatus();
       publishShellState();
     }
@@ -508,6 +549,13 @@
         ensureRealtimeConnected("prompt while disconnected");
         return;
       }
+      if (realtimeActivationMode === "sleeping") {
+        realtimeActivationMode = "active";
+        configureRealtimeSession();
+        void postRealtimeTrace("agent", "Stable Realtime agent woke from explicit text prompt", undefined);
+        renderStatus();
+        publishShellState();
+      }
       sendRealtimeTextMessage(clean);
       beginRealtimeResponse("silent");
       sendRealtimeEvent({
@@ -518,6 +566,7 @@
     }
 
     function requestAgentFloor(reason) {
+      if (realtimeActivationMode === "sleeping") setRealtimeAgentActivationMode("active", "floor granted");
       if (realtimeState !== "connected") {
         ensureRealtimeConnected("floor requested while disconnected");
         return;
@@ -553,6 +602,7 @@
     }
 
     function requestAgentTextFloor(mode, reason) {
+      if (realtimeActivationMode === "sleeping") setRealtimeAgentActivationMode("active", "text floor granted");
       if (realtimeState !== "connected") {
         ensureRealtimeConnected("text floor requested while disconnected");
         return;
@@ -589,7 +639,7 @@
     }
 
     function scheduleSilentAnalysis(trigger) {
-      if (realtimeState !== "connected" || !realtimeMuted) return;
+      if (realtimeState !== "connected" || !realtimeMuted || realtimeActivationMode === "sleeping") return;
       if (analysisTimer !== null) window.clearTimeout(analysisTimer);
       analysisTimer = window.setTimeout(() => {
         analysisTimer = null;
@@ -598,7 +648,7 @@
     }
 
     function scheduleLiveSilentAnalysis(trigger) {
-      if (realtimeState !== "connected" || !realtimeMuted) return;
+      if (realtimeState !== "connected" || !realtimeMuted || realtimeActivationMode === "sleeping") return;
       if (liveAnalysisTimer !== null) return;
       liveAnalysisTimer = window.setTimeout(() => {
         liveAnalysisTimer = null;
@@ -607,7 +657,7 @@
     }
 
     async function requestSilentAnalysis(trigger) {
-      if (realtimeState !== "connected" || !realtimeMuted) return;
+      if (realtimeState !== "connected" || !realtimeMuted || realtimeActivationMode === "sleeping") return;
       const now = Date.now();
       if (now - lastAnalysisAt < 6000) return;
       lastAnalysisAt = now;
@@ -648,6 +698,7 @@
     }
 
     function sendFollowupResponse() {
+      if (realtimeActivationMode === "sleeping") return;
       sendRealtimeEvent({
         type: "response.create",
         response: {
@@ -656,8 +707,27 @@
       });
     }
 
+    function shouldCreateRealtimeResponse() {
+      return realtimeActivationMode === "active" && !realtimeMuted;
+    }
+
+    function isLikelyPrompt(text) {
+      return /(?:\?|\b(?:agent|assistant|codex|pi-agent|hey|please|can you|could you|would you|show|open|create|update|fix|look|help)\b)/i.test(String(text || "").trim());
+    }
+
+    function decideRealtimeWake(transcriptText) {
+      const elapsed = Date.now() - lastRealtimeWakeAt;
+      if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 2500) return { shouldWake: false, reason: "debounced" };
+      if (!isLikelyPrompt(transcriptText)) return { shouldWake: false, reason: "not_prompt" };
+      return { shouldWake: true, reason: "prompt_detected" };
+    }
+
+    function realtimeActivationLabel() {
+      return realtimeActivationMode === "sleeping" ? "sleeping until prompted" : "active";
+    }
+
     function baseRealtimeMode() {
-      return realtimeMuted ? "silent" : "speak";
+      return realtimeMuted || realtimeActivationMode === "sleeping" ? "silent" : "speak";
     }
 
     function restoreRealtimeBaseMode() {
@@ -772,7 +842,7 @@
     }
 
     async function notifyRealtimeOfPiAgentUpdate(event) {
-      if (event.id === lastPiAgentNoticeId || realtimeState !== "connected") return;
+      if (event.id === lastPiAgentNoticeId || realtimeState !== "connected" || realtimeActivationMode === "sleeping") return;
       lastPiAgentNoticeId = event.id;
       sendRealtimeTextMessage(formatPiAgentUpdateForRealtime(event));
       await postRealtimeTrace("agent", "Pi-agent update injected into stable Realtime agent", { eventId: event.id, type: event.type, muted: realtimeMuted });
@@ -927,16 +997,18 @@
       } else if (!joined) {
         statusEl.textContent = "stable shell idle";
       } else if (realtimeState === "connected") {
-        statusEl.textContent = `voice agent live (${realtimeMuted ? "muted listener" : "audio responder"})`;
+        statusEl.textContent = `voice agent live (${realtimeMuted ? "muted listener" : "audio responder"}, ${realtimeActivationLabel()})`;
       } else if (realtimeState === "connecting") {
         statusEl.textContent = "voice agent connecting";
       } else {
         statusEl.textContent = realtimeDesired ? "voice agent retrying" : "voice agent idle";
       }
-      const state = forcedState || (!joined ? "idle" : realtimeState === "connected" && !realtimeMuted ? "speaking" : "ready");
+      const state = forcedState || (!joined ? "idle" : realtimeState === "connected" && !realtimeMuted && realtimeActivationMode === "active" ? "speaking" : "ready");
       dotEl.className = `dot ${state === "ready" ? "ready" : state === "speaking" ? "speaking" : ""}`;
       muteButton.textContent = realtimeMuted ? "Unmute agent" : "Mute agent";
       muteButton.disabled = !joined;
+      sleepButton.textContent = realtimeActivationMode === "sleeping" ? "Wake agent" : "Sleep until prompted";
+      sleepButton.disabled = !joined;
     }
 
     function publishShellState() {
@@ -946,6 +1018,7 @@
         realtimeState,
         realtimeMuted,
         realtimeResponseMode,
+        realtimeActivationMode,
         reconnectAttempt: realtimeReconnectAttempt
       }, window.location.origin);
     }

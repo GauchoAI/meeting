@@ -9,6 +9,7 @@ import { RoughGenerator } from "roughjs/bin/generator";
 // markdown2.html.js is intentionally a runtime JS translator file.
 // @ts-expect-error TypeScript does not attach declarations to this dotted filename.
 import { markdownToHtml } from "./markdown2.html.js";
+import { decideRealtimeWake, realtimeActivationLabel, shouldCreateRealtimeResponse, type RealtimeActivationMode } from "./realtime-sleep.js";
 import "./styles.css";
 
 const api = import.meta.env.VITE_MEETING_API_URL || "http://localhost:4317";
@@ -44,6 +45,7 @@ interface ShellRealtimeState {
   realtimeState: RealtimeState;
   realtimeMuted: boolean;
   realtimeResponseMode: RealtimeResponseMode;
+  realtimeActivationMode?: RealtimeActivationMode;
   reconnectAttempt?: number;
 }
 
@@ -86,6 +88,7 @@ function App() {
   const [realtimeState, setRealtimeState] = useState<RealtimeState>("idle");
   const [realtimeMuted, setRealtimeMuted] = useState(false);
   const [realtimeResponseMode, setRealtimeResponseMode] = useState<RealtimeResponseMode>("speak");
+  const [realtimeActivationMode, setRealtimeActivationMode] = useState<RealtimeActivationMode>("active");
   const [realtimePrompt, setRealtimePrompt] = useState("");
   const [realtimeDraftText, setRealtimeDraftText] = useState("");
   const [shellRealtimeState, setShellRealtimeState] = useState<ShellRealtimeState | null>(null);
@@ -101,6 +104,8 @@ function App() {
   const assistantDraftMessageIdRef = useRef<string | null>(null);
   const assistantDraftFlushTimeoutRef = useRef<number | null>(null);
   const realtimeMutedRef = useRef(false);
+  const realtimeActivationModeRef = useRef<RealtimeActivationMode>("active");
+  const lastRealtimeWakeAtRef = useRef(0);
   const pendingResponseModeRef = useRef<RealtimeResponseMode>("speak");
   const analysisTimeoutRef = useRef<number | null>(null);
   const liveAnalysisTimeoutRef = useRef<number | null>(null);
@@ -158,6 +163,10 @@ function App() {
   }, [realtimeState]);
 
   useEffect(() => {
+    realtimeActivationModeRef.current = realtimeActivationMode;
+  }, [realtimeActivationMode]);
+
+  useEffect(() => {
     if (isEmbedded || !connected || realtimeState !== "idle" || !realtimeDesiredRef.current) return;
     scheduleRealtimeReconnect(0, "meeting active");
   }, [connected, localStream, realtimeState]);
@@ -187,6 +196,7 @@ function App() {
         realtimeState: nextState,
         realtimeMuted: Boolean(data.realtimeMuted),
         realtimeResponseMode: nextMode === "silent" || nextMode === "speak" ? nextMode : "speak",
+        realtimeActivationMode: data.realtimeActivationMode === "sleeping" ? "sleeping" : "active",
         reconnectAttempt: typeof data.reconnectAttempt === "number" ? data.reconnectAttempt : undefined
       });
     };
@@ -219,19 +229,19 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (realtimeState !== "connected") return;
+    if (realtimeState !== "connected" || realtimeActivationModeRef.current === "sleeping") return;
     const latestPiAgentEvent = events.find(isPiAgentReviewEvent);
     if (!latestPiAgentEvent || latestPiAgentEvent.id === lastPiAgentNoticeIdRef.current) return;
     lastPiAgentNoticeIdRef.current = latestPiAgentEvent.id;
     const createdAt = Date.parse(latestPiAgentEvent.createdAt);
     if (Number.isFinite(createdAt) && Date.now() - createdAt > 45_000) return;
     void notifyRealtimeOfPiAgentUpdate(latestPiAgentEvent);
-  }, [events, realtimeState]);
+  }, [events, realtimeState, realtimeActivationMode]);
 
   const messages = events.filter((event): event is AgentMessageEvent => event.type === "agent.message");
   const handRaiseEvents = events.filter((event): event is AgentHandRaiseEvent => event.type === "agent.hand_raise" && event.agentId === realtimeAgentId);
   const activeHandRaises = handRaiseEvents.filter((event) => !dismissedHandIds.includes(event.id)).slice(0, 6);
-  const taskEvents = dedupeTasks(events.filter((event): event is AgentTaskEvent => event.type === "agent.task" && event.agentId === realtimeAgentId)).slice(0, 12);
+  const taskEvents = dedupeTasks(events.filter((event): event is AgentTaskEvent => event.type === "agent.task" && (event.agentId === realtimeAgentId || event.agentId === piAgentId))).slice(0, 12);
   const implementationTasks = taskEvents.filter((event) => event.stream === "implementation");
   const conversationTasks = taskEvents.filter((event) => (event.stream || "conversation") === "conversation");
   const implementationTaskColumns = {
@@ -243,13 +253,14 @@ function App() {
   const canvasMessages = messages.filter((event) => isCanvasMessage(event) && (event.stream || "conversation") === "conversation");
   const implementationCanvasMessages = messages.filter((event) => isCanvasMessage(event) && event.stream === "implementation");
   const selectableCanvasMessages = [...canvasMessages, ...implementationCanvasMessages].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const autoCanvasMessages = selectableCanvasMessages.filter((event) => !isTaskResultWrapperMessage(event));
   const statusMessages = messages.filter((event) => !isCanvasMessage(event));
   const conversationStatusMessages = statusMessages.filter((event) => (event.stream || "conversation") === "conversation");
   const implementationStatusMessages = statusMessages.filter((event) => event.stream === "implementation");
   const explicitCanvasDocument = resolveCanvasDocument(query, selectableCanvasMessages);
   const selectedCanvasMessage = selectedCanvasDocumentId ? selectableCanvasMessages.find((event) => event.documentId === selectedCanvasDocumentId) : undefined;
   const liveCanvasMessage = canvasMessages.find((event) => event.documentId === realtimeLiveCanvasDocumentId) || selectableCanvasMessages[0];
-  const autoCanvasMessage = selectableCanvasMessages[0] || liveCanvasMessage;
+  const autoCanvasMessage = autoCanvasMessages[0] || selectableCanvasMessages[0] || liveCanvasMessage;
   const focusedCanvasMessage = selectedCanvasMessage || (selectedCanvasDocumentId ? liveCanvasMessage : autoCanvasMessage);
   const canvasDocument = explicitCanvasDocument || (focusedCanvasMessage
     ? { agentId: focusedCanvasMessage.agentId, text: focusedCanvasMessage.text, createdAt: focusedCanvasMessage.createdAt, documentId: focusedCanvasMessage.documentId }
@@ -344,16 +355,12 @@ function App() {
           meetingId: "local-demo",
           createdAt: nowIso(),
           agentId: realtimeAgentId,
-          format: "markdown",
+          format: "plain",
           surface: "status",
           text: [
-            "Realtime agent connected.",
-            "",
-            `Mode: **${realtimeMutedRef.current ? "muted listener" : "audio responder"}**`,
-            "",
-            "**Available tools**",
-            "",
-            ...availableRealtimeTools.map((tool) => `- ${tool}`)
+            "Status: Realtime agent connected.",
+            `Confidence: High — mode is ${realtimeActivationLabel(realtimeActivationModeRef.current)} / ${realtimeMutedRef.current ? "muted listener" : "audio responder"}.`,
+            "Next: Use the prompt box or wake control; sleeping mode will not speak until explicitly prompted."
           ].join("\n")
         });
       });
@@ -459,7 +466,8 @@ function App() {
     scheduleRealtimeReconnect(100, "manual restart");
   }
 
-  function configureRealtimeSession(muted = realtimeMutedRef.current) {
+  function configureRealtimeSession(muted = realtimeMutedRef.current, activationMode = realtimeActivationModeRef.current) {
+    const createResponse = shouldCreateRealtimeResponse({ mode: activationMode, muted });
     sendRealtimeEvent({
       type: "session.update",
       session: {
@@ -472,10 +480,10 @@ function App() {
             },
             turn_detection: {
               type: "server_vad",
-              create_response: !muted,
-              interrupt_response: !muted,
+              create_response: createResponse,
+              interrupt_response: createResponse,
               prefix_padding_ms: 300,
-              silence_duration_ms: 900
+              silence_duration_ms: activationMode === "sleeping" ? 1200 : 900
             }
           }
         }
@@ -531,6 +539,10 @@ function App() {
     }
     if (type === "conversation.item.input_audio_transcription.completed") {
       await persistRealtimeTranscriptCompleted(event);
+      if (realtimeActivationModeRef.current === "sleeping") {
+        handleSleepingRealtimeTurn(String(event.transcript || event.text || ""));
+        return;
+      }
       if (realtimeMutedRef.current) {
         scheduleSilentAnalysis("user_turn_completed");
       } else {
@@ -680,9 +692,47 @@ function App() {
     if (remoteAudioRef.current) remoteAudioRef.current.muted = muted;
     restoreRealtimeBaseMode();
     if (realtimeState === "connected") {
-      configureRealtimeSession(muted);
-      void postRealtimeTrace("agent", muted ? "Realtime agent muted" : "Realtime agent unmuted", { audioResponses: !muted });
+      configureRealtimeSession(muted, realtimeActivationModeRef.current);
+      void postRealtimeTrace("agent", muted ? "Realtime agent muted" : "Realtime agent unmuted", { audioResponses: shouldCreateRealtimeResponse({ mode: realtimeActivationModeRef.current, muted }) });
     }
+  }
+
+  function setRealtimeAgentSleepMode(mode: RealtimeActivationMode, reason = "manual") {
+    if (postShellRealtimeCommand({ type: "meeting:realtime:activation", mode, reason })) {
+      setShellRealtimeState((current) => current ? { ...current, realtimeActivationMode: mode } : current);
+      return;
+    }
+    realtimeActivationModeRef.current = mode;
+    setRealtimeActivationMode(mode);
+    if (mode === "sleeping") {
+      if (analysisTimeoutRef.current !== null) window.clearTimeout(analysisTimeoutRef.current);
+      if (liveAnalysisTimeoutRef.current !== null) window.clearTimeout(liveAnalysisTimeoutRef.current);
+      analysisTimeoutRef.current = null;
+      liveAnalysisTimeoutRef.current = null;
+      beginRealtimeResponse("silent");
+    }
+    if (realtimeStateRef.current === "connected") configureRealtimeSession(realtimeMutedRef.current, mode);
+    void postRealtimeTrace("agent", mode === "sleeping" ? "Realtime agent sleeping until prompted" : "Realtime agent active", { reason, muted: realtimeMutedRef.current });
+  }
+
+  function handleSleepingRealtimeTurn(transcriptText: string) {
+    const decision = decideRealtimeWake({
+      mode: realtimeActivationModeRef.current,
+      muted: realtimeMutedRef.current,
+      transcript: transcriptText,
+      nowMs: Date.now(),
+      lastWakeAtMs: lastRealtimeWakeAtRef.current
+    });
+    if (!decision.shouldWake) {
+      void postRealtimeTrace("debug", "Sleeping Realtime ignored VAD turn", { reason: decision.reason });
+      return;
+    }
+    lastRealtimeWakeAtRef.current = Date.now();
+    realtimeActivationModeRef.current = "active";
+    setRealtimeActivationMode("active");
+    configureRealtimeSession(realtimeMutedRef.current, "active");
+    beginRealtimeResponse("silent");
+    void postRealtimeTrace("agent", "Realtime agent woke from prompt-like speech", { reason: decision.reason, muted: realtimeMutedRef.current });
   }
 
   function sendRealtimePrompt() {
@@ -693,6 +743,12 @@ function App() {
       return;
     }
     if (realtimeState !== "connected") return;
+    if (realtimeActivationModeRef.current === "sleeping") {
+      realtimeActivationModeRef.current = "active";
+      setRealtimeActivationMode("active");
+      configureRealtimeSession(realtimeMutedRef.current, "active");
+      void postRealtimeTrace("agent", "Realtime agent woke from explicit text prompt", undefined);
+    }
     sendRealtimeEvent({
       type: "conversation.item.create",
       item: {
@@ -733,6 +789,7 @@ function App() {
   function requestAgentFloor(reason?: string) {
     if (postShellRealtimeCommand({ type: "meeting:realtime:floor", reason })) return;
     if (realtimeState !== "connected") return;
+    if (realtimeActivationModeRef.current === "sleeping") setRealtimeAgentSleepMode("active", "floor granted");
     if (analysisTimeoutRef.current !== null) {
       window.clearTimeout(analysisTimeoutRef.current);
       analysisTimeoutRef.current = null;
@@ -773,6 +830,7 @@ function App() {
   function requestAgentTextFloor(mode: Exclude<AgentRequestedMode, "speak">, reason: string) {
     if (postShellRealtimeCommand({ type: "meeting:realtime:text-floor", mode, reason })) return;
     if (realtimeState !== "connected") return;
+    if (realtimeActivationModeRef.current === "sleeping") setRealtimeAgentSleepMode("active", "text floor granted");
     if (analysisTimeoutRef.current !== null) {
       window.clearTimeout(analysisTimeoutRef.current);
       analysisTimeoutRef.current = null;
@@ -812,7 +870,7 @@ function App() {
   }
 
   function scheduleSilentAnalysis(trigger: string) {
-    if (realtimeState !== "connected" || !realtimeMutedRef.current) return;
+    if (realtimeState !== "connected" || !realtimeMutedRef.current || realtimeActivationModeRef.current === "sleeping") return;
     if (analysisTimeoutRef.current !== null) window.clearTimeout(analysisTimeoutRef.current);
     analysisTimeoutRef.current = window.setTimeout(() => {
       analysisTimeoutRef.current = null;
@@ -821,7 +879,7 @@ function App() {
   }
 
   function scheduleLiveSilentAnalysis(trigger: string) {
-    if (realtimeState !== "connected" || !realtimeMutedRef.current) return;
+    if (realtimeState !== "connected" || !realtimeMutedRef.current || realtimeActivationModeRef.current === "sleeping") return;
     if (liveAnalysisTimeoutRef.current !== null) return;
     liveAnalysisTimeoutRef.current = window.setTimeout(() => {
       liveAnalysisTimeoutRef.current = null;
@@ -830,7 +888,7 @@ function App() {
   }
 
   async function requestSilentAnalysis(trigger: string) {
-    if (realtimeState !== "connected" || !realtimeMutedRef.current) return;
+    if (realtimeState !== "connected" || !realtimeMutedRef.current || realtimeActivationModeRef.current === "sleeping") return;
     const now = Date.now();
     if (now - lastAnalysisAtRef.current < 6000) return;
     lastAnalysisAtRef.current = now;
@@ -875,6 +933,7 @@ function App() {
   }
 
   async function notifyRealtimeOfPiAgentUpdate(event: AgentMessageEvent | AgentHandRaiseEvent) {
+    if (realtimeActivationModeRef.current === "sleeping") return;
     const updateText = formatPiAgentUpdateForRealtime(event);
     sendRealtimeTextMessage(updateText);
     await postRealtimeTrace("agent", "Pi-agent update injected into Realtime agent", { eventId: event.id, type: event.type, muted: realtimeMutedRef.current });
@@ -912,6 +971,7 @@ function App() {
   }
 
   function sendFollowupResponse() {
+    if (realtimeActivationModeRef.current === "sleeping") return;
     sendRealtimeEvent({
       type: "response.create",
       response: {
@@ -1072,9 +1132,10 @@ function App() {
   const effectiveRealtimeState = isEmbedded ? shellRealtimeState?.realtimeState || "idle" : realtimeState;
   const effectiveRealtimeMuted = isEmbedded ? shellRealtimeState?.realtimeMuted || false : realtimeMuted;
   const effectiveRealtimeResponseMode = isEmbedded ? shellRealtimeState?.realtimeResponseMode || "speak" : realtimeResponseMode;
+  const effectiveRealtimeActivationMode = isEmbedded ? shellRealtimeState?.realtimeActivationMode || "active" : realtimeActivationMode;
   const effectiveRealtimeConnected = effectiveRealtimeState === "connected";
   const effectiveRealtimeLabel = effectiveRealtimeConnected
-    ? `${effectiveRealtimeMuted ? "Muted listener" : "Audio responder"} · ${effectiveRealtimeResponseMode}`
+    ? `${effectiveRealtimeMuted ? "Muted listener" : "Audio responder"} · ${realtimeActivationLabel(effectiveRealtimeActivationMode)} · ${effectiveRealtimeResponseMode}`
     : effectiveRealtimeState === "connecting"
       ? "Connecting"
       : isEmbedded && shellRealtimeState?.joined
@@ -1120,6 +1181,11 @@ function App() {
               )}
               {effectiveRealtimeConnected && (
                 <button className="secondary" onClick={() => setRealtimeAgentMuted(!effectiveRealtimeMuted)}>{effectiveRealtimeMuted ? "Unmute agent" : "Mute agent"}</button>
+              )}
+              {effectiveRealtimeConnected && (
+                <button className="secondary" onClick={() => setRealtimeAgentSleepMode(effectiveRealtimeActivationMode === "sleeping" ? "active" : "sleeping", "menu toggle")}>
+                  {effectiveRealtimeActivationMode === "sleeping" ? "Wake voice agent" : "Sleep until prompted"}
+                </button>
               )}
               {effectiveRealtimeConnected && (
                 <button onClick={() => handleAgentHandAction(activeHandRaises[0])}>{handActionLabel(activeHandRaises[0])}</button>
@@ -1196,6 +1262,11 @@ function App() {
               {effectiveRealtimeConnected && (
                 <button className="secondary" onClick={() => setRealtimeAgentMuted(!effectiveRealtimeMuted)}>{effectiveRealtimeMuted ? "Unmute" : "Mute"}</button>
               )}
+              {effectiveRealtimeConnected && (
+                <button className="secondary" onClick={() => setRealtimeAgentSleepMode(effectiveRealtimeActivationMode === "sleeping" ? "active" : "sleeping", "control center toggle")}>
+                  {effectiveRealtimeActivationMode === "sleeping" ? "Wake" : "Sleep"}
+                </button>
+              )}
               <button className="secondary" onClick={() => setSelectedCanvasDocumentId(realtimeLiveCanvasDocumentId)}>Live notes</button>
               <button className="secondary" onClick={() => setSelectedCanvasDocumentId(null)}>Auto</button>
               <button className="secondary" onClick={() => setControlCenterOpen(false)}>Close</button>
@@ -1246,7 +1317,7 @@ function App() {
                         {event.details && <pre>{event.details}</pre>}
                         <div className="opsActions">
                           {event.taskKey && (event.status === "done" || event.status === "failed") && (
-                            <button onClick={() => setSelectedCanvasDocumentId(`task-result:${event.taskKey}`)}>Show result</button>
+                            <button onClick={() => setSelectedCanvasDocumentId(event.previewUrl || `task-result:${event.taskKey}`)}>Show result</button>
                           )}
                           {event.previewUrl && (
                             <a className="secondary buttonLink" href={event.previewUrl} target="_blank" rel="noreferrer">Open preview</a>
@@ -2764,6 +2835,10 @@ function isCanvasMessage(event: AgentMessageEvent): boolean {
 
 function isCanvasStatusWrapper(event: AgentMessageEvent): boolean {
   return !event.documentId && isAssistantStatusTemplate(event.text);
+}
+
+function isTaskResultWrapperMessage(event: AgentMessageEvent): boolean {
+  return typeof event.documentId === "string" && event.documentId.startsWith("task-result:");
 }
 
 interface RenderStats {

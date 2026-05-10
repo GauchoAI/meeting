@@ -883,7 +883,7 @@ function repoGuideText(): string {
 }
 
 function readMeetingContext(): unknown {
-  const canvasMessages = events.filter((event): event is Extract<MeetingEvent, { type: "agent.message" }> => event.type === "agent.message" && event.surface === "canvas" && !isCanvasStatusWrapper(event));
+  const canvasMessages = events.filter((event): event is Extract<MeetingEvent, { type: "agent.message" }> => event.type === "agent.message" && event.surface === "canvas" && !isCanvasStatusWrapper(event) && !isTaskResultWrapperMessage(event));
   const latestCanvas = canvasMessages[canvasMessages.length - 1];
   const transcript = events
     .filter((event): event is Extract<MeetingEvent, { type: "utterance.final" | "utterance.partial" }> => event.type === "utterance.final" || event.type === "utterance.partial")
@@ -1095,6 +1095,10 @@ function mirrorEventToPipeline(event: MeetingEvent): void {
 
 function isCanvasStatusWrapper(event: Extract<MeetingEvent, { type: "agent.message" }>): boolean {
   return !event.documentId && isAssistantStatusTemplate(event.text);
+}
+
+function isTaskResultWrapperMessage(event: Extract<MeetingEvent, { type: "agent.message" }>): boolean {
+  return typeof event.documentId === "string" && event.documentId.startsWith("task-result:");
 }
 
 function appendConversationInboxRecord(event: MeetingEvent): void {

@@ -12,7 +12,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "test:assistant-delivery": "node scripts/check-assistant-delivery.mjs"
+    "test:assistant-delivery": "node scripts/check-assistant-delivery.mjs",
+    "test:realtime-sleep": "node scripts/test-realtime-sleep.mjs"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {

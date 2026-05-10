@@ -1,6 +1,41 @@
 {
-  "updatedAt": "2026-05-10T02:10:07.499Z",
+  "updatedAt": "2026-05-10T03:33:25.305Z",
   "artifacts": [
+    {
+      "kind": "plan",
+      "slug": "current-project-plan-from-meeting-context",
+      "title": "Current Project Plan from Meeting Context",
+      "createdAt": "2026-05-10T03:33:25.273Z",
+      "updatedAt": "2026-05-10T03:33:25.273Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "project-plan",
+        "meeting-context",
+        "implementation-queue"
+      ],
+      "summary": "Readable Now/Next/Later/Done project plan based on current implementation task statuses in the Meeting context.",
+      "path": "artifacts/dt=2026-05-10/hour=00/plan-current-project-plan-from-meeting-context/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=00/plan-current-project-plan-from-meeting-context",
+      "mtime": "2026-05-10T03:33:25.290Z"
+    },
+    {
+      "kind": "note",
+      "slug": "concise-prompt-rendering-guidance",
+      "title": "Concise Prompt Rendering Guidance",
+      "createdAt": "2026-05-10T02:02:33.896Z",
+      "updatedAt": "2026-05-10T02:17:30.000Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "terminal",
+        "prompt-rendering",
+        "concision",
+        "guidance"
+      ],
+      "summary": "Concise guidance for rendering pi-agent questions and instructions with current-vs-preferred examples, a reusable template, and a canvas selection rule that keeps artifacts ahead of wrapper status.",
+      "path": "artifacts/dt=2026-05-10/hour=23/note-concise-prompt-rendering-guidance/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=23/note-concise-prompt-rendering-guidance",
+      "mtime": "2026-05-10T02:19:57.714Z"
+    },
     {
       "kind": "note",
       "slug": "exact-verbatim-input-comparison",
@@ -36,24 +71,6 @@
       "path": "artifacts/dt=2026-05-10/hour=23/note-verbatim-message-rendering-before-after/artifact.smart.md",
       "dir": "artifacts/dt=2026-05-10/hour=23/note-verbatim-message-rendering-before-after",
       "mtime": "2026-05-10T02:08:02.189Z"
-    },
-    {
-      "kind": "note",
-      "slug": "concise-prompt-rendering-guidance",
-      "title": "Concise Prompt Rendering Guidance",
-      "createdAt": "2026-05-10T02:02:33.896Z",
-      "updatedAt": "2026-05-10T02:02:33.896Z",
-      "artifact": "artifact.smart.md",
-      "tags": [
-        "terminal",
-        "prompt-rendering",
-        "concision",
-        "guidance"
-      ],
-      "summary": "Short guidance for rendering pi-agent questions and instructions with minimal boilerplate, before/after examples, and a reusable template.",
-      "path": "artifacts/dt=2026-05-10/hour=23/note-concise-prompt-rendering-guidance/artifact.smart.md",
-      "dir": "artifacts/dt=2026-05-10/hour=23/note-concise-prompt-rendering-guidance",
-      "mtime": "2026-05-10T02:02:33.905Z"
     },
     {
       "kind": "implementation",
