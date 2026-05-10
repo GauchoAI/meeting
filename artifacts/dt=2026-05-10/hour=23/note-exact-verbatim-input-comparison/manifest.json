@@ -1,0 +1,15 @@
+{
+  "kind": "note",
+  "slug": "exact-verbatim-input-comparison",
+  "title": "Exact Verbatim Input View and Comparison",
+  "createdAt": "2026-05-10T02:10:07.480Z",
+  "updatedAt": "2026-05-10T02:10:07.480Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "verbatim",
+    "prompt-rendering",
+    "comparison",
+    "terminal"
+  ],
+  "summary": "Exact received Task/Context/Constraints/Output input plus concise differences versus the current verbatim message rendering artifact."
+}
