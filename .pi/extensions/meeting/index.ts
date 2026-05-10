@@ -657,8 +657,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		if (!ctx.isIdle() && !isRealtimeInjectedMessage) {
-			void postTrace("debug", "ignored meeting utterance while agent busy", { id: event.id, createdAt: event.createdAt, textChars: text.length });
-			return;
+			void postTrace("debug", "queued meeting utterance as follow-up while agent busy", { id: event.id, createdAt: event.createdAt, textChars: text.length });
 		}
 		lastHostUtterance = text;
 		const extensionReceivedAt = Date.now();

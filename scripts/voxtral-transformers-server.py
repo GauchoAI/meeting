@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -86,14 +88,42 @@ def transcribe(audio_bytes: bytes, extension: str) -> str:
     suffix = f".{safe_extension(extension)}"
     with tempfile.TemporaryDirectory(prefix="meeting-voxtral-") as tmpdir:
         source = Path(tmpdir) / f"chunk{suffix}"
+        wav = Path(tmpdir) / "chunk.wav"
         source.write_bytes(audio_bytes)
-        audio = Audio.from_file(str(source), strict=False)
+        convert_to_wav(source, wav)
+        audio = Audio.from_file(str(wav), strict=False)
         audio.resample(PROCESSOR.feature_extractor.sampling_rate)
         inputs = PROCESSOR(audio.audio_array, return_tensors="pt")
         inputs = inputs.to(MODEL.device, dtype=MODEL.dtype)
         outputs = MODEL.generate(**inputs)
         decoded = PROCESSOR.batch_decode(outputs, skip_special_tokens=True)
         return (decoded[0] if decoded else "").strip()
+
+
+def convert_to_wav(source: Path, destination: Path) -> None:
+    ffmpeg = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg is required to decode browser microphone chunks for Voxtral STT")
+    command = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source),
+        "-ar",
+        str(PROCESSOR.feature_extractor.sampling_rate),
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+        str(destination),
+    ]
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "unknown ffmpeg error").strip()
+        raise RuntimeError(f"ffmpeg failed to decode {source.suffix or 'audio'} chunk: {detail}")
 
 
 def safe_extension(extension: str) -> str:

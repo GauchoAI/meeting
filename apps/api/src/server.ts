@@ -116,7 +116,7 @@ const server = createServer(async (req, res) => {
         meetingId,
         createdAt: nowIso(),
         level: "warn",
-        text: `Local Whisper transcription failed: ${message}`
+        text: `Local STT transcription failed: ${message}`
       });
       return sendJson(res, { ok: false, error: message }, 500);
     }

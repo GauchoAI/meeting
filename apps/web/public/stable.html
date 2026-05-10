@@ -55,6 +55,8 @@
     const legacyAutoJoinKey = "meeting.autoJoin";
     const realtimeAgentId = "realtime-codex";
     const piAgentId = "pi-agent";
+    const requestedVoiceMode = parseVoiceMode(new URLSearchParams(window.location.search).get("voiceMode"));
+    const hasExplicitVoiceMode = Boolean(requestedVoiceMode);
 
     const statusEl = document.getElementById("status");
     const dotEl = document.getElementById("dot");
@@ -69,12 +71,13 @@
 
     let localStream = null;
     let joined = false;
-    let voiceMode = localStorage.getItem("meeting.voiceMode") || "realtime";
+    let voiceMode = requestedVoiceMode || parseVoiceMode(localStorage.getItem("meeting.voiceMode")) || "realtime";
+    let voiceModeManuallySelected = false;
     let speechProvider = "unknown";
     let realtimePeer = null;
     let realtimeChannel = null;
     let realtimeState = "idle";
-    let realtimeDesired = true;
+    let realtimeDesired = usesRealtimeVoice();
     let realtimeMuted = false;
     let realtimeResponseMode = "speak";
     let realtimeActivationMode = "active";
@@ -106,7 +109,10 @@
     leaveButton.addEventListener("click", leave);
     muteButton.addEventListener("click", () => setRealtimeAgentMuted(!realtimeMuted));
     sleepButton.addEventListener("click", () => setRealtimeAgentActivationMode(realtimeActivationMode === "sleeping" ? "active" : "sleeping", "stable shell toggle"));
-    voiceModeSelect.addEventListener("change", () => setVoiceMode(String(voiceModeSelect.value || "realtime")));
+    voiceModeSelect.addEventListener("change", () => {
+      voiceModeManuallySelected = true;
+      setVoiceMode(String(voiceModeSelect.value || "realtime"));
+    });
     uiFrame.addEventListener("load", publishShellState);
 
     window.addEventListener("message", (event) => {
@@ -123,7 +129,6 @@
 
     voiceModeSelect.value = voiceMode;
     void loadSpeechStatus().then(() => {
-      if (!localStorage.getItem("meeting.voiceMode") && speechProvider === "voxtral-http") setVoiceMode("local", { persist: false, trace: false });
       renderStatus();
       publishShellState();
     }).catch((error) => {
@@ -148,7 +153,7 @@
       await loadSpeechStatus().catch(() => undefined);
       localStream = await getMeetingMediaStream();
       joined = true;
-      realtimeDesired = true;
+      realtimeDesired = usesRealtimeVoice();
       sessionStorage.setItem(autoJoinKey, "true");
       sessionStorage.setItem(legacyAutoJoinKey, "true");
       joinButton.hidden = true;
@@ -322,7 +327,7 @@
       const delay = delayMs ?? Math.min(15000, 750 * 2 ** Math.min(attempt, 5));
       realtimeReconnectTimer = window.setTimeout(() => {
         realtimeReconnectTimer = null;
-        if (!realtimeDesired || !joined || realtimeState !== "idle") return;
+        if (!usesRealtimeVoice() || !realtimeDesired || !joined || realtimeState !== "idle") return;
         realtimeReconnectAttempt += 1;
         void postRealtimeTrace("agent", "Realtime auto-reconnect from stable shell", { attempt: realtimeReconnectAttempt, reason });
         connectRealtimeAgent(localStream);
@@ -560,6 +565,7 @@
     async function loadSpeechStatus() {
       const health = await fetch(`${api}/health`).then((res) => res.json());
       speechProvider = String(health?.speech?.provider || "unknown");
+      preferLocalVoiceForLocalProvider();
       return health;
     }
 
@@ -575,7 +581,7 @@
     }
 
     function setVoiceMode(next, options = {}) {
-      const mode = next === "local" || next === "hybrid" ? next : "realtime";
+      const mode = parseVoiceMode(next) || "realtime";
       const previous = voiceMode;
       voiceMode = mode;
       voiceModeSelect.value = mode;
@@ -583,8 +589,14 @@
       if (joined && localStream) {
         if (usesLocalStt()) startLocalSttCapture(localStream);
         else stopLocalSttCapture();
-        if (usesRealtimeVoice()) ensureRealtimeConnected("voice mode changed");
-        else disconnectRealtimeAgent({ intentional: true });
+        if (usesRealtimeVoice()) {
+          realtimeDesired = true;
+          ensureRealtimeConnected("voice mode changed");
+        } else {
+          realtimeDesired = false;
+          clearRealtimeReconnect();
+          disconnectRealtimeAgent({ intentional: true });
+        }
       }
       if (options.trace !== false && previous !== mode) void postRealtimeTrace("agent", "Stable shell voice mode changed", { previous, voiceMode: mode, speechProvider });
       renderStatus();
@@ -601,6 +613,17 @@
 
     function usesLocalSpeechOutput() {
       return voiceMode === "local";
+    }
+
+    function preferLocalVoiceForLocalProvider() {
+      if (hasExplicitVoiceMode || voiceModeManuallySelected) return;
+      if ((speechProvider === "voxtral-http" || speechProvider === "moshi-http") && voiceMode === "realtime") {
+        setVoiceMode("local", { persist: true, trace: false });
+      }
+    }
+
+    function parseVoiceMode(value) {
+      return value === "local" || value === "hybrid" || value === "realtime" ? value : null;
     }
 
     function setRealtimeAgentMuted(muted) {
@@ -933,7 +956,7 @@
         } catch {
           return;
         }
-        if (isPiAgentReviewEvent(event)) {
+        if (isPiAgentReviewEvent(event) || (usesLocalSpeechOutput() && isLocalSpeakablePiAgentMessage(event))) {
           if (usesRealtimeVoice() && realtimeState === "connected") {
             void notifyRealtimeOfPiAgentUpdate(event);
           } else if (usesLocalSpeechOutput()) {
@@ -1022,12 +1045,11 @@
     }
 
     async function handleLocalPiAgentUpdate(event) {
-      if (!isVoiceAgentDirectMessage(event) || realtimeMuted) return;
-      const envelope = parseVoiceAgentEnvelope(String(event.text || ""));
-      const message = envelope.message || String(event.text || "").trim();
+      if (realtimeMuted) return;
+      const message = localSpeechTextForPiAgentUpdate(event);
       if (!message) return;
       speakLocalVoiceMessage(message);
-      await postRealtimeTrace("agent", "Local voice spoke Pi/Codex message", { eventId: event.id, intent: envelope.intent || "inform" });
+      await postRealtimeTrace("agent", "Local voice spoke Pi/Codex message", { eventId: event.id, direct: isVoiceAgentDirectMessage(event) });
     }
 
     function speakLocalVoiceMessage(message) {
@@ -1111,6 +1133,15 @@
       return event.surface === "canvas" || event.stream === "implementation" || Boolean(event.documentId);
     }
 
+    function isLocalSpeakablePiAgentMessage(event) {
+      if (!event || event.agentId !== piAgentId) return false;
+      if (event.type === "agent.hand_raise") return true;
+      if (event.type !== "agent.message" || event.lifecycle !== "final") return false;
+      const text = String(event.text || "").trim();
+      if (!text || /^(ok|okay|noted|thanks|you.?re welcome|i.?m here)[.!]*$/i.test(text)) return false;
+      return event.surface === "status" || event.surface === "canvas" || Boolean(event.documentId);
+    }
+
     function isVoiceAgentDirectMessage(event) {
       return event?.type === "agent.message" && String(event.documentId || "").startsWith("voice-message:");
     }
@@ -1123,6 +1154,37 @@
         result[match[1].toLowerCase()] = match[2].trim();
       }
       return result;
+    }
+
+    function localSpeechTextForPiAgentUpdate(event) {
+      if (event?.type === "agent.hand_raise") return clipText(String(event.reason || "I have a suggestion."), 240);
+      if (!event || event.type !== "agent.message") return "";
+      if (isVoiceAgentDirectMessage(event)) {
+        const envelope = parseVoiceAgentEnvelope(String(event.text || ""));
+        return clipText(envelope.message || String(event.text || "").trim(), 360);
+      }
+      const speech = markdownToSpeech(String(event.text || ""));
+      if (!speech) return "";
+      if (event.surface === "canvas" || event.documentId) return clipText(`I updated the canvas. ${firstSpeechSentence(speech)}`, 300);
+      return clipText(speech, 360);
+    }
+
+    function markdownToSpeech(text) {
+      return String(text || "")
+        .replace(/```[\s\S]*?```/g, " code block ")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, " image ")
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+        .replace(/^#{1,6}\s*/gm, "")
+        .replace(/^[\s>*-]+/gm, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function firstSpeechSentence(text) {
+      const normalized = String(text || "").trim();
+      const match = /^(.{20,220}?[.!?])\s/.exec(normalized);
+      return match ? match[1] : clipText(normalized, 220);
     }
 
     function formatPiAgentUpdateForRealtime(event, context) {
