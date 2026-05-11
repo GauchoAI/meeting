@@ -87,7 +87,7 @@ MEETING_TTS_PROVIDER=chatterbox-turbo
 CHATTERBOX_TTS_URL=http://127.0.0.1:8791/synthesize
 ```
 
-Mistral Voxtral TTS is available as an explicit provider:
+Mistral-hosted Voxtral TTS is available as an explicit provider when a Mistral API key is present:
 
 ```bash
 MEETING_TTS_PROVIDER=mistral-voxtral
@@ -106,6 +106,25 @@ MISTRAL_TTS_BASE_URL=https://api.mistral.ai/v1
 ```
 
 Use `wav` for `/tts/synthesize` because it returns browser-playable audio with no client-side decoding work. Use `/tts/stream` for the Voxtral low-latency path: the API requests `stream=true` and `response_format=pcm`, relays Mistral `speech.audio.delta` events, and the stable shell schedules PCM float32 chunks through WebAudio as they arrive. If streaming fails, the shell falls back to `/tts/synthesize`; it still never falls back to browser `speechSynthesis`.
+
+Local Voxtral TTS on Apple Silicon uses MLX Audio:
+
+```bash
+scripts/start-voxtral-mlx-tts.sh
+```
+
+Then configure the Meeting API:
+
+```bash
+MEETING_TTS_PROVIDER=mlx-voxtral
+VOXTRAL_MLX_TTS_URL=http://127.0.0.1:8792/v1/audio/speech
+VOXTRAL_MLX_TTS_MODEL=mlx-community/Voxtral-4B-TTS-2603-mlx-4bit
+VOXTRAL_MLX_TTS_VOICE=casual_male
+VOXTRAL_MLX_TTS_RESPONSE_FORMAT=wav
+VOXTRAL_MLX_TTS_STREAMING_INTERVAL=0.32
+```
+
+The first request downloads and loads the MLX model, so it can take a while. After warmup, `/tts/stream` posts `stream=true` and `response_format=pcm` to MLX Audio, converts raw PCM int16 chunks to the browser player's float32 SSE format, and starts playback before the full sentence is complete.
 
 ## Voxtral TTS notes from `voxtral-demo.txt`
 
