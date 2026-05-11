@@ -1069,6 +1069,17 @@
         return;
       }
       const now = Date.now();
+      if (localPushToTalkActive) {
+        if (localSttPausedForSpeech || localSpeechAudioPlaying() || localSpeechQueuePlaying || localSpeechQueue.length) {
+          stopLocalSpeechForManualInput();
+        }
+        if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
+        if (localSttRecorder?.state === "recording" && now - localSttRecorderStartedAt >= localPushToTalkMaxMs()) {
+          stopLocalPushToTalk();
+        }
+        scheduleLocalVadTick();
+        return;
+      }
       if (localSttPausedForSpeech) {
         const level = currentLocalMicLevel();
         const canInterrupt = now - localSpeechStartedAt >= localBargeInGraceMs();
@@ -1082,14 +1093,6 @@
         }
         localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, now + 450);
         if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
-        scheduleLocalVadTick();
-        return;
-      }
-      if (localPushToTalkActive) {
-        if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
-        if (localSttRecorder?.state === "recording" && now - localSttRecorderStartedAt >= localSpeechMaxMs()) {
-          stopLocalPushToTalk();
-        }
         scheduleLocalVadTick();
         return;
       }
@@ -1282,6 +1285,11 @@
 
     function localSpeechMaxMs() {
       return 22000;
+    }
+
+    function localPushToTalkMaxMs() {
+      const configured = Number(localStorage.getItem("meeting.localPushToTalkMaxMs") || "600000");
+      return Number.isFinite(configured) ? Math.max(30000, Math.min(1800000, configured)) : 600000;
     }
 
     async function sendAudioChunk(blob, clientStartedAt = 0) {
