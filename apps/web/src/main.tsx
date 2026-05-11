@@ -2883,6 +2883,7 @@ function speechProviderLabel(provider: string): string {
   if (provider === "voxtral-http") return "Local Voxtral";
   if (provider === "local-whisper") return "Local Whisper";
   if (provider === "moshi-http") return "Local Moshi";
+  if (provider === "parakeet-http") return "Local Parakeet";
   return "Local STT";
 }
 

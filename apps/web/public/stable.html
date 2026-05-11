@@ -666,7 +666,7 @@
 
     function preferLocalVoiceForLocalProvider() {
       if (hasExplicitVoiceMode || voiceModeManuallySelected) return;
-      if ((speechProvider === "local-whisper" || speechProvider === "voxtral-http" || speechProvider === "moshi-http") && voiceMode === "realtime") {
+      if ((speechProvider === "local-whisper" || speechProvider === "voxtral-http" || speechProvider === "moshi-http" || speechProvider === "parakeet-http") && voiceMode === "realtime") {
         setVoiceMode("local", { persist: true, trace: false });
       }
     }
@@ -2172,6 +2172,7 @@
       if (speechProvider === "voxtral-http") return "Local Voxtral";
       if (speechProvider === "local-whisper") return "Local Whisper";
       if (speechProvider === "moshi-http") return "Local Moshi";
+      if (speechProvider === "parakeet-http") return "Local Parakeet";
       return "Local STT";
     }
 

@@ -4,7 +4,7 @@ The stable Meeting pipeline should keep Pi/Codex as the tool-using brain. Local 
 
 ## Recommendation
 
-1. Use Voxtral as the first local drop-in STT experiment.
+1. Use Parakeet V3 as the multilingual local drop-in STT experiment when Handy has already downloaded the ONNX model.
 2. Use Moshi MLX as a sidecar full-duplex voice lab.
 3. Keep `message_pi_agent`, `run_codex_task`, artifacts, and task lifecycle in Pi/Codex.
 
@@ -35,13 +35,43 @@ pnpm dev:api
 
 The bridge is intentionally simple: it receives each browser audio chunk, transcribes it, and returns JSON. This tests local quality and integration before investing in a true streaming vLLM deployment.
 
-The stable shell exposes three voice modes:
+## Parakeet V3 STT
+
+Model: `parakeet-tdt-0.6b-v3-int8`
+
+Purpose: replace local Whisper on the existing `/audio/chunk` path with Handy's fast ONNX Parakeet V3 model while preserving the same transcript JSONL and Pi/Codex downstream behavior.
+
+Start the local bridge:
+
+```bash
+cd /Users/miguel_lemos/Desktop/mamba3/meeting
+scripts/start-parakeet-stt-server.sh
+```
+
+Then point the Meeting API at it:
+
+```bash
+STT_PROVIDER=parakeet-http \
+PARAKEET_STT_URL=http://localhost:8793/transcribe \
+pnpm dev:api
+```
+
+By default the bridge reuses Handy's downloaded model at:
+
+```txt
+~/Library/Application Support/com.pais.handy/models/parakeet-tdt-0.6b-v3-int8
+```
+
+Override it with `PARAKEET_STT_MODEL_PATH` if the model lives elsewhere. The bridge keeps the model loaded and accepts raw browser audio chunks, converts them to 16 kHz mono WAV through `ffmpeg`, and returns `{ text, model, elapsedMs }` like the existing Voxtral/Moshi bridges.
+
+The stable shell exposes these voice modes:
 
 - `OpenAI voice`: the previous OpenAI Realtime listen/speak path.
+- `Local Parakeet`: microphone chunks go to `/audio/chunk`, which uses Parakeet through `STT_PROVIDER=parakeet-http`; Pi/Codex remains the tool-using brain; explicit Pi voice messages must use the local TTS path, not browser speech synthesis.
 - `Local Voxtral`: microphone chunks go to `/audio/chunk`, which uses Voxtral through `STT_PROVIDER=voxtral-http`; Pi/Codex remains the tool-using brain; explicit Pi voice messages must use the local TTS path, not browser speech synthesis.
-- `Hybrid`: OpenAI Realtime remains the conversational voice while local Voxtral also writes transcript events into the Meeting/Pi pipeline.
+- `Hybrid`: OpenAI Realtime remains the conversational voice while the selected local STT provider also writes transcript events into the Meeting/Pi pipeline.
 
-When `.env` sets `STT_PROVIDER=voxtral-http`, the stable shell defaults to `Local Voxtral` unless `localStorage.meeting.voiceMode` already has a saved preference.
+When `.env` sets a local provider such as `STT_PROVIDER=parakeet-http`, the stable shell defaults to local voice unless `localStorage.meeting.voiceMode` already has a saved preference.
 
 ## Moshi MLX Lab
 

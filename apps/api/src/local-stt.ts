@@ -1,6 +1,6 @@
 import { transcribeWithLocalWhisper } from "./local-whisper.js";
 
-export type LocalSttProvider = "local-whisper" | "voxtral-http" | "moshi-http";
+export type LocalSttProvider = "local-whisper" | "voxtral-http" | "moshi-http" | "parakeet-http";
 
 export interface LocalSttResult {
   text: string;
@@ -13,7 +13,7 @@ export interface LocalSttResult {
 
 export function currentLocalSttProvider(): LocalSttProvider {
   const provider = process.env.STT_PROVIDER;
-  if (provider === "voxtral-http" || provider === "moshi-http") return provider;
+  if (provider === "voxtral-http" || provider === "moshi-http" || provider === "parakeet-http") return provider;
   return "local-whisper";
 }
 
@@ -47,7 +47,8 @@ async function transcribeWithHttpStt(provider: Exclude<LocalSttProvider, "local-
 
 function sttEndpoint(provider: Exclude<LocalSttProvider, "local-whisper">): string {
   if (provider === "voxtral-http") return process.env.VOXTRAL_STT_URL || "http://localhost:8787/transcribe";
-  return process.env.MOSHI_STT_URL || "http://localhost:8788/transcribe";
+  if (provider === "moshi-http") return process.env.MOSHI_STT_URL || "http://localhost:8788/transcribe";
+  return process.env.PARAKEET_STT_URL || "http://localhost:8793/transcribe";
 }
 
 function parseSttResponse(body: string): { text: string; model?: string; elapsedMs?: number } {

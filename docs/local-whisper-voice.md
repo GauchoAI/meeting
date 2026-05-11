@@ -7,7 +7,7 @@ The reliable voice architecture is: browser capture sends explicit speech turns,
 - The stable shell at `http://localhost:5175/stable.html` owns mic capture and speech output so the meeting UI can hot reload without dropping voice state.
 - Local capture defaults to push-to-talk: hold Space while speaking, release Space to send one clip to Whisper.
 - The API receives only stable-shell chunks with `client=stable-vad-v1`; legacy chunks are ignored for local providers unless `MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS=true`.
-- `STT_PROVIDER=local-whisper` keeps OpenAI Realtime disabled by default. Set `MEETING_ALLOW_OPENAI_REALTIME=true` only for explicit paid realtime tests.
+- `STT_PROVIDER=local-whisper` keeps OpenAI Realtime disabled by default. Other local STT providers such as `parakeet-http` do the same. Set `MEETING_ALLOW_OPENAI_REALTIME=true` only for explicit paid realtime tests.
 - `WHISPER_SERVER_URL=http://127.0.0.1:8790/inference` enables the preloaded `whisper-server` path. Without it, the API falls back to spawning `whisper-cli` per chunk.
 
 ## Low-Latency Mode
@@ -27,6 +27,19 @@ WHISPER_MODEL_PATH=models/ggml-small.bin
 ```
 
 The server path avoids reloading the 465 MB `ggml-small.bin` model for every spoken turn. That is the biggest latency win available without returning to paid realtime models.
+
+To try Handy's downloaded Parakeet V3 model instead of Whisper:
+
+```bash
+scripts/start-parakeet-stt-server.sh
+```
+
+Then configure:
+
+```env
+STT_PROVIDER=parakeet-http
+PARAKEET_STT_URL=http://127.0.0.1:8793/transcribe
+```
 
 ## Capture Mode
 

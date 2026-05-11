@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { streamingTtsSupported, ttsProviderStatus, type TtsProviderStatus } from "./tts.js";
 
 export interface SpeechProviderStatus {
-  provider: "local-whisper" | "deepgram" | "voxtral-http" | "moshi-http";
+  provider: "local-whisper" | "deepgram" | "voxtral-http" | "moshi-http" | "parakeet-http";
   configured: boolean;
   streamingStt: boolean;
   streamingTts: boolean;
@@ -38,7 +38,7 @@ function localTtsStatus(): SpeechProviderStatus["localTts"] {
 
 function speechProvider(): SpeechProviderStatus["provider"] {
   const provider = process.env.STT_PROVIDER;
-  if (provider === "deepgram" || provider === "voxtral-http" || provider === "moshi-http") return provider;
+  if (provider === "deepgram" || provider === "voxtral-http" || provider === "moshi-http" || provider === "parakeet-http") return provider;
   return "local-whisper";
 }
 
@@ -46,6 +46,7 @@ function speechProviderConfigured(provider: SpeechProviderStatus["provider"]): b
   if (provider === "deepgram") return Boolean(process.env.DEEPGRAM_API_KEY);
   if (provider === "voxtral-http") return Boolean(process.env.VOXTRAL_STT_URL || process.env.STT_PROVIDER === "voxtral-http");
   if (provider === "moshi-http") return Boolean(process.env.MOSHI_STT_URL || process.env.STT_PROVIDER === "moshi-http");
+  if (provider === "parakeet-http") return Boolean(process.env.PARAKEET_STT_URL || process.env.STT_PROVIDER === "parakeet-http");
   return Boolean(process.env.WHISPER_SERVER_URL || (process.env.WHISPER_CPP_BIN && process.env.WHISPER_MODEL_PATH));
 }
 
@@ -56,6 +57,7 @@ function streamingSttSupported(provider: SpeechProviderStatus["provider"]): bool
 function localListenModel(provider: SpeechProviderStatus["provider"]): string | undefined {
   if (provider === "voxtral-http") return process.env.VOXTRAL_STT_MODEL || "mistralai/Voxtral-Mini-4B-Realtime-2602";
   if (provider === "moshi-http") return process.env.MOSHI_STT_MODEL || "kyutai/moshika-mlx-bf16";
+  if (provider === "parakeet-http") return process.env.PARAKEET_STT_MODEL || "parakeet-tdt-0.6b-v3-int8";
   if (provider === "local-whisper") return process.env.WHISPER_MODEL_PATH;
   return undefined;
 }
@@ -64,6 +66,7 @@ function speechProviderNote(provider: SpeechProviderStatus["provider"]): string 
   if (provider === "deepgram") return process.env.DEEPGRAM_API_KEY ? "Deepgram key detected." : "Set DEEPGRAM_API_KEY for Deepgram STT.";
   if (provider === "voxtral-http") return `Experimental local Voxtral STT over HTTP at ${process.env.VOXTRAL_STT_URL || "http://localhost:8787/transcribe"}.`;
   if (provider === "moshi-http") return `Experimental Moshi bridge over HTTP at ${process.env.MOSHI_STT_URL || "http://localhost:8788/transcribe"}. Moshi is for full-duplex voice experiments, not durable tool use.`;
+  if (provider === "parakeet-http") return `Experimental local Parakeet V3 STT over HTTP at ${process.env.PARAKEET_STT_URL || "http://localhost:8793/transcribe"}.`;
   if (process.env.WHISPER_SERVER_URL) return `Local Whisper server detected at ${process.env.WHISPER_SERVER_URL}; using preloaded model path when available.`;
   return process.env.DEEPGRAM_API_KEY
     ? "Deepgram key detected; local Whisper remains the default STT provider unless STT_PROVIDER=deepgram."
