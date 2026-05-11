@@ -12,6 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from queue import Queue
 from typing import Any
 
 import soundfile as sf
@@ -25,6 +26,7 @@ PORT = int(os.environ.get("QWEN3_TTS_PORT", "8794"))
 MODEL_ID = os.environ.get("QWEN3_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-0.6B-Base")
 DEVICE = os.environ.get("QWEN3_TTS_DEVICE", "auto")
 DTYPE = os.environ.get("QWEN3_TTS_DTYPE", "auto")
+WORKERS = max(1, int(os.environ.get("QWEN3_TTS_WORKERS", "2")))
 REF_DIR = Path(os.environ.get("QWEN3_TTS_REF_DIR", str(ROOT / ".meeting" / "qwen3-tts-refs")))
 
 
@@ -130,12 +132,13 @@ def request_text(payload: dict[str, Any]) -> str:
 
 
 class Qwen3TtsEngine:
-    def __init__(self) -> None:
+    def __init__(self, index: int) -> None:
+        self.index = index
         self.lock = threading.Lock()
         self.device = choose_device()
         self.dtype = choose_dtype(self.device)
         started = time.time()
-        print(f"[meeting-qwen3-tts] loading {MODEL_ID} on {self.device} dtype={self.dtype}", flush=True)
+        print(f"[meeting-qwen3-tts] loading worker={self.index} {MODEL_ID} on {self.device} dtype={self.dtype}", flush=True)
         self.model = Qwen3TTSModel.from_pretrained(
             MODEL_ID,
             device_map=self.device,
@@ -143,7 +146,7 @@ class Qwen3TtsEngine:
             attn_implementation=None,
         )
         self.supported_languages = set(self.model.get_supported_languages() or [])
-        print(f"[meeting-qwen3-tts] ready in {time.time() - started:.2f}s; languages={sorted(self.supported_languages)}", flush=True)
+        print(f"[meeting-qwen3-tts] worker={self.index} ready in {time.time() - started:.2f}s; languages={sorted(self.supported_languages)}", flush=True)
 
     def synthesize(self, text: str, requested_language: str | None) -> tuple[bytes, int, str, float]:
         language = normalize_language(requested_language)
@@ -175,7 +178,26 @@ class Qwen3TtsEngine:
             return buffer.getvalue(), sample_rate, language, elapsed_ms
 
 
-ENGINE = Qwen3TtsEngine()
+class Qwen3TtsPool:
+    def __init__(self, workers: int) -> None:
+        self.engines = [Qwen3TtsEngine(index + 1) for index in range(workers)]
+        self.available: Queue[Qwen3TtsEngine] = Queue()
+        for engine in self.engines:
+            self.available.put(engine)
+        self.device = self.engines[0].device
+        self.dtype = self.engines[0].dtype
+        self.supported_languages = set().union(*(engine.supported_languages for engine in self.engines))
+
+    def synthesize(self, text: str, requested_language: str | None) -> tuple[bytes, int, str, float, int]:
+        engine = self.available.get()
+        try:
+            audio, sample_rate, language, elapsed_ms = engine.synthesize(text, requested_language)
+            return audio, sample_rate, language, elapsed_ms, engine.index
+        finally:
+            self.available.put(engine)
+
+
+ENGINE_POOL = Qwen3TtsPool(WORKERS)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -187,9 +209,10 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "provider": "qwen3-tts",
                 "model": MODEL_ID,
-                "device": ENGINE.device,
-                "dtype": str(ENGINE.dtype),
-                "languages": sorted(ENGINE.supported_languages),
+                "device": ENGINE_POOL.device,
+                "dtype": str(ENGINE_POOL.dtype),
+                "workers": len(ENGINE_POOL.engines),
+                "languages": sorted(ENGINE_POOL.supported_languages),
             })
             return
         self.write_json(404, {"error": "not found"})
@@ -205,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 self.write_json(400, {"error": "text is required"})
                 return
-            audio, sample_rate, language, elapsed_ms = ENGINE.synthesize(text, payload.get("language"))
+            audio, sample_rate, language, elapsed_ms, worker = ENGINE_POOL.synthesize(text, payload.get("language"))
             self.send_response(200)
             self.send_header("Content-Type", "audio/wav")
             self.send_header("Content-Length", str(len(audio)))
@@ -213,9 +236,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("X-Qwen3-TTS-Language", language)
             self.send_header("X-Qwen3-TTS-Sample-Rate", str(sample_rate))
             self.send_header("X-Qwen3-TTS-Model", MODEL_ID)
+            self.send_header("X-Qwen3-TTS-Worker", str(worker))
             self.end_headers()
             self.wfile.write(audio)
-            print(f"[meeting-qwen3-tts] {int(elapsed_ms)}ms language={language} chars={len(text)} bytes={len(audio)}", flush=True)
+            print(f"[meeting-qwen3-tts] {int(elapsed_ms)}ms worker={worker} language={language} chars={len(text)} bytes={len(audio)}", flush=True)
         except Exception as exc:
             print(f"[meeting-qwen3-tts] error: {exc}", flush=True)
             self.write_json(500, {"error": str(exc)})

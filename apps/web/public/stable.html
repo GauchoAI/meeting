@@ -1334,7 +1334,7 @@
     }
 
     function warmLocalSpeechQueue() {
-      const maxPrefetch = 1;
+      const maxPrefetch = localTtsProvider === "qwen3-tts" ? 2 : 1;
       let inFlight = 0;
       for (const item of localSpeechQueue) {
         if (item.synthesis) inFlight += 1;
