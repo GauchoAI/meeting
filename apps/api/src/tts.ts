@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { selectedTtsProvider, type SpeechTtsProvider } from "./speech-selection.js";
 
-export type TtsProvider = "chatterbox-turbo" | "mistral-voxtral" | "mlx-voxtral" | "qwen3-tts";
+export type TtsProvider = SpeechTtsProvider;
 
 export interface TtsProviderStatus {
   provider: TtsProvider;
@@ -39,17 +40,7 @@ export interface TtsStreamResult {
 }
 
 export function ttsProvider(): TtsProvider {
-  const provider = process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER;
-  if (provider === "mistral" || provider === "mistral-voxtral" || provider === "voxtral-tts") {
-    return "mistral-voxtral";
-  }
-  if (provider === "mlx-voxtral" || provider === "voxtral-mlx" || provider === "local-voxtral-tts") {
-    return "mlx-voxtral";
-  }
-  if (provider === "qwen" || provider === "qwen3" || provider === "qwen3-tts" || provider === "local-qwen3-tts") {
-    return "qwen3-tts";
-  }
-  return "chatterbox-turbo";
+  return selectedTtsProvider();
 }
 
 export function ttsProviderStatus(): TtsProviderStatus {

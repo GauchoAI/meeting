@@ -6,7 +6,8 @@ import { formatAssistantCanvasMarkdown, formatAssistantStatusMarkdown, firstMark
 import { speechProviderStatus } from "./speech.js";
 import { loadDotEnv, loadLocalConfig } from "./env.js";
 import { transcribeLocalAudio } from "./local-stt.js";
-import { streamSpeech, synthesizeSpeech, TtsProviderError } from "./tts.js";
+import { selectedSttProvider } from "./speech-selection.js";
+import { streamSpeech, synthesizeSpeech, ttsProvider, TtsProviderError } from "./tts.js";
 
 loadLocalConfig();
 loadDotEnv();
@@ -100,7 +101,7 @@ const server = createServer(async (req, res) => {
     }
     try {
       const sttStartedAt = Date.now();
-      appendTrace("latency", "stt.start", { sttStartedAt, bytes: audio.length, extension, provider: process.env.STT_PROVIDER || "local-whisper" });
+      appendTrace("latency", "stt.start", { sttStartedAt, bytes: audio.length, extension, provider: selectedSttProvider() });
       const result = await transcribeLocalAudio(audio, extension);
       const sttEndedAt = Date.now();
       appendTrace("latency", "stt.end", { sttStartedAt, sttEndedAt, sttMs: sttEndedAt - sttStartedAt, reportedSttMs: result.elapsedMs, provider: result.provider, model: result.model || result.modelPath, textChars: result.text.length });
@@ -140,7 +141,7 @@ const server = createServer(async (req, res) => {
 
 function shouldIgnoreLegacyAudioChunk(client: string): boolean {
   if (process.env.MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS === "true") return false;
-  const provider = process.env.STT_PROVIDER || "local-whisper";
+  const provider = selectedSttProvider();
   if (provider !== "local-whisper" && provider !== "voxtral-http" && provider !== "moshi-http" && provider !== "parakeet-http") return false;
   return client !== "stable-vad-v1";
 }
@@ -381,7 +382,7 @@ function sendRealtimeArtifactFile(pathname: string, res: ServerResponse): void {
 async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<void> {
   if (!sdp.trim()) return sendJson(res, { error: "missing sdp" }, 400);
   if (shouldBlockOpenAiRealtime()) {
-    const provider = process.env.STT_PROVIDER || "local-whisper";
+    const provider = selectedSttProvider();
     appendTrace("agent", "OpenAI Realtime call refused while local voice provider is active", { provider });
     return sendJson(res, { error: `OpenAI Realtime is disabled while STT_PROVIDER=${provider}. Use local voice mode or set MEETING_ALLOW_OPENAI_REALTIME=true.` }, 409);
   }
@@ -630,7 +631,7 @@ async function synthesizeLocalSpeech(text: string, res: ServerResponse): Promise
   const compact = compactText(text, 700);
   if (!compact) return sendJson(res, { ok: false, error: "missing text" }, 400);
   const startedAt = Date.now();
-  appendTrace("latency", "tts.start", { provider: process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo", textChars: compact.length });
+  appendTrace("latency", "tts.start", { provider: ttsProvider(), textChars: compact.length });
   try {
     const result = await synthesizeSpeech(compact);
     appendTrace("latency", "tts.end", {
@@ -655,7 +656,7 @@ async function synthesizeLocalSpeech(text: string, res: ServerResponse): Promise
     const message = error instanceof Error ? error.message : String(error);
     const providerError = error instanceof TtsProviderError ? error : undefined;
     appendTrace("error", "tts.failed", {
-      provider: providerError?.provider || process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo",
+      provider: providerError?.provider || ttsProvider(),
       status: providerError?.status,
       elapsedMs: providerError?.elapsedMs,
       message
@@ -668,7 +669,7 @@ async function streamLocalSpeech(text: string, res: ServerResponse): Promise<voi
   const compact = compactText(text, 700);
   if (!compact) return sendJson(res, { ok: false, error: "missing text" }, 400);
   const startedAt = Date.now();
-  appendTrace("latency", "tts.stream.start", { provider: process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo", textChars: compact.length });
+  appendTrace("latency", "tts.stream.start", { provider: ttsProvider(), textChars: compact.length });
   try {
     const result = await streamSpeech(compact);
     sendCorsHeaders(res);
@@ -712,7 +713,7 @@ async function streamLocalSpeech(text: string, res: ServerResponse): Promise<voi
     const message = error instanceof Error ? error.message : String(error);
     const providerError = error instanceof TtsProviderError ? error : undefined;
     appendTrace("error", "tts.stream.failed", {
-      provider: providerError?.provider || process.env.MEETING_TTS_PROVIDER || process.env.TTS_PROVIDER || "chatterbox-turbo",
+      provider: providerError?.provider || ttsProvider(),
       status: providerError?.status,
       elapsedMs: providerError?.elapsedMs,
       message
@@ -723,7 +724,7 @@ async function streamLocalSpeech(text: string, res: ServerResponse): Promise<voi
 
 function shouldBlockOpenAiRealtime(): boolean {
   if (process.env.MEETING_ALLOW_OPENAI_REALTIME === "true") return false;
-  const provider = process.env.STT_PROVIDER || "local-whisper";
+  const provider = selectedSttProvider();
   return provider === "local-whisper" || provider === "voxtral-http" || provider === "moshi-http" || provider === "parakeet-http";
 }
 

@@ -131,6 +131,25 @@ def request_text(payload: dict[str, Any]) -> str:
     return str(text or "").strip()
 
 
+def bool_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def generation_kwargs(*, do_sample: bool | None = None) -> dict[str, Any]:
+    sample = bool_env("QWEN3_TTS_DO_SAMPLE", False) if do_sample is None else do_sample
+    kwargs: dict[str, Any] = {
+        "max_new_tokens": int(os.environ.get("QWEN3_TTS_MAX_NEW_TOKENS", "900")),
+        "do_sample": sample,
+    }
+    if sample:
+        kwargs["temperature"] = float(os.environ.get("QWEN3_TTS_TEMPERATURE", "0.6"))
+        kwargs["top_p"] = float(os.environ.get("QWEN3_TTS_TOP_P", "0.9"))
+    return kwargs
+
+
 class Qwen3TtsEngine:
     def __init__(self, index: int) -> None:
         self.index = index
@@ -160,22 +179,37 @@ class Qwen3TtsEngine:
         ref_audio = prepare_reference_audio(language)
         ref_text = REFERENCE_VOICES[language]["text"]
         started = time.time()
+        kwargs = generation_kwargs()
         with self.lock:
-            wavs, sample_rate = self.model.generate_voice_clone(
-                text=text,
-                language=language,
-                ref_audio=str(ref_audio),
-                ref_text=ref_text,
-                x_vector_only_mode=False,
-                non_streaming_mode=True,
-                max_new_tokens=int(os.environ.get("QWEN3_TTS_MAX_NEW_TOKENS", "900")),
-                temperature=float(os.environ.get("QWEN3_TTS_TEMPERATURE", "0.6")),
-                top_p=float(os.environ.get("QWEN3_TTS_TOP_P", "0.9")),
-            )
+            try:
+                wavs, sample_rate = self.generate(text, language, ref_audio, ref_text, kwargs)
+            except RuntimeError as exc:
+                if "probability tensor" not in str(exc).lower() or kwargs.get("do_sample") is False:
+                    raise
+                print(f"[meeting-qwen3-tts] worker={self.index} retrying deterministic generation after sampling failure", flush=True)
+                wavs, sample_rate = self.generate(text, language, ref_audio, ref_text, generation_kwargs(do_sample=False))
         elapsed_ms = (time.time() - started) * 1000
         with io.BytesIO() as buffer:
             sf.write(buffer, wavs[0], sample_rate, format="WAV")
             return buffer.getvalue(), sample_rate, language, elapsed_ms
+
+    def generate(
+        self,
+        text: str,
+        language: str,
+        ref_audio: Path,
+        ref_text: str,
+        kwargs: dict[str, Any],
+    ) -> tuple[list[Any], int]:
+        return self.model.generate_voice_clone(
+            text=text,
+            language=language,
+            ref_audio=str(ref_audio),
+            ref_text=ref_text,
+            x_vector_only_mode=False,
+            non_streaming_mode=True,
+            **kwargs,
+        )
 
 
 class Qwen3TtsPool:

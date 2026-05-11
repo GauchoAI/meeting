@@ -4,9 +4,28 @@ The stable Meeting pipeline should keep Pi/Codex as the tool-using brain. Local 
 
 ## Recommendation
 
-1. Use Parakeet V3 as the multilingual local drop-in STT experiment when Handy has already downloaded the ONNX model.
-2. Use Moshi MLX as a sidecar full-duplex voice lab.
-3. Keep `message_pi_agent`, `run_codex_task`, artifacts, and task lifecycle in Pi/Codex.
+1. Use Parakeet V3 as the live local STT default when Handy has already downloaded the ONNX model.
+2. Use MLX Voxtral TTS as the live English/Spanish speech default.
+3. Use Qwen3 TTS for narration/offline artifact audio, not live speech.
+4. Use Moshi MLX as a sidecar full-duplex voice lab.
+5. Keep `message_pi_agent`, `run_codex_task`, artifacts, and task lifecycle in Pi/Codex.
+
+The current benchmark and recommendation matrix live in `docs/speech-provider-benchmarks.md`.
+
+## Provider selector
+
+The API reads `config/meeting.local.json` first and `.env` second. The committed local defaults are:
+
+```json
+{
+  "speechMode": "live",
+  "sttProvider": "parakeet-http",
+  "liveTtsProvider": "mlx-voxtral",
+  "narrationTtsProvider": "qwen3-tts"
+}
+```
+
+Set `MEETING_SPEECH_MODE=live`, `narration`, or `experimental` to choose a mode. Direct overrides such as `STT_PROVIDER=local-whisper` and `MEETING_TTS_PROVIDER=chatterbox-turbo` still win when present.
 
 ## Voxtral Realtime STT
 
@@ -118,7 +137,15 @@ POST http://localhost:4317/tts/synthesize
 POST http://localhost:4317/tts/stream
 ```
 
-By default this proxies to the local Chatterbox Turbo worker:
+The live local default is MLX Voxtral TTS:
+
+```bash
+MEETING_SPEECH_MODE=live
+MEETING_LIVE_TTS_PROVIDER=mlx-voxtral
+VOXTRAL_MLX_TTS_URL=http://127.0.0.1:8792/v1/audio/speech
+```
+
+Chatterbox Turbo remains available as an explicit legacy local provider:
 
 ```bash
 MEETING_TTS_PROVIDER=chatterbox-turbo
@@ -169,6 +196,16 @@ The first request downloads and loads the MLX model, so it can take a while. Aft
 For this Voxtral model, each independently synthesized chunk can carry a slightly different room/noise profile. The stable shell therefore asks Codex/Pi for a short first spoken sentence, then batches later speech into longer chunks to reduce audible volume/background shifts. The shell also strips file paths, file names, environment variables, raw JSON, and markdown syntax from spoken text; those details stay visible in the UI instead of being read aloud.
 
 Spanish with the English `casual_male` voice can degrade badly. The API auto-selects `VOXTRAL_MLX_TTS_SPANISH_VOICE` for likely Spanish text unless `VOXTRAL_MLX_TTS_AUTO_VOICE=false`.
+
+Qwen3 TTS is available for narration/offline artifact audio:
+
+```bash
+MEETING_SPEECH_MODE=narration
+MEETING_NARRATION_TTS_PROVIDER=qwen3-tts
+QWEN3_TTS_URL=http://127.0.0.1:8794/synthesize
+```
+
+The local benchmark measured Qwen3 slower than real time for English, Spanish, and Russian, so do not force it as the live default.
 
 ## Voxtral TTS notes from `voxtral-demo.txt`
 

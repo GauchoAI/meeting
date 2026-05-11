@@ -1,13 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { selectedSttProvider, speechSelectionStatus, type SpeechSelectionStatus, type SpeechSttProvider } from "./speech-selection.js";
 import { streamingTtsSupported, ttsProviderStatus, type TtsProviderStatus } from "./tts.js";
 
 export interface SpeechProviderStatus {
-  provider: "local-whisper" | "deepgram" | "voxtral-http" | "moshi-http" | "parakeet-http";
+  provider: SpeechSttProvider;
   configured: boolean;
   streamingStt: boolean;
   streamingTts: boolean;
   localTts?: TtsProviderStatus;
+  selection: SpeechSelectionStatus;
   settingsPath?: string;
   listenModel?: string;
   speakModel?: string;
@@ -24,6 +26,7 @@ export function speechProviderStatus(): SpeechProviderStatus {
     streamingStt: streamingSttSupported(provider),
     streamingTts: streamingTtsSupported(),
     localTts: localTtsStatus(),
+    selection: speechSelectionStatus(),
     settingsPath: settings.path,
     listenModel: localListenModel(provider) || settings.listenModel,
     speakModel: settings.speakModel,
@@ -37,9 +40,7 @@ function localTtsStatus(): SpeechProviderStatus["localTts"] {
 }
 
 function speechProvider(): SpeechProviderStatus["provider"] {
-  const provider = process.env.STT_PROVIDER;
-  if (provider === "deepgram" || provider === "voxtral-http" || provider === "moshi-http" || provider === "parakeet-http") return provider;
-  return "local-whisper";
+  return selectedSttProvider();
 }
 
 function speechProviderConfigured(provider: SpeechProviderStatus["provider"]): boolean {

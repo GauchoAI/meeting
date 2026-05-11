@@ -12,6 +12,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
+    "benchmark:speech": "node scripts/benchmark-speech-providers.mjs",
     "test:assistant-delivery": "node scripts/check-assistant-delivery.mjs",
     "test:realtime-sleep": "node scripts/test-realtime-sleep.mjs"
   },

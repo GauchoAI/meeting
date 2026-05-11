@@ -1,6 +1,7 @@
 import { transcribeWithLocalWhisper } from "./local-whisper.js";
+import { selectedSttProvider, type SpeechSttProvider } from "./speech-selection.js";
 
-export type LocalSttProvider = "local-whisper" | "voxtral-http" | "moshi-http" | "parakeet-http";
+export type LocalSttProvider = Exclude<SpeechSttProvider, "deepgram">;
 
 export interface LocalSttResult {
   text: string;
@@ -12,7 +13,7 @@ export interface LocalSttResult {
 }
 
 export function currentLocalSttProvider(): LocalSttProvider {
-  const provider = process.env.STT_PROVIDER;
+  const provider = selectedSttProvider();
   if (provider === "voxtral-http" || provider === "moshi-http" || provider === "parakeet-http") return provider;
   return "local-whisper";
 }

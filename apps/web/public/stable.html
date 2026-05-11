@@ -1357,6 +1357,7 @@
           warmLocalSpeechQueue();
           const item = localSpeechQueue.shift();
           if (!item) continue;
+          warmLocalSpeechQueue();
           if (!item.synthesis) {
             item.generation = nextLocalSpeechGeneration();
             item.synthesis = prepareLocalSpeechAudio(item.text, item.generation, item).catch((error) => ({ ok: false, error, item }));
@@ -1852,6 +1853,7 @@
 
     function findSpeechBoundary(text, final, mode = "continuation") {
       const normalized = String(text || "");
+      const qwenLocalTts = localTtsProvider === "qwen3-tts";
       if (mode === "first") {
         const firstSentence = sentenceBoundary(normalized, final, 22, 130);
         if (firstSentence >= 0) return firstSentence;
@@ -1861,6 +1863,14 @@
           const fallbackBoundary = softSpeechBoundary(normalized, 130, 55);
           return fallbackBoundary >= 0 ? fallbackBoundary : normalized.length;
         }
+        return -1;
+      }
+      if (qwenLocalTts) {
+        const early = softSpeechBoundary(normalized, final ? 150 : 145, final ? 65 : 80);
+        const sentence = sentenceBoundary(normalized, final, 55, 180);
+        if (early >= 0 && (sentence < 0 || early < sentence)) return early;
+        if (sentence >= 0) return sentence;
+        if (final && normalized.trim().length >= 24) return normalized.length;
         return -1;
       }
       const sentence = sentenceBoundary(normalized, final, 160, 420);
