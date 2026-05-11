@@ -64,6 +64,14 @@ By default the bridge reuses Handy's downloaded model at:
 
 Override it with `PARAKEET_STT_MODEL_PATH` if the model lives elsewhere. The bridge keeps the model loaded and accepts raw browser audio chunks, converts them to 16 kHz mono WAV through `ffmpeg`, and returns `{ text, model, elapsedMs }` like the existing Voxtral/Moshi bridges.
 
+Run the local multilingual smoke test after starting the bridge:
+
+```bash
+scripts/test-parakeet-stt-smoke.sh
+```
+
+This generates short macOS `say` samples for Russian and Spanish, posts them to the Parakeet bridge, and prints the returned transcript. It is a controlled sanity check, not a replacement for human-speaker acceptance testing.
+
 The stable shell exposes these voice modes:
 
 - `OpenAI voice`: the previous OpenAI Realtime listen/speak path.
