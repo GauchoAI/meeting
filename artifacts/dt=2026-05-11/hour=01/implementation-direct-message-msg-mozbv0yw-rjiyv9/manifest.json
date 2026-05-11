@@ -1,0 +1,10 @@
+{
+  "kind": "implementation",
+  "slug": "direct-message-msg-mozbv0yw-rjiyv9",
+  "title": "Direct request from Realtime agent",
+  "createdAt": "2026-05-11T04:39:12.059Z",
+  "updatedAt": "2026-05-11T04:39:12.059Z",
+  "artifact": "artifact.smart.md",
+  "tags": [],
+  "summary": "Pi agent implementation output for Direct request from Realtime agent"
+}
