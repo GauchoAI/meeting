@@ -120,11 +120,17 @@ MEETING_TTS_PROVIDER=mlx-voxtral
 VOXTRAL_MLX_TTS_URL=http://127.0.0.1:8792/v1/audio/speech
 VOXTRAL_MLX_TTS_MODEL=mlx-community/Voxtral-4B-TTS-2603-mlx-4bit
 VOXTRAL_MLX_TTS_VOICE=casual_male
+VOXTRAL_MLX_TTS_AUTO_VOICE=true
+VOXTRAL_MLX_TTS_SPANISH_VOICE=es_male
 VOXTRAL_MLX_TTS_RESPONSE_FORMAT=wav
 VOXTRAL_MLX_TTS_STREAMING_INTERVAL=0.32
 ```
 
 The first request downloads and loads the MLX model, so it can take a while. After warmup, `/tts/stream` posts `stream=true` and `response_format=pcm` to MLX Audio, converts raw PCM int16 chunks to the browser player's float32 SSE format, and starts playback before the full sentence is complete.
+
+For this Voxtral model, each independently synthesized chunk can carry a slightly different room/noise profile. The stable shell therefore asks Codex/Pi for a short first spoken sentence, then batches later speech into longer chunks to reduce audible volume/background shifts. The shell also strips file paths, file names, environment variables, raw JSON, and markdown syntax from spoken text; those details stay visible in the UI instead of being read aloud.
+
+Spanish with the English `casual_male` voice can degrade badly. The API auto-selects `VOXTRAL_MLX_TTS_SPANISH_VOICE` for likely Spanish text unless `VOXTRAL_MLX_TTS_AUTO_VOICE=false`.
 
 ## Voxtral TTS notes from `voxtral-demo.txt`
 

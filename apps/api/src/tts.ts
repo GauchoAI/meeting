@@ -24,6 +24,7 @@ export interface TtsSynthesisResult {
   upstreamElapsedMs?: string | null;
   model?: string;
   responseFormat?: string;
+  voice?: string;
 }
 
 export interface TtsStreamResult {
@@ -34,6 +35,7 @@ export interface TtsStreamResult {
   responseFormat: "pcm";
   pcmSampleRate: number;
   elapsedMs: number;
+  voice?: string;
 }
 
 export function ttsProvider(): TtsProvider {
@@ -207,7 +209,8 @@ async function synthesizeMistralVoxtral(text: string): Promise<TtsSynthesisResul
     endpoint: config.endpoint,
     elapsedMs,
     model: config.model,
-    responseFormat: config.responseFormat
+    responseFormat: config.responseFormat,
+    voice: config.voiceId
   };
 }
 
@@ -254,7 +257,8 @@ async function streamMistralVoxtral(text: string): Promise<TtsStreamResult> {
     elapsedMs,
     model: config.model,
     responseFormat: "pcm",
-    pcmSampleRate: config.pcmSampleRate
+    pcmSampleRate: config.pcmSampleRate,
+    voice: config.voiceId
   };
 }
 
@@ -267,6 +271,8 @@ function mlxVoxtralConfig(): {
   streamingInterval: number;
   maxTokens: number;
   temperature: number;
+  autoVoice: boolean;
+  spanishVoice: string;
 } {
   return {
     endpoint: process.env.VOXTRAL_MLX_TTS_URL || "http://127.0.0.1:8792/v1/audio/speech",
@@ -276,12 +282,15 @@ function mlxVoxtralConfig(): {
     pcmSampleRate: Number(process.env.VOXTRAL_MLX_TTS_PCM_SAMPLE_RATE || 24_000),
     streamingInterval: Number(process.env.VOXTRAL_MLX_TTS_STREAMING_INTERVAL || 0.32),
     maxTokens: Number(process.env.VOXTRAL_MLX_TTS_MAX_TOKENS || 900),
-    temperature: Number(process.env.VOXTRAL_MLX_TTS_TEMPERATURE || 0.8)
+    temperature: Number(process.env.VOXTRAL_MLX_TTS_TEMPERATURE || 0.8),
+    autoVoice: process.env.VOXTRAL_MLX_TTS_AUTO_VOICE !== "false",
+    spanishVoice: process.env.VOXTRAL_MLX_TTS_SPANISH_VOICE || "es_male"
   };
 }
 
 async function synthesizeMlxVoxtral(text: string): Promise<TtsSynthesisResult> {
   const config = mlxVoxtralConfig();
+  const voice = mlxVoxtralVoiceForText(text, config);
   const startedAt = Date.now();
   const response = await fetch(config.endpoint, {
     method: "POST",
@@ -289,7 +298,7 @@ async function synthesizeMlxVoxtral(text: string): Promise<TtsSynthesisResult> {
     body: JSON.stringify({
       model: config.model,
       input: text,
-      voice: config.voice,
+      voice,
       response_format: config.responseFormat,
       stream: false,
       max_tokens: config.maxTokens,
@@ -313,12 +322,14 @@ async function synthesizeMlxVoxtral(text: string): Promise<TtsSynthesisResult> {
     endpoint: config.endpoint,
     elapsedMs,
     model: config.model,
-    responseFormat: config.responseFormat
+    responseFormat: config.responseFormat,
+    voice
   };
 }
 
 async function streamMlxVoxtral(text: string): Promise<TtsStreamResult> {
   const config = mlxVoxtralConfig();
+  const voice = mlxVoxtralVoiceForText(text, config);
   const startedAt = Date.now();
   const response = await fetch(config.endpoint, {
     method: "POST",
@@ -329,7 +340,7 @@ async function streamMlxVoxtral(text: string): Promise<TtsStreamResult> {
     body: JSON.stringify({
       model: config.model,
       input: text,
-      voice: config.voice,
+      voice,
       response_format: "pcm",
       stream: true,
       streaming_interval: config.streamingInterval,
@@ -353,8 +364,31 @@ async function streamMlxVoxtral(text: string): Promise<TtsStreamResult> {
     elapsedMs,
     model: config.model,
     responseFormat: "pcm",
-    pcmSampleRate: config.pcmSampleRate
+    pcmSampleRate: config.pcmSampleRate,
+    voice
   };
+}
+
+function mlxVoxtralVoiceForText(text: string, config: ReturnType<typeof mlxVoxtralConfig>): string {
+  if (!config.autoVoice) return config.voice;
+  if (isLikelySpanish(text) && !isSpanishVoxtralVoice(config.voice)) return config.spanishVoice;
+  return config.voice;
+}
+
+function isSpanishVoxtralVoice(voice: string): boolean {
+  return /^es[_-]/i.test(voice);
+}
+
+function isLikelySpanish(text: string): boolean {
+  const normalized = ` ${text.toLowerCase()} `;
+  if (/[¿¡ñáéíóúü]/i.test(text)) return true;
+  const hits = [
+    " el ", " la ", " los ", " las ", " una ", " unas ", " de ", " del ",
+    " que ", " para ", " pero ", " porque ", " como ", " con ", " sin ",
+    " esto ", " esta ", " este ", " proyecto ", " agente ", " codigo ",
+    " código ", " archivo ", " pantalla ", " reunión ", " pregunta "
+  ].filter((token) => normalized.includes(token)).length;
+  return hits >= 3;
 }
 
 function pcmInt16StreamToFloat32Sse(stream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {

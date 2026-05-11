@@ -37,7 +37,7 @@ export function createMeetingMcpServer() {
 
   server.tool(
     "meeting_message_voice_agent",
-    "Send a concise private coordination message to the Realtime voice agent without updating the canvas. Use this to ask it to raise its hand or speak a short summary on your behalf.",
+    "Send a concise private coordination message to the Realtime voice agent without updating the canvas. Use this to ask it to raise its hand or speak a short summary on your behalf. If the message may be spoken aloud, make the first sentence short and avoid exact file names, paths, settings names, and raw JSON unless explicitly requested.",
     {
       message: z.string(),
       intent: z.enum(["inform", "raise-hand", "speak", "question"]).default("inform"),

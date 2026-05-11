@@ -640,6 +640,7 @@ async function synthesizeLocalSpeech(text: string, res: ServerResponse): Promise
       bytes: result.audio.length,
       endpoint: result.endpoint,
       model: result.model,
+      voice: result.voice,
       responseFormat: result.responseFormat,
       upstreamElapsedMs: result.upstreamElapsedMs
     });
@@ -647,6 +648,7 @@ async function synthesizeLocalSpeech(text: string, res: ServerResponse): Promise
       "X-TTS-Provider": result.provider,
       "X-TTS-Elapsed-Ms": result.upstreamElapsedMs || String(result.elapsedMs),
       ...(result.model ? { "X-TTS-Model": result.model } : {}),
+      ...(result.voice ? { "X-TTS-Voice": result.voice } : {}),
       ...(result.responseFormat ? { "X-TTS-Format": result.responseFormat } : {})
     });
   } catch (error) {
@@ -676,6 +678,7 @@ async function streamLocalSpeech(text: string, res: ServerResponse): Promise<voi
       Connection: "keep-alive",
       "X-TTS-Provider": result.provider,
       "X-TTS-Model": result.model,
+      ...(result.voice ? { "X-TTS-Voice": result.voice } : {}),
       "X-TTS-Format": result.responseFormat,
       "X-TTS-Encoding": "pcm_f32le",
       "X-TTS-Sample-Rate": String(result.pcmSampleRate),
@@ -989,6 +992,8 @@ function buildRealtimeInstructions(): string {
     "By default you are an audible meeting participant: when an unmuted human speaks to you, answer with concise audio.",
     "When the client mutes you, switch to silent background listener mode and raise your hand instead of speaking.",
     "Default to brief answers. Prefer one short sentence. Do not ramble.",
+    "When speaking aloud, make the first sentence short, ideally under eight words. Later sentences can be longer when useful.",
+    "For spoken answers, never read exact file names, paths, command flags, environment variable names, raw JSON, or markdown syntax unless the user explicitly asks for exact text. Use human phrases such as the voice system, the server, the local page, or the relevant file.",
     "The current meeting canvas and transcript are first-class context, not something to rediscover.",
     "There are two streams in this system: conversation and implementation.",
     "Conversation is the true branch for human discussion, live notes, diagrams, planning, and hand raises.",
@@ -1771,7 +1776,8 @@ function formatPiHandoffForHumans(input: { title: string; prompt: string; hints:
   const constraints = [
     ...input.hints.map((hint) => normalizeHumanText(hint)).filter(Boolean),
     "Preserve actionable content; omit raw transport records and routing metadata unless it changes the action.",
-    "Keep the response concise and ensure status-only messages do not steal canvas focus."
+    "Keep the response concise and ensure status-only messages do not steal canvas focus.",
+    "If the result is meant for voice delivery, make the first sentence short and describe files/settings in human terms rather than spelling exact names."
   ];
   return [
     `Task: ${input.title}`,
@@ -1853,6 +1859,7 @@ function directMessagePrompt(input: { intent: string; message: string }): string
     "Task: Reply to the Realtime voice agent.",
     `Context: Voice agent ${input.intent}: ${input.message}`,
     "Constraints: Reply quickly and concisely. Do not update or steal the canvas. Do not create or edit artifacts unless explicitly requested.",
+    "Voice-ready style: first sentence under eight words; avoid exact file names, paths, command flags, settings names, and raw JSON unless explicitly requested.",
     "If this is a turn-taking protocol, answer with only the next required turn and preserve any stop condition.",
     "Output: Use meeting_message_voice_agent so the Realtime voice agent receives the reply directly. Use intent=question or intent=speak only if you need another voice-agent turn; otherwise use intent=inform."
   ].join("\n");
@@ -1865,6 +1872,7 @@ function directMessageForTerminal(input: { intent: string; message: string }): s
     `${label}:`,
     `${tag}${input.message}`,
     "Reply now with meeting_message_voice_agent. Keep it to one or two sentences.",
+    "Voice-ready style: first sentence under eight words; avoid exact file names, paths, command flags, settings names, and raw JSON unless explicitly requested.",
     "If this is a turn-taking protocol, send only the next required turn and preserve any stop condition.",
     "Use intent=question or intent=speak only if you need another voice-agent turn; otherwise use intent=inform.",
     "Do not use meeting_post_markdown or artifact tools unless the message explicitly asks for canvas/artifact work."

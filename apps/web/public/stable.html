@@ -767,6 +767,7 @@
             reason ? `Your current raised-hand reason is: ${reason}` : "Speak about the most useful proposal or issue you detected recently.",
             "Speak concisely and only about your current proposal or the most useful thing you noticed in the recent conversation.",
             "Keep it to at most two short sentences unless the user explicitly asks for more.",
+            "Make the first sentence short. Do not read file names, paths, settings names, markdown, or JSON aloud unless explicitly asked.",
             "If you have no meaningful contribution, say so briefly."
           ].join("\n")
         }
@@ -1315,7 +1316,7 @@
     }
 
     function enqueueLocalVoiceMessage(message, options = {}) {
-      const text = clipText(String(message || "").trim(), options.maxChars || 360);
+      const text = clipText(sanitizeSpokenText(String(message || "")).trim(), options.maxChars || 360);
       if (!text || realtimeMuted) return;
       if (options.clearExisting) clearLocalSpeechQueue();
       localSpeechQueue.push(createLocalSpeechQueueItem(text));
@@ -1739,6 +1740,7 @@
             instructions: [
               "A pi-agent/Codex update was just injected into your conversation context.",
               "Speak one concise sentence only if the update is useful for the host right now.",
+              "Make it voice-ready: short first sentence, no exact file names or paths.",
               "Mention that Codex/pi-agent produced or updated the UI/artifact if that is what happened.",
               "Do not read long content aloud. Do not create durable artifacts."
             ].join("\n")
@@ -1797,9 +1799,9 @@
       }
       state.lastSpeech = speech;
       const available = speech.slice(state.consumed);
-      const extraction = extractSpeakableSegments(available, false);
+      const extraction = extractSpeakableSegments(available, false, { first: state.queued === 0 });
       for (const segment of extraction.segments) {
-        enqueueLocalVoiceMessage(segment.text, { maxChars: 260 });
+        enqueueLocalVoiceMessage(segment.text, { maxChars: segment.maxChars || 420 });
         state.queued += 1;
       }
       state.consumed += extraction.consumed;
@@ -1812,9 +1814,9 @@
       if (!state) return false;
       const speech = markdownToSpeech(String(event.text || ""));
       const available = speech.slice(Math.min(state.consumed, speech.length));
-      const extraction = extractSpeakableSegments(available, true);
+      const extraction = extractSpeakableSegments(available, true, { first: state.queued === 0 });
       for (const segment of extraction.segments) {
-        enqueueLocalVoiceMessage(segment.text, { maxChars: 300 });
+        enqueueLocalVoiceMessage(segment.text, { maxChars: segment.maxChars || 420 });
         state.queued += 1;
       }
       if (!state.queued && speech) {
@@ -1828,7 +1830,7 @@
       return String(event.id || event.documentId || "pi-agent-stream");
     }
 
-    function extractSpeakableSegments(text, final) {
+    function extractSpeakableSegments(text, final, options = {}) {
       const segments = [];
       let cursor = 0;
       const source = String(text || "");
@@ -1837,27 +1839,46 @@
         const leading = rest.length - rest.trimStart().length;
         const slice = rest.slice(leading);
         if (!slice.trim()) break;
-        const boundary = findSpeechBoundary(slice, final);
+        const mode = options.first && segments.length === 0 ? "first" : "continuation";
+        const boundary = findSpeechBoundary(slice, final, mode);
         if (boundary < 0) break;
         const raw = slice.slice(0, boundary).trim();
         const end = leading + boundary;
-        if (isUsefulSpeechSegment(raw)) segments.push({ text: raw, end });
+        if (isUsefulSpeechSegment(raw)) segments.push({ text: raw, end, maxChars: mode === "first" ? 160 : 480 });
         cursor += end;
       }
       return { segments, consumed: cursor };
     }
 
-    function findSpeechBoundary(text, final) {
+    function findSpeechBoundary(text, final, mode = "continuation") {
       const normalized = String(text || "");
-      const early = softSpeechBoundary(normalized, final ? 180 : 130, final ? 100 : 75);
+      if (mode === "first") {
+        const firstSentence = sentenceBoundary(normalized, final, 22, 130);
+        if (firstSentence >= 0) return firstSentence;
+        const early = softSpeechBoundary(normalized, final ? 120 : 95, final ? 40 : 55);
+        if (early >= 0) return early;
+        if (final && normalized.trim().length >= 18) {
+          const fallbackBoundary = softSpeechBoundary(normalized, 130, 55);
+          return fallbackBoundary >= 0 ? fallbackBoundary : normalized.length;
+        }
+        return -1;
+      }
+      const sentence = sentenceBoundary(normalized, final, 160, 420);
+      if (sentence >= 0) return sentence;
+      const early = softSpeechBoundary(normalized, final ? 360 : 420, final ? 120 : 240);
       if (early >= 0) return early;
+      if (final && normalized.trim().length >= 30) return normalized.length;
+      return -1;
+    }
+
+    function sentenceBoundary(text, final, min, max) {
+      const normalized = String(text || "");
       const sentence = /[.!?](?=\s|$)/g;
       let match;
       while ((match = sentence.exec(normalized))) {
         const end = match.index + 1;
-        if (end >= 45 || final) return end;
+        if (end >= min || final || end >= max) return end;
       }
-      if (final && normalized.trim().length >= 18) return normalized.length;
       return -1;
     }
 
@@ -1926,15 +1947,37 @@
     }
 
     function markdownToSpeech(text) {
-      return String(text || "")
+      return sanitizeSpokenText(String(text || "")
         .replace(/```[\s\S]*?```/g, " code block ")
-        .replace(/`([^`]+)`/g, "$1")
+        .replace(/`([^`]+)`/g, (_, value) => humanizeCodeSpan(value))
         .replace(/!\[[^\]]*\]\([^)]*\)/g, " image ")
         .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
         .replace(/^#{1,6}\s*/gm, "")
         .replace(/^[\s>*-]+/gm, "")
         .replace(/\s+/g, " ")
+        .trim());
+    }
+
+    function sanitizeSpokenText(text) {
+      return String(text || "")
+        .replace(/https?:\/\/[^\s)]+/gi, "the local page")
+        .replace(/\b(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|json|md|html|css|py|sh|wav|mp3|safetensors)\b/gi, "the relevant file")
+        .replace(/(?:^|\s)(?:\/Users|\.{1,2}\/)[^\s,;:)]+/g, " the relevant file")
+        .replace(/\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|json|md|html|css|py|sh|wav|mp3|safetensors)\b/gi, "the relevant file")
+        .replace(/\b[A-Z][A-Z0-9_]{3,}(?:=[^\s,;]+)?\b/g, "the relevant setting")
+        .replace(/\s*(?:the relevant file)(?:\s*(?:,|and)\s*the relevant file)+/gi, " the relevant files")
+        .replace(/\bthe relevant file\s+the relevant file\b/gi, "the relevant file")
+        .replace(/\s+/g, " ")
         .trim();
+    }
+
+    function humanizeCodeSpan(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      if (/^(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]+$/.test(text)) return "the relevant file";
+      if (/^[\w.-]+\.(?:ts|tsx|js|jsx|mjs|json|md|html|css|py|sh|wav|mp3|safetensors)$/i.test(text)) return "the relevant file";
+      if (/^[A-Z][A-Z0-9_]{3,}(?:=.*)?$/.test(text)) return "the relevant setting";
+      return text;
     }
 
     function firstSpeechSentence(text) {
