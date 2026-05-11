@@ -3,7 +3,7 @@
   "slug": "improve-direct-message-rendering",
   "title": "Direct message from Realtime agent",
   "createdAt": "2026-05-11T04:39:58.090Z",
-  "updatedAt": "2026-05-11T04:39:58.090Z",
+  "updatedAt": "2026-05-11T04:43:03.503Z",
   "artifact": "artifact.smart.md",
   "tags": [],
   "summary": "Pi agent implementation output for Direct message from Realtime agent"
