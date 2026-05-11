@@ -4,6 +4,7 @@ target/
 models/
 .env
 .env.local
+.venv-*/
 .DS_Store
 *.log
 coverage/

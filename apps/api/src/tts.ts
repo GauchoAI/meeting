@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-export type TtsProvider = "chatterbox-turbo" | "mistral-voxtral" | "mlx-voxtral";
+export type TtsProvider = "chatterbox-turbo" | "mistral-voxtral" | "mlx-voxtral" | "qwen3-tts";
 
 export interface TtsProviderStatus {
   provider: TtsProvider;
@@ -46,6 +46,9 @@ export function ttsProvider(): TtsProvider {
   if (provider === "mlx-voxtral" || provider === "voxtral-mlx" || provider === "local-voxtral-tts") {
     return "mlx-voxtral";
   }
+  if (provider === "qwen" || provider === "qwen3" || provider === "qwen3-tts" || provider === "local-qwen3-tts") {
+    return "qwen3-tts";
+  }
   return "chatterbox-turbo";
 }
 
@@ -81,6 +84,18 @@ export function ttsProviderStatus(): TtsProviderStatus {
       note: "Local Voxtral TTS through MLX Audio. Run scripts/start-voxtral-mlx-tts.sh if the endpoint is not already running."
     };
   }
+  if (provider === "qwen3-tts") {
+    const config = qwen3TtsConfig();
+    return {
+      provider,
+      configured: true,
+      endpoint: config.endpoint,
+      model: config.model,
+      responseFormat: "wav",
+      streaming: false,
+      note: "Local Qwen3 TTS HTTP worker with English, Spanish, and Russian voice-clone references. Run scripts/start-qwen3-tts.sh first."
+    };
+  }
   return {
     provider,
     configured: true,
@@ -99,6 +114,7 @@ export async function synthesizeSpeech(text: string): Promise<TtsSynthesisResult
   const provider = ttsProvider();
   if (provider === "mistral-voxtral") return synthesizeMistralVoxtral(text);
   if (provider === "mlx-voxtral") return synthesizeMlxVoxtral(text);
+  if (provider === "qwen3-tts") return synthesizeQwen3Tts(text);
   return synthesizeChatterbox(text);
 }
 
@@ -327,6 +343,47 @@ async function synthesizeMlxVoxtral(text: string): Promise<TtsSynthesisResult> {
   };
 }
 
+function qwen3TtsConfig(): {
+  endpoint: string;
+  model: string;
+} {
+  return {
+    endpoint: process.env.QWEN3_TTS_URL || "http://127.0.0.1:8794/synthesize",
+    model: process.env.QWEN3_TTS_MODEL || "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+  };
+}
+
+async function synthesizeQwen3Tts(text: string): Promise<TtsSynthesisResult> {
+  const config = qwen3TtsConfig();
+  const startedAt = Date.now();
+  const response = await fetch(config.endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, input: text, language: languageForQwen3Text(text) })
+  });
+  const elapsedMs = Date.now() - startedAt;
+  const responseContentType = response.headers.get("content-type") || "";
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new TtsProviderError("qwen3-tts", response.status, errorBody || `Qwen3 TTS returned ${response.status}`, elapsedMs);
+  }
+  if (responseContentType.includes("application/json")) {
+    const errorBody = await response.text();
+    throw new TtsProviderError("qwen3-tts", 502, errorBody || "Qwen3 TTS returned JSON instead of audio.", elapsedMs);
+  }
+  return {
+    audio: Buffer.from(await response.arrayBuffer()),
+    contentType: responseContentType.includes("audio/") ? responseContentType : "audio/wav",
+    provider: "qwen3-tts",
+    endpoint: config.endpoint,
+    elapsedMs,
+    upstreamElapsedMs: response.headers.get("x-tts-elapsed-ms"),
+    model: response.headers.get("x-qwen3-tts-model") || config.model,
+    responseFormat: "wav",
+    voice: response.headers.get("x-qwen3-tts-language") || undefined
+  };
+}
+
 async function streamMlxVoxtral(text: string): Promise<TtsStreamResult> {
   const config = mlxVoxtralConfig();
   const voice = mlxVoxtralVoiceForText(text, config);
@@ -389,6 +446,12 @@ function isLikelySpanish(text: string): boolean {
     " código ", " archivo ", " pantalla ", " reunión ", " pregunta "
   ].filter((token) => normalized.includes(token)).length;
   return hits >= 3;
+}
+
+function languageForQwen3Text(text: string): "english" | "spanish" | "russian" {
+  if (/[а-яё]/i.test(text)) return "russian";
+  if (isLikelySpanish(text)) return "spanish";
+  return "english";
 }
 
 function pcmInt16StreamToFloat32Sse(stream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
