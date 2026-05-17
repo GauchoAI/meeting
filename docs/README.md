@@ -4,12 +4,20 @@ This directory is the project knowledge base. Keep root-level `README.md` focuse
 
 ## Recommended Reading Order
 
-1. `reproducible-dev.md` - local development contract and stable runtime expectations.
-2. `stable-shell.md` - why `stable.html` owns microphone and voice state.
-3. `local-voice-models.md` - local STT/TTS provider setup and selector behavior.
-4. `speech-provider-benchmarks.md` - measured local speech results and provider recommendations.
-5. `assistant-output-delivery.md` - how assistant output reaches canvas/status surfaces.
-6. `agent-direct-messaging.md` - low-noise handoffs between Realtime, Pi, and local workers.
+1. `running-the-program.md` - commands to start, verify, restart, and stop the full local live stack.
+2. `reproducible-dev.md` - local development contract and stable runtime expectations.
+3. `stable-shell.md` - why `stable.html` owns microphone and voice state.
+4. `local-voice-models.md` - local STT/TTS provider setup and selector behavior.
+5. `speech-provider-benchmarks.md` - measured local speech results and provider recommendations.
+6. `assistant-output-delivery.md` - how assistant output reaches canvas/status surfaces.
+7. `agent-direct-messaging.md` - low-noise handoffs between Realtime, Pi, and local workers.
+
+## Operations
+
+| Doc | Covers |
+| --- | --- |
+| `running-the-program.md` | Full local-live startup, stop, logs, smoke tests, and troubleshooting. |
+| `reproducible-dev.md` | Source checkout workflow and validation expectations. |
 
 ## Architecture
 

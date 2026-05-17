@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --parallel --filter @meeting/api --filter @meeting/web --filter @meeting/agent-worker dev",
+    "dev:local-live": "bash scripts/start-local-live.sh",
+    "dev:local-live:stop": "bash scripts/stop-local-live.sh",
     "dev:api": "pnpm --filter @meeting/api dev",
     "dev:web": "pnpm --filter @meeting/web dev",
     "dev:agent": "pnpm --filter @meeting/agent-worker dev",

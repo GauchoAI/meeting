@@ -11,4 +11,7 @@ coverage/
 .meeting/
 .meeting-state/
 .pi/browser-profile/
+.pi/generated/
+.pi/generated-images/
+.pi/npm/
 .pi/screenshots/

@@ -39,6 +39,10 @@
       <option value="local">Local Whisper</option>
       <option value="hybrid">Hybrid</option>
     </select>
+    <select id="captureMode" aria-label="Capture mode" hidden>
+      <option value="push-to-talk">Hold Space</option>
+      <option value="auto-vad">Hands-free</option>
+    </select>
     <button id="join">Join meeting</button>
     <button id="mute" class="secondary" disabled>Mute agent</button>
     <button id="sleep" class="secondary" disabled>Sleep until prompted</button>
@@ -67,6 +71,7 @@
     const sleepButton = document.getElementById("sleep");
     const speakButton = document.getElementById("speak");
     const voiceModeSelect = document.getElementById("voiceMode");
+    const captureModeSelect = document.getElementById("captureMode");
     const remoteAudio = document.getElementById("remoteAudio");
     const uiFrame = document.getElementById("ui");
 
@@ -111,6 +116,7 @@
     let localSpeechFinishCurrent = null;
     let localSpeechQueue = [];
     let localSpeechQueuePlaying = false;
+    let localSpeechCurrentItem = null;
     const codexStreamingSpeech = new Map();
     let localSpeechStartedAt = 0;
     let localSpeechBargeInStartedAt = 0;
@@ -137,6 +143,9 @@
     voiceModeSelect.addEventListener("change", () => {
       voiceModeManuallySelected = true;
       setVoiceMode(String(voiceModeSelect.value || "realtime"));
+    });
+    captureModeSelect.addEventListener("change", () => {
+      setLocalCaptureMode(String(captureModeSelect.value || "push-to-talk"));
     });
     speakButton.addEventListener("pointerdown", (event) => {
       event.preventDefault();
@@ -168,6 +177,7 @@
     });
 
     voiceModeSelect.value = voiceMode;
+    captureModeSelect.value = localCaptureMode();
     void loadSpeechStatus().then(() => {
       renderStatus();
       publishShellState();
@@ -1013,6 +1023,7 @@
         if (usesLocalSpeechOutput() && isSpeakableCodexFinal(event) && finalizeCodexStreamingSpeech(event)) {
           return;
         }
+        if (usesLocalSpeechOutput()) handleLocalHostUtteranceForPendingSpeech(event);
         if (isPiAgentReviewEvent(event) || (usesLocalSpeechOutput() && isLocalSpeakablePiAgentMessage(event))) {
           if (usesRealtimeVoice() && realtimeState === "connected") {
             void notifyRealtimeOfPiAgentUpdate(event);
@@ -1141,7 +1152,8 @@
           void postRealtimeTrace("debug", "Dropped local STT chunk during local speech output", { chunks: chunks.length });
         } else if (chunks.length > 0) {
           const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
-          void sendAudioChunk(blob, startedAt);
+          const stoppedAt = Number(recorder._meetingStoppedAt || Date.now());
+          void sendAudioChunk(blob, startedAt, stoppedAt);
         }
       };
       recorder.onerror = (event) => {
@@ -1153,7 +1165,10 @@
 
     function stopLocalSpeechRecorder(options = {}) {
       if (options.discard) localSttDiscardCurrentChunk = true;
-      if (localSttRecorder?.state === "recording") localSttRecorder.stop();
+      if (localSttRecorder?.state === "recording") {
+        localSttRecorder._meetingStoppedAt = Date.now();
+        localSttRecorder.stop();
+      }
     }
 
     function startLocalPushToTalk() {
@@ -1194,6 +1209,7 @@
 
     function stopLocalSpeechForManualInput() {
       localSpeechGeneration += 1;
+      abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
       if (localSpeechResumeTimer !== null) {
         window.clearTimeout(localSpeechResumeTimer);
@@ -1206,6 +1222,51 @@
       localSttDiscardCurrentChunk = false;
       stopLocalSpeechAudio();
       void postRealtimeTrace("agent", "Local voice speech interrupted by push-to-talk", undefined);
+    }
+
+    function handleLocalHostUtteranceForPendingSpeech(event) {
+      if (!isConfirmedLocalHostUtterance(event)) return;
+      cancelLocalSpeechForHostContinuation("confirmed-host-utterance", {
+        eventId: event.id,
+        textChars: String(event.text || "").trim().length
+      });
+    }
+
+    function isConfirmedLocalHostUtterance(event) {
+      if (!event || event.type !== "utterance.final") return false;
+      const text = String(event.text || "").trim();
+      if (!text) return false;
+      const speaker = `${event.speakerId || ""} ${event.speakerLabel || ""}`.toLowerCase();
+      return speaker.includes("host");
+    }
+
+    function cancelLocalSpeechForHostContinuation(reason, details = {}) {
+      if (!localSpeechCurrentItem && !localSpeechQueue.length && !localSpeechAudioPlaying()) return;
+      localSpeechGeneration += 1;
+      abortLocalSpeechCurrentItem();
+      clearLocalSpeechQueue();
+      if (localSpeechResumeTimer !== null) {
+        window.clearTimeout(localSpeechResumeTimer);
+        localSpeechResumeTimer = null;
+      }
+      stopLocalSpeechAudio();
+      localSttPausedForSpeech = false;
+      localSpeechStartedAt = 0;
+      localSpeechBargeInStartedAt = 0;
+      localSttSuppressUploadsUntil = 0;
+      localSttDiscardCurrentChunk = false;
+      renderStatus("host still speaking; local voice cancelled", "ready");
+      publishShellState();
+      void postRealtimeTrace("agent", "Cancelled pending local voice because host continued speaking", { reason, ...details });
+    }
+
+    function abortLocalSpeechCurrentItem() {
+      if (!localSpeechCurrentItem?.controller) {
+        localSpeechCurrentItem = null;
+        return;
+      }
+      localSpeechCurrentItem.controller.abort();
+      localSpeechCurrentItem = null;
     }
 
     function isEditableEventTarget(target) {
@@ -1267,20 +1328,42 @@
     }
 
     function localBargeInHoldMs() {
-      return 240;
+      const defaultMs = localCaptureMode() === "auto-vad" ? 320 : 240;
+      const configured = Number(localStorage.getItem("meeting.localBargeInHoldMs") || String(defaultMs));
+      return Number.isFinite(configured) ? Math.max(160, Math.min(800, configured)) : defaultMs;
     }
 
     function localAcousticBargeInEnabled() {
-      return localStorage.getItem("meeting.localAcousticBargeIn") === "true";
+      const configured = localStorage.getItem("meeting.localAcousticBargeIn");
+      if (configured === "true") return true;
+      if (configured === "false") return false;
+      return localCaptureMode() === "auto-vad";
     }
 
     function localCaptureMode() {
       return localStorage.getItem("meeting.localCaptureMode") === "auto-vad" ? "auto-vad" : "push-to-talk";
     }
 
+    function setLocalCaptureMode(mode) {
+      const next = mode === "auto-vad" ? "auto-vad" : "push-to-talk";
+      if (next === "auto-vad") {
+        localStorage.setItem("meeting.localCaptureMode", "auto-vad");
+        if (localPushToTalkActive) stopLocalPushToTalk({ discard: true });
+        if (joined && localStream && usesLocalStt() && !localSttActive) startLocalSttCapture(localStream);
+        renderStatus("hands-free listening enabled", "ready");
+      } else {
+        localStorage.removeItem("meeting.localCaptureMode");
+        if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
+        renderStatus("hold Space to speak", "ready");
+      }
+      void postRealtimeTrace("agent", "Local capture mode changed", { captureMode: next });
+      publishShellState();
+    }
+
     function localSpeechSilenceMs() {
-      const configured = Number(localStorage.getItem("meeting.localSpeechSilenceMs") || "900");
-      return Number.isFinite(configured) ? Math.max(450, Math.min(3000, configured)) : 900;
+      const defaultMs = localCaptureMode() === "auto-vad" ? 1600 : 900;
+      const configured = Number(localStorage.getItem("meeting.localSpeechSilenceMs") || String(defaultMs));
+      return Number.isFinite(configured) ? Math.max(450, Math.min(4000, configured)) : defaultMs;
     }
 
     function localSpeechMaxMs() {
@@ -1292,7 +1375,7 @@
       return Number.isFinite(configured) ? Math.max(30000, Math.min(1800000, configured)) : 600000;
     }
 
-    async function sendAudioChunk(blob, clientStartedAt = 0) {
+    async function sendAudioChunk(blob, clientStartedAt = 0, clientStoppedAt = 0) {
       if (Date.now() < localSttSuppressUploadsUntil) {
         await postRealtimeTrace("debug", "Skipped local STT upload during local speech output", { bytes: blob.size });
         return;
@@ -1305,6 +1388,7 @@
           client: "stable-vad-v1"
         });
         if (clientStartedAt) params.set("clientStartedAt", String(clientStartedAt));
+        if (clientStoppedAt) params.set("clientStoppedAt", String(clientStoppedAt));
         await fetch(`${api}/audio/chunk?${params.toString()}`, {
           method: "POST",
           headers: { "Content-Type": blob.type || "application/octet-stream" },
@@ -1319,17 +1403,44 @@
       if (realtimeMuted) return;
       const message = localSpeechTextForPiAgentUpdate(event);
       if (!message) return;
-      enqueueLocalVoiceMessage(message, { clearExisting: isVoiceAgentDirectMessage(event) });
-      await postRealtimeTrace("agent", "Queued local TTS for Pi/Codex message", { eventId: event.id, direct: isVoiceAgentDirectMessage(event) });
+      const direct = isVoiceAgentDirectMessage(event);
+      const segmented = direct || (event?.type === "agent.message" && event.surface === "status");
+      const queued = segmented
+        ? enqueueLocalVoiceSegments(message, { clearExisting: direct })
+        : enqueueLocalVoiceMessage(message, { clearExisting: direct });
+      await postRealtimeTrace("agent", "Queued local TTS for Pi/Codex message", { eventId: event.id, direct, queuedSegments: queued });
     }
 
     function enqueueLocalVoiceMessage(message, options = {}) {
-      const text = clipText(sanitizeSpokenText(String(message || "")).trim(), options.maxChars || 360);
-      if (!text || realtimeMuted) return;
+      const text = clipText(sanitizeSpokenText(String(message || "")).trim(), options.maxChars || 700);
+      if (!text || realtimeMuted) return 0;
       if (options.clearExisting) clearLocalSpeechQueue();
       localSpeechQueue.push(createLocalSpeechQueueItem(text));
       warmLocalSpeechQueue();
       void playLocalSpeechQueue();
+      return 1;
+    }
+
+    function enqueueLocalVoiceSegments(message, options = {}) {
+      const text = sanitizeSpokenText(String(message || "")).trim();
+      if (!text || realtimeMuted) return 0;
+      if (options.clearExisting) clearLocalSpeechQueue();
+      const maxChars = Number(options.maxChars || 640);
+      const extraction = extractSpeakableSegments(text, true, { first: true });
+      const extracted = extraction.segments.map((segment) => segment.text);
+      const tail = text.slice(Math.min(extraction.consumed, text.length)).trim();
+      const segments = (extracted.length ? extracted : [text]).concat(tail && tail !== text ? [tail] : []);
+      let queued = 0;
+      for (const segment of segments.flatMap((segment) => splitLongSpeechSegment(segment, maxChars))) {
+        const spoken = sanitizeSpokenText(segment).trim();
+        if (!isUsefulSpeechSegment(spoken)) continue;
+        localSpeechQueue.push(createLocalSpeechQueueItem(clipText(spoken, maxChars)));
+        queued += 1;
+      }
+      if (!queued) return 0;
+      warmLocalSpeechQueue();
+      void playLocalSpeechQueue();
+      return queued;
     }
 
     function createLocalSpeechQueueItem(text) {
@@ -1409,13 +1520,15 @@
     async function playPreparedLocalSpeechItem(item) {
       const generation = item.generation || (localSpeechGeneration + 1);
       localSpeechGeneration = generation;
-      pauseLocalSttForSpeech();
-      stopLocalSpeechAudio();
-      renderStatus(item.synthesis ? "local voice ready" : "preparing local voice", "speaking");
+      localSpeechCurrentItem = item;
+      renderStatus(item.synthesis ? "local voice preparing; listening" : "preparing local voice; listening", "ready");
       try {
         const prepared = await item.synthesis;
         if (!prepared?.ok) throw prepared?.error || new Error("local TTS preparation failed");
         if (prepared.generation !== localSpeechGeneration) return;
+        if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
+        pauseLocalSttForSpeech();
+        stopLocalSpeechAudio();
         if (prepared.kind === "stream") {
           await playPreparedLocalSpeechStream(prepared);
         } else {
@@ -1426,6 +1539,8 @@
         await postRealtimeTrace("error", "Local TTS failed; browser speech fallback is disabled", { error: error?.message || String(error) });
         renderStatus("local TTS unavailable; speech skipped", "ready");
         resumeLocalSttAfterSpeech();
+      } finally {
+        if (localSpeechCurrentItem === item) localSpeechCurrentItem = null;
       }
     }
 
@@ -1433,11 +1548,12 @@
       localSpeechGeneration += 1;
       const generation = localSpeechGeneration;
       const text = clipText(message, 360);
-      pauseLocalSttForSpeech();
-      stopLocalSpeechAudio();
-      renderStatus("preparing local voice", "speaking");
+      renderStatus("preparing local voice; listening", "ready");
       try {
         const prepared = await prepareLocalSpeechAudio(text, generation, {});
+        if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
+        pauseLocalSttForSpeech();
+        stopLocalSpeechAudio();
         if (prepared.kind === "stream") await playPreparedLocalSpeechStream(prepared);
         else await playLocalSpeechBlob(prepared.blob, prepared.generation);
       } catch (error) {
@@ -1481,7 +1597,7 @@
       stopLocalSpeechAudio();
       const { response, generation } = prepared;
       const sampleRate = Number(response.headers.get("x-tts-sample-rate") || "24000") || 24000;
-      const playback = createLocalSpeechStreamPlayback(sampleRate);
+      const playback = createLocalSpeechStreamPlayback(sampleRate, generation);
       localSpeechStreamPlayback = playback;
       renderStatus("local voice streaming", "speaking");
 
@@ -1553,21 +1669,29 @@
         audio.onended = finish;
         audio.onerror = finish;
         renderStatus("local voice speaking", "speaking");
-        void audio.play().catch((error) => {
+        void audio.play().then(() => {
+          void postRealtimeTrace("latency", "local.tts.playback.start", {
+            kind: "blob",
+            generation,
+            clientPlaybackStartedAt: Date.now()
+          });
+        }).catch((error) => {
           void postRealtimeTrace("error", "Local TTS playback failed", { error: error?.message || String(error) });
           finish();
         });
       });
     }
 
-    function createLocalSpeechStreamPlayback(sampleRate) {
+    function createLocalSpeechStreamPlayback(sampleRate, generation = 0) {
       const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextCtor) throw new Error("WebAudio is unavailable in this browser");
       const context = new AudioContextCtor({ sampleRate });
       const playback = {
         context,
+        generation,
         nextStart: 0,
         playing: true,
+        playbackStartTraced: false,
         sources: new Set(),
         stop() {
           playback.playing = false;
@@ -1612,6 +1736,16 @@
       source.onended = () => playback.sources.delete(source);
       playback.sources.add(source);
       const startAt = Math.max(playback.nextStart, playback.context.currentTime + 0.015);
+      if (!playback.playbackStartTraced) {
+        playback.playbackStartTraced = true;
+        void postRealtimeTrace("latency", "local.tts.playback.start", {
+          kind: "stream",
+          generation: playback.generation,
+          clientPlaybackStartedAt: Date.now(),
+          audioContextCurrentTime: playback.context.currentTime,
+          scheduledAt: startAt
+        });
+      }
       source.start(startAt);
       playback.nextStart = startAt + audioBuffer.duration;
     }
@@ -1639,6 +1773,53 @@
 
     function waitMs(ms) {
       return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    async function waitForLocalSpeechPlaybackTurn(generation) {
+      if (localCaptureMode() !== "auto-vad" || !usesLocalStt()) return true;
+      let notedWait = false;
+      const waitStartedAt = Date.now();
+      while (generation === localSpeechGeneration && joined && usesLocalSpeechOutput() && !realtimeMuted) {
+        if (!localShouldDeferSpeechPlayback()) return true;
+        const waitedMs = Date.now() - waitStartedAt;
+        if (waitedMs >= localUnconfirmedMicDeferMs()) {
+          void postRealtimeTrace("agent", "Continuing local voice after unconfirmed mic activity", {
+            level: currentLocalMicLevel(),
+            waitedMs,
+            maxWaitMs: localUnconfirmedMicDeferMs()
+          });
+          return true;
+        }
+        if (!notedWait) {
+          notedWait = true;
+          renderStatus("host still speaking; local voice waiting", "ready");
+          void postRealtimeTrace("agent", "Local voice prepared but waiting for host speech to finish", {
+            level: currentLocalMicLevel(),
+            quietMs: localSpeechPlaybackQuietMs()
+          });
+        }
+        await waitMs(80);
+      }
+      return false;
+    }
+
+    function localShouldDeferSpeechPlayback() {
+      if (localCaptureMode() !== "auto-vad" || !localSttActive) return false;
+      if (localPushToTalkActive) return true;
+      if (localSttRecorder?.state === "recording") return true;
+      const now = Date.now();
+      const recentVoice = localSttLastVoiceAt > 0 && now - localSttLastVoiceAt < localSpeechPlaybackQuietMs();
+      return recentVoice || currentLocalMicLevel() >= localVoiceThreshold();
+    }
+
+    function localUnconfirmedMicDeferMs() {
+      const configured = Number(localStorage.getItem("meeting.localUnconfirmedMicDeferMs") || "1800");
+      return Number.isFinite(configured) ? Math.max(0, Math.min(8000, configured)) : 1800;
+    }
+
+    function localSpeechPlaybackQuietMs() {
+      const configured = Number(localStorage.getItem("meeting.localSpeechPlaybackQuietMs") || "650");
+      return Number.isFinite(configured) ? Math.max(0, Math.min(3000, configured)) : 650;
     }
 
     function localSpeechAudioPlaying() {
@@ -1699,6 +1880,7 @@
 
     function interruptLocalSpeechForBargeIn(level) {
       localSpeechGeneration += 1;
+      abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
       localSttPausedForSpeech = false;
       localSpeechStartedAt = 0;
@@ -1810,7 +1992,7 @@
       const available = speech.slice(state.consumed);
       const extraction = extractSpeakableSegments(available, false, { first: state.queued === 0 });
       for (const segment of extraction.segments) {
-        enqueueLocalVoiceMessage(segment.text, { maxChars: segment.maxChars || 420 });
+        enqueueLocalVoiceMessage(segment.text, { maxChars: Math.max(segment.maxChars || 700, segment.text.length) });
         state.queued += 1;
       }
       state.consumed += extraction.consumed;
@@ -1825,7 +2007,7 @@
       const available = speech.slice(Math.min(state.consumed, speech.length));
       const extraction = extractSpeakableSegments(available, true, { first: state.queued === 0 });
       for (const segment of extraction.segments) {
-        enqueueLocalVoiceMessage(segment.text, { maxChars: segment.maxChars || 420 });
+        enqueueLocalVoiceMessage(segment.text, { maxChars: Math.max(segment.maxChars || 700, segment.text.length) });
         state.queued += 1;
       }
       if (!state.queued && speech) {
@@ -1857,6 +2039,20 @@
         cursor += end;
       }
       return { segments, consumed: cursor };
+    }
+
+    function splitLongSpeechSegment(text, maxChars = 640) {
+      const chunks = [];
+      let rest = String(text || "").trim();
+      const limit = Math.max(240, Number(maxChars) || 640);
+      while (rest.length > limit) {
+        const boundary = softSpeechBoundary(rest, limit, Math.floor(limit * 0.45));
+        const end = boundary > 0 ? boundary : limit;
+        chunks.push(rest.slice(0, end).trim());
+        rest = rest.slice(end).trim();
+      }
+      if (rest) chunks.push(rest);
+      return chunks;
     }
 
     function findSpeechBoundary(text, final, mode = "continuation") {
@@ -1956,12 +2152,12 @@
       if (!event || event.type !== "agent.message") return "";
       if (isVoiceAgentDirectMessage(event)) {
         const envelope = parseVoiceAgentEnvelope(String(event.text || ""));
-        return clipText(envelope.message || String(event.text || "").trim(), 360);
+        return envelope.message || String(event.text || "").trim();
       }
       const speech = markdownToSpeech(String(event.text || ""));
       if (!speech) return "";
       if (event.surface === "canvas" || event.documentId) return clipText(`I updated the canvas. ${firstSpeechSentence(speech)}`, 300);
-      return clipText(speech, 360);
+      return speech;
     }
 
     function markdownToSpeech(text) {
@@ -1982,7 +2178,7 @@
         .replace(/\b(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|mjs|json|md|html|css|py|sh|wav|mp3|safetensors)\b/gi, "the relevant file")
         .replace(/(?:^|\s)(?:\/Users|\.{1,2}\/)[^\s,;:)]+/g, " the relevant file")
         .replace(/\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|json|md|html|css|py|sh|wav|mp3|safetensors)\b/gi, "the relevant file")
-        .replace(/\b[A-Z][A-Z0-9_]{3,}(?:=[^\s,;]+)?\b/g, "the relevant setting")
+        .replace(/\b(?=[A-Z0-9_]*(?:[_0-9]|=))[A-Z][A-Z0-9_]{3,}(?:=[^\s,;]+)?\b/g, "the relevant setting")
         .replace(/\s*(?:the relevant file)(?:\s*(?:,|and)\s*the relevant file)+/gi, " the relevant files")
         .replace(/\bthe relevant file\s+the relevant file\b/gi, "the relevant file")
         .replace(/\s+/g, " ")
@@ -2162,11 +2358,14 @@
       muteButton.disabled = !joined;
       sleepButton.textContent = realtimeActivationMode === "sleeping" ? "Wake agent" : "Sleep until prompted";
       sleepButton.disabled = !joined || !usesRealtimeVoice();
-      speakButton.hidden = !joined || !usesLocalStt();
-      speakButton.disabled = !joined || !usesLocalStt();
+      speakButton.hidden = !joined || !usesLocalStt() || localCaptureMode() !== "push-to-talk";
+      speakButton.disabled = !joined || !usesLocalStt() || localCaptureMode() !== "push-to-talk";
       speakButton.textContent = localPushToTalkActive ? "Release to send" : "Hold Space to speak";
       speakButton.classList.toggle("active", localPushToTalkActive);
       voiceModeSelect.value = voiceMode;
+      captureModeSelect.hidden = !usesLocalStt();
+      captureModeSelect.disabled = !usesLocalStt();
+      captureModeSelect.value = localCaptureMode();
     }
 
     function publishShellState() {
@@ -2178,6 +2377,7 @@
         realtimeResponseMode,
         realtimeActivationMode,
         voiceMode,
+        captureMode: localCaptureMode(),
         localSttActive,
         speechProvider,
         localTtsProvider,

@@ -52,15 +52,22 @@ PARAKEET_STT_URL=http://127.0.0.1:8793/transcribe
 
 ## Capture Mode
 
-The default local capture mode is explicit push-to-talk. This is more reliable than acoustic VAD while tuning because it avoids sending tiny or badly cut chunks to Whisper.
+The default local capture mode is explicit push-to-talk. This is more reliable than acoustic VAD while tuning because it avoids sending tiny or badly cut chunks to the selected local STT provider.
 
-To re-enable automatic VAD capture for experiments:
+The stable shell also exposes `Hands-free`, which enables automatic VAD capture so the host can speak without holding Space. This is the natural conversation mode, but it is more sensitive to room noise, laptop speaker echo, and silence-threshold tuning.
+
+Use the capture selector in the stable-shell toolbar:
+
+- `Hold Space`: press and hold Space while speaking, then release to send one clip.
+- `Hands-free`: local VAD starts recording when the mic level crosses the speech threshold and sends the clip after sustained silence. The default silence window is 1600 ms so short thinking pauses are less likely to make the agent answer over the host.
+
+The selector persists in local storage. The equivalent console command is:
 
 ```js
 localStorage.setItem("meeting.localCaptureMode", "auto-vad")
 ```
 
-To return to push-to-talk:
+To return to push-to-talk from the console:
 
 ```js
 localStorage.removeItem("meeting.localCaptureMode")
@@ -68,15 +75,23 @@ localStorage.removeItem("meeting.localCaptureMode")
 
 ## Interruption
 
-When Codex is speaking, the stable shell keeps VAD alive but suppresses audio uploads so the agent voice is not fed back into Whisper. Automatic acoustic barge-in is disabled by default because laptop speakers can trigger false interruptions.
+When Codex is speaking, the stable shell keeps VAD alive but suppresses audio uploads so the agent voice is not fed back into Whisper. In `Hands-free` mode, acoustic barge-in is enabled by default: sustained mic activity after a short grace period interrupts local TTS and returns the shell to listening.
 
-For tuning only, enable it from the browser console:
+Local TTS preparation is not the same as playback. The shell can prepare a response while it is still listening, but before playing audio it checks the mic again. Raw VAD activity only defers playback for a bounded window, because room noise and speaker echo can cross the mic threshold. If that mic activity does not become a confirmed `utterance.final` from the host, local TTS continues. The pending local voice is cancelled only when a confirmed host transcript arrives, so a real newer host turn wins without losing audio to empty STT chunks.
+
+To force barge-in on from the browser console:
 
 ```js
 localStorage.setItem("meeting.localAcousticBargeIn", "true")
 ```
 
-Disable it again with:
+To force it off:
+
+```js
+localStorage.setItem("meeting.localAcousticBargeIn", "false")
+```
+
+To return to the mode-dependent default:
 
 ```js
 localStorage.removeItem("meeting.localAcousticBargeIn")

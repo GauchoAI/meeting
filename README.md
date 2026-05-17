@@ -7,7 +7,7 @@
 ```bash
 pnpm install
 cp .env.example .env
-pnpm dev
+pnpm dev:local-live
 ```
 
 Open the stable shell:
@@ -17,6 +17,8 @@ http://localhost:5175/stable.html
 ```
 
 The stable shell owns microphone permission, local speech capture, Realtime state, transcript persistence, and Pi/Codex update injection. The React app runs inside the shell iframe so normal UI hot reloads do not drop the voice session.
+
+For the full runbook, including restart, stop, logs, smoke tests, and manual foreground commands, see `docs/running-the-program.md`.
 
 ## Project Map
 
@@ -54,6 +56,12 @@ scripts/start-parakeet-stt-server.sh
 scripts/start-voxtral-mlx-tts.sh
 ```
 
+Or start the full local live stack in detached sessions:
+
+```bash
+pnpm dev:local-live
+```
+
 Run the repeatable speech benchmark:
 
 ```bash
@@ -66,6 +74,8 @@ Current measured recommendations are in `docs/speech-provider-benchmarks.md`.
 
 ```bash
 pnpm dev
+pnpm dev:local-live
+pnpm dev:local-live:stop
 pnpm dev:api
 pnpm dev:web
 pnpm dev:mcp

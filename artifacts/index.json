@@ -1,6 +1,108 @@
 {
-  "updatedAt": "2026-05-10T03:33:25.305Z",
+  "updatedAt": "2026-05-17T03:12:49.369Z",
   "artifacts": [
+    {
+      "kind": "note",
+      "slug": "buenos-aires-1807-wargame-test",
+      "title": "Buenos Aires 1807 Wargame Test",
+      "createdAt": "2026-05-17T03:12:49.342Z",
+      "updatedAt": "2026-05-17T03:12:49.342Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "wargame",
+        "buenos-aires",
+        "1807",
+        "alternate-history",
+        "ai-arbiter"
+      ],
+      "summary": "Quick summary of the Buenos Aires 1807 alternate-history wargame test, lessons learned, and diagram-ready scenario structure.",
+      "path": "artifacts/dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test",
+      "mtime": "2026-05-17T03:12:49.358Z"
+    },
+    {
+      "kind": "note",
+      "slug": "ai-wargame-design-considerations",
+      "title": "AI Wargame Design Considerations",
+      "createdAt": "2026-05-17T00:58:29.578Z",
+      "updatedAt": "2026-05-17T00:58:29.578Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "wargame",
+        "ai-arbiter",
+        "game-design",
+        "historical-simulation"
+      ],
+      "summary": "Design notes for an AI-arbitrated geopolitical/strategic wargame, including prepared historical context requirements and adjudication principles.",
+      "path": "artifacts/dt=2026-05-17/hour=21/note-ai-wargame-design-considerations/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-17/hour=21/note-ai-wargame-design-considerations",
+      "mtime": "2026-05-17T00:58:29.593Z"
+    },
+    {
+      "kind": "implementation",
+      "slug": "verify-direct-message-terminal-rendering",
+      "title": "Direct message from Realtime agent",
+      "createdAt": "2026-05-10T04:28:50.114Z",
+      "updatedAt": "2026-05-11T04:46:35.076Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Pi agent implementation output for Direct message from Realtime agent",
+      "path": "artifacts/dt=2026-05-10/hour=01/implementation-verify-direct-message-terminal-rendering/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=01/implementation-verify-direct-message-terminal-rendering",
+      "mtime": "2026-05-11T04:46:35.086Z"
+    },
+    {
+      "kind": "implementation",
+      "slug": "improve-direct-message-rendering",
+      "title": "Direct message from Realtime agent",
+      "createdAt": "2026-05-11T04:39:58.090Z",
+      "updatedAt": "2026-05-11T04:43:03.503Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Pi agent implementation output for Direct message from Realtime agent",
+      "path": "artifacts/dt=2026-05-11/hour=01/implementation-improve-direct-message-rendering/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-11/hour=01/implementation-improve-direct-message-rendering",
+      "mtime": "2026-05-11T04:43:03.505Z"
+    },
+    {
+      "kind": "implementation",
+      "slug": "direct-message-msg-mozbv0yw-rjiyv9",
+      "title": "Direct request from Realtime agent",
+      "createdAt": "2026-05-11T04:39:12.059Z",
+      "updatedAt": "2026-05-11T04:39:12.059Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Pi agent implementation output for Direct request from Realtime agent",
+      "path": "artifacts/dt=2026-05-11/hour=01/implementation-direct-message-msg-mozbv0yw-rjiyv9/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-11/hour=01/implementation-direct-message-msg-mozbv0yw-rjiyv9",
+      "mtime": "2026-05-11T04:39:12.069Z"
+    },
+    {
+      "kind": "implementation",
+      "slug": "direct-message-msg-moz9zj28-elozt9",
+      "title": "Direct message from Realtime agent",
+      "createdAt": "2026-05-11T04:30:03.425Z",
+      "updatedAt": "2026-05-11T04:30:03.425Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Pi agent implementation output for Direct message from Realtime agent",
+      "path": "artifacts/dt=2026-05-11/hour=01/implementation-direct-message-msg-moz9zj28-elozt9/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-11/hour=01/implementation-direct-message-msg-moz9zj28-elozt9",
+      "mtime": "2026-05-11T04:30:03.436Z"
+    },
+    {
+      "kind": "implementation",
+      "slug": "direct-message-msg-moz9muji-1m1gaj",
+      "title": "Direct message from Realtime agent",
+      "createdAt": "2026-05-10T04:23:00.557Z",
+      "updatedAt": "2026-05-10T04:23:00.557Z",
+      "artifact": "artifact.smart.md",
+      "tags": [],
+      "summary": "Pi agent implementation output for Direct message from Realtime agent",
+      "path": "artifacts/dt=2026-05-10/hour=01/implementation-direct-message-msg-moz9muji-1m1gaj/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-10/hour=01/implementation-direct-message-msg-moz9muji-1m1gaj",
+      "mtime": "2026-05-10T04:23:00.569Z"
+    },
     {
       "kind": "plan",
       "slug": "current-project-plan-from-meeting-context",
@@ -16,7 +118,7 @@
       "summary": "Readable Now/Next/Later/Done project plan based on current implementation task statuses in the Meeting context.",
       "path": "artifacts/dt=2026-05-10/hour=00/plan-current-project-plan-from-meeting-context/artifact.smart.md",
       "dir": "artifacts/dt=2026-05-10/hour=00/plan-current-project-plan-from-meeting-context",
-      "mtime": "2026-05-10T03:33:25.290Z"
+      "mtime": "2026-05-11T04:30:13.391Z"
     },
     {
       "kind": "note",

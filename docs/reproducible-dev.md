@@ -7,8 +7,7 @@ This repo is intended to be runnable from a fresh clone with one canonical sourc
 ```bash
 pnpm install
 cp .env.example .env
-bash scripts/setup-whisper.cpp.sh   # if the Whisper model/binary are not already installed
-pnpm dev
+pnpm dev:local-live
 ```
 
 Open:
@@ -21,6 +20,7 @@ Click **Join meeting** once. The stable shell starts the Realtime voice agent
 immediately and keeps it alive while the iframe hot reloads.
 
 Local Voxtral and Moshi experiments are documented in `docs/local-voice-models.md`.
+The full startup, stop, logs, and smoke-test runbook is `docs/running-the-program.md`.
 
 ## Pi extensions
 
@@ -61,13 +61,13 @@ models/
 Prefer running directly from the source checkout:
 
 ```bash
-pnpm dev
+pnpm dev:local-live
 ```
 
-or in the background:
+For app-only development without local speech providers:
 
 ```bash
-bash scripts/dev-source.sh
+pnpm dev
 ```
 
 Avoid editing `apps/web/public/stable.html` during a live meeting unless doing deliberate stable-shell maintenance. Normal UI iteration should happen in `apps/web/src/*`.

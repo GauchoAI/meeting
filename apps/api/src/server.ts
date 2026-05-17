@@ -91,10 +91,23 @@ const server = createServer(async (req, res) => {
     const speakerLabel = url.searchParams.get("speaker") || "Host";
     const client = url.searchParams.get("client") || "";
     const clientStartedAt = Number(url.searchParams.get("clientStartedAt") || 0) || undefined;
+    const clientStoppedAt = Number(url.searchParams.get("clientStoppedAt") || 0) || undefined;
     const receivedAt = Date.now();
     const audio = await readBuffer(req);
     const uploadReadAt = Date.now();
-    appendTrace("latency", "audio.upload.received", { bytes: audio.length, extension, client, clientStartedAt, receivedAt, uploadReadAt, clientToApiMs: clientStartedAt ? receivedAt - clientStartedAt : undefined, requestReadMs: uploadReadAt - receivedAt });
+    appendTrace("latency", "audio.upload.received", {
+      bytes: audio.length,
+      extension,
+      client,
+      clientStartedAt,
+      clientStoppedAt,
+      clientSpeechMs: clientStartedAt && clientStoppedAt ? clientStoppedAt - clientStartedAt : undefined,
+      receivedAt,
+      uploadReadAt,
+      clientToApiMs: clientStartedAt ? receivedAt - clientStartedAt : undefined,
+      clientStopToApiMs: clientStoppedAt ? receivedAt - clientStoppedAt : undefined,
+      requestReadMs: uploadReadAt - receivedAt
+    });
     if (shouldIgnoreLegacyAudioChunk(client)) {
       appendTrace("debug", "ignored legacy local audio chunk", { client, bytes: audio.length, extension });
       return sendJson(res, { ok: true, ignored: true, reason: "legacy local audio client" });
@@ -120,7 +133,13 @@ const server = createServer(async (req, res) => {
           startMs,
           endMs: startMs + result.elapsedMs
         });
-        appendTrace("latency", "utterance.final", { utteranceCreatedAt, totalApiMs: utteranceCreatedAt - receivedAt, clientToUtteranceMs: clientStartedAt ? utteranceCreatedAt - clientStartedAt : undefined, textChars: result.text.length });
+        appendTrace("latency", "utterance.final", {
+          utteranceCreatedAt,
+          totalApiMs: utteranceCreatedAt - receivedAt,
+          clientToUtteranceMs: clientStartedAt ? utteranceCreatedAt - clientStartedAt : undefined,
+          clientStopToUtteranceMs: clientStoppedAt ? utteranceCreatedAt - clientStoppedAt : undefined,
+          textChars: result.text.length
+        });
       }
       return sendJson(res, { ok: true, result });
     } catch (error) {

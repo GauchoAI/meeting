@@ -195,6 +195,18 @@ The first request downloads and loads the MLX model, so it can take a while. Aft
 
 For this Voxtral model, each independently synthesized chunk can carry a slightly different room/noise profile. The stable shell therefore asks Codex/Pi for a short first spoken sentence, then batches later speech into longer chunks to reduce audible volume/background shifts. The shell also strips file paths, file names, environment variables, raw JSON, and markdown syntax from spoken text; those details stay visible in the UI instead of being read aloud.
 
+### Spoken text hygiene
+
+The stable shell sanitizes text before sending it to TTS. The goal is to avoid reading developer-only strings aloud:
+
+- file paths become `the relevant file`
+- URLs become `the local page`
+- env/config-like identifiers such as `MEETING_TTS_PROVIDER` become `the relevant setting`
+
+This sanitizer must not rewrite natural acronyms. A real failure exposed this: Spanish speech containing `URSS` was transformed into `the relevant setting` because the old rule matched any all-caps token with four or more characters. The rule now only treats uppercase tokens as settings when they look config-like, meaning they contain `_`, a digit, or `=`.
+
+The regression test in `scripts/test-realtime-sleep.mjs` checks that direct Pi voice messages are sentence-chunked instead of clipped and that the acronym sanitizer stays narrow.
+
 Spanish with the English `casual_male` voice can degrade badly. The API auto-selects `VOXTRAL_MLX_TTS_SPANISH_VOICE` for likely Spanish text unless `VOXTRAL_MLX_TTS_AUTO_VOICE=false`.
 
 Qwen3 TTS is available for narration/offline artifact audio:

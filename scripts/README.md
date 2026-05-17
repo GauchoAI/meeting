@@ -6,6 +6,8 @@ Scripts are grouped by how they are used. Prefer the root `package.json` command
 
 | Script | Purpose |
 | --- | --- |
+| `start-local-live.sh` | Starts the full source app plus local Parakeet STT and MLX Voxtral TTS stack. |
+| `stop-local-live.sh` | Stops the local-live screen sessions and ports. |
 | `dev-source.sh` | Shell helper for local development environment variables. |
 | `meeting-daemon.sh` | Runs the local Meeting daemon process. |
 | `meeting-mcp-stdio.sh` | Starts the MCP server over stdio. |
@@ -40,6 +42,7 @@ Scripts are grouped by how they are used. Prefer the root `package.json` command
 | Script | Purpose |
 | --- | --- |
 | `benchmark-speech-providers.mjs` | Unified local speech provider benchmark; exposed as `pnpm benchmark:speech`. |
+| `measure-meeting-latency.mjs` | Measures Meeting voice/STT/agent/TTS latency from `.meeting/events.jsonl`; see `docs/meeting-latency-measurement.md`. |
 | `test-parakeet-stt-smoke.sh` | Parakeet STT smoke test with generated local audio. |
 | `test-qwen3-tts-smoke.sh` | Qwen3 TTS smoke test for English, Spanish, and Russian. |
 | `check-assistant-delivery.mjs` | Guardrail checks for assistant output delivery. |
