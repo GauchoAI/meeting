@@ -337,6 +337,18 @@
       const roomKey = firebaseCleanKey(roomId);
       const signalsUrl = firebasePathUrl(`signalingRooms/${roomKey}/signals`);
       const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+      let localMicMutedForRelayUntil = 0;
+
+      function muteLocalMicForRelay(ms = 9000) {
+        localMicMutedForRelayUntil = Math.max(localMicMutedForRelayUntil, Date.now() + ms);
+        for (const track of stream.getAudioTracks?.() || []) track.enabled = false;
+        window.setTimeout(() => {
+          if (Date.now() < localMicMutedForRelayUntil) return;
+          for (const track of stream.getAudioTracks?.() || []) track.enabled = true;
+          void postRealtimeTrace("debug", "Guest mic unmuted after relay speech");
+        }, ms + 150);
+        void postRealtimeTrace("debug", "Guest mic muted during relay speech", { ms });
+      }
 
       async function clearSignals() {
         await fetch(signalsUrl, { method: "DELETE" }).catch(() => undefined);
@@ -571,6 +583,7 @@
           await publish({ type: "hello", roomId, from: self });
           void postRealtimeTrace("agent", host ? "Hosting human WebRTC room" : "Joined human WebRTC room as guest", { roomId, peerId: self.id, peerName: self.name });
         },
+        muteLocalMicForRelay,
         broadcastSpeech(text, type = "assistant.speech") {
           return broadcastHumanPeerData({ type, text, from: self, createdAtMs: Date.now() });
         },
@@ -1826,8 +1839,12 @@
         const utterance = new SpeechSynthesisUtterance(clipText(spoken, 700));
         utterance.lang = "en-US";
         utterance.rate = 1;
+        const estimatedMs = Math.min(18000, Math.max(2500, spoken.length * 65));
+        peerRoom?.muteLocalMicForRelay?.(estimatedMs + 1200);
+        utterance.onend = () => peerRoom?.muteLocalMicForRelay?.(500);
+        utterance.onerror = () => peerRoom?.muteLocalMicForRelay?.(500);
         window.speechSynthesis.speak(utterance);
-        void postRealtimeTrace("agent", "Speaking assistant audio relayed from host", { textChars: spoken.length });
+        void postRealtimeTrace("agent", "Speaking assistant audio relayed from host", { textChars: spoken.length, mutedGuestMicMs: estimatedMs + 1200 });
       } catch (error) {
         void postRealtimeTrace("error", "Guest browser speech relay failed", { error: error?.message || String(error) });
       }
