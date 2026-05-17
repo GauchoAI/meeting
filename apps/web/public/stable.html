@@ -83,6 +83,7 @@
     const remoteAudio = document.getElementById("remoteAudio");
     const uiFrame = document.getElementById("ui");
     const embeddedParams = new URLSearchParams({ embedded: "1", meeting: meetingId });
+    if (pageParams.get("v")) embeddedParams.set("v", pageParams.get("v"));
     if (api) embeddedParams.set("api", api);
     if (peerOnly) embeddedParams.set("peerOnly", "1");
     for (const key of ["advertise", "host", "title", "hostName", "name"]) {
