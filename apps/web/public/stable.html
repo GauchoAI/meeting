@@ -470,6 +470,10 @@
         } catch {
           return;
         }
+        if (message?.type === "meeting.event" && !host) {
+          uiFrame.contentWindow?.postMessage({ type: "meeting.event", event: message.event }, "*");
+          return;
+        }
         if (message?.type === "assistant.audio.start" && !host) {
           incomingPeerAudio.set(message.id, { chunks: [], mimeType: message.mimeType || "audio/mpeg", startedAt: Date.now() });
           return;
@@ -664,6 +668,9 @@
         muteLocalMicForRelay,
         broadcastSpeech(text, type = "assistant.speech") {
           return broadcastHumanPeerData({ type, text, from: self, createdAtMs: Date.now() });
+        },
+        broadcastEvent(event) {
+          return broadcastHumanPeerData({ type: "meeting.event", event, from: self, createdAtMs: Date.now() });
         },
         broadcastAudioBlob,
         stop() {
@@ -1438,6 +1445,7 @@
         } catch {
           return;
         }
+        peerRoom?.broadcastEvent?.(event);
         if (usesLocalSpeechOutput() && isSpeakableCodexDraft(event)) {
           handleCodexStreamingSpeech(event);
           return;

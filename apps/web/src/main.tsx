@@ -131,6 +131,18 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!peerOnly && !pagesHosted) return;
+    const onMessage = (message: MessageEvent) => {
+      if (message.data?.type !== "meeting.event" || !message.data.event) return;
+      const event = message.data.event as MeetingEvent;
+      setEvents((current) => upsertEvent(current, event).slice(0, 100));
+      transcript.apply(event);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [transcript]);
+
+  useEffect(() => {
     let alive = true;
     let source: EventSource | undefined;
 
