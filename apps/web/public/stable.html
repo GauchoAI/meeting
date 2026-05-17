@@ -1983,9 +1983,7 @@
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       try {
-        peerRoom?.muteLocalMicForRelay?.(800);
         await audio.play();
-        audio.onended = () => peerRoom?.muteLocalMicForRelay?.(120);
         void postRealtimeTrace("agent", "Playing relayed assistant TTS audio", { bytes: blob.size, mimeType, transferMs: Date.now() - startedAt });
       } catch (error) {
         enableAudioButton.hidden = false;
