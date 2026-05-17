@@ -338,6 +338,7 @@
     function createHumanPeerRoom({ roomId, self, host, stream }) {
       const peers = new Map();
       const seenSignals = new Set();
+      const incomingPeerAudio = new Map();
       let eventSource = null;
       let pollTimer = null;
       let stopped = false;
@@ -469,6 +470,21 @@
         } catch {
           return;
         }
+        if (message?.type === "assistant.audio.start" && !host) {
+          incomingPeerAudio.set(message.id, { chunks: [], mimeType: message.mimeType || "audio/mpeg", startedAt: Date.now() });
+          return;
+        }
+        if (message?.type === "assistant.audio.chunk" && !host) {
+          const transfer = incomingPeerAudio.get(message.id);
+          if (transfer) transfer.chunks[message.index || 0] = message.data || "";
+          return;
+        }
+        if (message?.type === "assistant.audio.end" && !host) {
+          const transfer = incomingPeerAudio.get(message.id);
+          incomingPeerAudio.delete(message.id);
+          if (transfer) void playPeerAssistantAudioBlob(transfer.chunks.join(""), transfer.mimeType, transfer.startedAt);
+          return;
+        }
         if ((message?.type === "assistant.speech" || message?.type === "host.speech") && !host) {
           speakPeerAssistantText(message.text || "");
         }
@@ -485,6 +501,31 @@
           }
         }
         return sent;
+      }
+
+      async function waitForChannelBuffer(channel) {
+        while (channel.bufferedAmount > 768000) await waitMs(25);
+      }
+
+      async function broadcastAudioBlob(blob, type = "assistant.audio") {
+        const openChannels = [...peers.values()].map((state) => state.dataChannel).filter((channel) => channel?.readyState === "open");
+        if (!openChannels.length || !blob?.size) return 0;
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const chunkBytes = 9000;
+        for (const channel of openChannels) channel.send(JSON.stringify({ type: `${type}.start`, id, mimeType: blob.type || "audio/mpeg", bytes: bytes.byteLength, createdAtMs: Date.now() }));
+        for (let offset = 0, index = 0; offset < bytes.length; offset += chunkBytes, index += 1) {
+          let binary = "";
+          const slice = bytes.subarray(offset, Math.min(offset + chunkBytes, bytes.length));
+          for (const byte of slice) binary += String.fromCharCode(byte);
+          const payload = JSON.stringify({ type: `${type}.chunk`, id, index, data: window.btoa(binary) });
+          for (const channel of openChannels) {
+            await waitForChannelBuffer(channel);
+            if (channel.readyState === "open") channel.send(payload);
+          }
+        }
+        for (const channel of openChannels) if (channel.readyState === "open") channel.send(JSON.stringify({ type: `${type}.end`, id, createdAtMs: Date.now() }));
+        return openChannels.length;
       }
 
       function startRemotePeerTranscription(peer, remoteStream) {
@@ -624,6 +665,7 @@
         broadcastSpeech(text, type = "assistant.speech") {
           return broadcastHumanPeerData({ type, text, from: self, createdAtMs: Date.now() });
         },
+        broadcastAudioBlob,
         stop() {
           stopped = true;
           void publish({ type: "bye", roomId, from: self }).catch(() => undefined);
@@ -1864,11 +1906,43 @@
       if (sent) void postRealtimeTrace("agent", "Broadcast assistant speech to human peers", { peers: sent, textChars: spoken.length });
     }
 
+    async function broadcastAssistantAudioToHumanPeers(blob) {
+      if (!blob || !peerRoom?.broadcastAudioBlob) return 0;
+      const sent = await peerRoom.broadcastAudioBlob(blob, "assistant.audio");
+      if (sent) void postRealtimeTrace("agent", "Broadcast assistant TTS audio to human peers", { peers: sent, bytes: blob.size, mimeType: blob.type });
+      return sent;
+    }
+
     function broadcastHostSpeechToHumanPeers(text) {
       const spoken = sanitizeSpokenText(String(text || "")).trim();
       if (!spoken || !peerRoom?.broadcastSpeech) return;
       const sent = peerRoom.broadcastSpeech(spoken, "host.speech");
       if (sent) void postRealtimeTrace("agent", "Broadcast host speech transcript to human peers", { peers: sent, textChars: spoken.length });
+    }
+
+    function base64ToBlob(base64, mimeType = "audio/mpeg") {
+      const binary = window.atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      return new Blob([bytes], { type: mimeType });
+    }
+
+    async function playPeerAssistantAudioBlob(base64Audio, mimeType, startedAt = Date.now()) {
+      const blob = base64ToBlob(base64Audio, mimeType);
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      try {
+        peerRoom?.muteLocalMicForRelay?.(Math.min(30000, Math.max(4000, Math.round(blob.size / 24))));
+        await audio.play();
+        void postRealtimeTrace("agent", "Playing relayed assistant TTS audio", { bytes: blob.size, mimeType, transferMs: Date.now() - startedAt });
+      } catch (error) {
+        enableAudioButton.hidden = false;
+        speakPeerAssistantText("Audio is ready. Please press Enable guest audio.");
+        void postRealtimeTrace("error", "Relayed assistant TTS audio playback failed", { error: error?.message || String(error), bytes: blob.size, mimeType });
+      } finally {
+        audio.onended = () => URL.revokeObjectURL(url);
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
     }
 
     function unlockPeerAudio(withTest = false) {
@@ -1983,7 +2057,8 @@
         if (!prepared?.ok) throw prepared?.error || new Error("local TTS preparation failed");
         if (prepared.generation !== localSpeechGeneration) return;
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
-        broadcastAssistantSpeechToHumanPeers(item.text);
+        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
+        else broadcastAssistantSpeechToHumanPeers(item.text);
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") {
@@ -2009,7 +2084,8 @@
       try {
         const prepared = await prepareLocalSpeechAudio(text, generation, {});
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
-        broadcastAssistantSpeechToHumanPeers(text);
+        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
+        else broadcastAssistantSpeechToHumanPeers(text);
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") await playPreparedLocalSpeechStream(prepared);
