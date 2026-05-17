@@ -406,7 +406,7 @@
         pc.addEventListener("connectionstatechange", () => {
           if (["closed", "failed", "disconnected"].includes(pc.connectionState)) removePeer(peer.id);
         });
-        const state = { peer, pc, remoteStream, audio, recorder: null };
+        const state = { peer, pc, remoteStream, audio, recorder: null, pendingIce: [] };
         peers.set(peer.id, state);
         return state;
       }
@@ -468,6 +468,7 @@
         if (signal.type === "offer") {
           const state = getOrCreatePeer(signal.from);
           await state.pc.setRemoteDescription(signal.sdp);
+          for (const candidate of state.pendingIce.splice(0)) await state.pc.addIceCandidate(candidate).catch(() => undefined);
           const answer = await state.pc.createAnswer();
           await state.pc.setLocalDescription(answer);
           await publish({ type: "answer", roomId, from: self, to: signal.from.id, sdp: answer });
@@ -475,12 +476,18 @@
         }
         if (signal.type === "answer") {
           const state = peers.get(signal.from.id);
-          if (state) await state.pc.setRemoteDescription(signal.sdp);
+          if (state) {
+            await state.pc.setRemoteDescription(signal.sdp);
+            for (const candidate of state.pendingIce.splice(0)) await state.pc.addIceCandidate(candidate).catch(() => undefined);
+          }
           return;
         }
         if (signal.type === "ice") {
           const state = peers.get(signal.from.id);
-          if (state) await state.pc.addIceCandidate(signal.candidate);
+          if (state) {
+            if (state.pc.remoteDescription) await state.pc.addIceCandidate(signal.candidate);
+            else state.pendingIce.push(signal.candidate);
+          }
         }
       }
 
