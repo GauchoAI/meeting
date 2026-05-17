@@ -428,29 +428,45 @@
         const state = peers.get(peer.id);
         const audioTracks = remoteStream?.getAudioTracks?.() || [];
         if (!state || state.recorder || !audioTracks.length) return;
-        try {
-          const audioOnlyStream = new MediaStream(audioTracks);
-          const mimeType = preferredMimeType();
-          const recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
-          let chunkStartedAt = Date.now();
-          state.recorder = recorder;
-          recorder.ondataavailable = (event) => {
-            if (!event.data?.size) return;
-            const stoppedAt = Date.now();
-            const blob = new Blob([event.data], { type: recorder.mimeType || mimeType || "audio/webm" });
-            void postRealtimeTrace("debug", "Forwarding guest WebRTC audio chunk", { peerId: peer.id, peerName: peer.name, bytes: blob.size, mimeType: blob.type });
-            void sendPeerAudioChunk(blob, peer.name || "Guest", chunkStartedAt, stoppedAt);
-            chunkStartedAt = stoppedAt;
-          };
-          recorder.onerror = (event) => {
-            void postRealtimeTrace("error", "Guest WebRTC recorder failed", { peerId: peer.id, error: String(event?.error?.message || event?.type || event) });
-          };
-          recorder.start(3000);
-          void postRealtimeTrace("agent", "Started guest WebRTC transcription on host", { peerId: peer.id, peerName: peer.name, audioTracks: audioOnlyStream.getAudioTracks().length, mimeType: recorder.mimeType || mimeType || "audio/webm" });
-        } catch (error) {
-          state.recorder = null;
-          void postRealtimeTrace("error", "Failed to start guest WebRTC transcription", { peerId: peer.id, peerName: peer.name, error: error?.message || String(error), audioTracks: audioTracks.length });
-        }
+        const audioOnlyStream = new MediaStream(audioTracks);
+        const mimeType = preferredMimeType();
+        let active = true;
+        let currentRecorder = null;
+        state.recorder = { stop: () => { active = false; currentRecorder?.stop?.(); } };
+        const recordSegment = () => {
+          if (!active || stopped || !audioOnlyStream.getAudioTracks().some((track) => track.readyState === "live")) return;
+          const chunks = [];
+          const startedAt = Date.now();
+          try {
+            const recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
+            currentRecorder = recorder;
+            recorder.ondataavailable = (event) => {
+              if (event.data?.size) chunks.push(event.data);
+            };
+            recorder.onerror = (event) => {
+              void postRealtimeTrace("error", "Guest WebRTC recorder failed", { peerId: peer.id, error: String(event?.error?.message || event?.type || event) });
+            };
+            recorder.onstop = () => {
+              const stoppedAt = Date.now();
+              if (chunks.length) {
+                const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+                void postRealtimeTrace("debug", "Forwarding complete guest WebRTC recording", { peerId: peer.id, peerName: peer.name, bytes: blob.size, mimeType: blob.type, segmentMs: stoppedAt - startedAt });
+                void sendPeerAudioChunk(blob, peer.name || "Guest", startedAt, stoppedAt);
+              }
+              if (active && !stopped) window.setTimeout(recordSegment, 25);
+            };
+            recorder.start();
+            window.setTimeout(() => {
+              if (recorder.state === "recording") recorder.stop();
+            }, 6000);
+          } catch (error) {
+            active = false;
+            state.recorder = null;
+            void postRealtimeTrace("error", "Failed to start guest WebRTC transcription", { peerId: peer.id, peerName: peer.name, error: error?.message || String(error), audioTracks: audioTracks.length });
+          }
+        };
+        recordSegment();
+        void postRealtimeTrace("agent", "Started guest WebRTC transcription on host", { peerId: peer.id, peerName: peer.name, audioTracks: audioOnlyStream.getAudioTracks().length, mimeType: mimeType || "audio/webm" });
       }
 
       function removePeer(peerId) {
