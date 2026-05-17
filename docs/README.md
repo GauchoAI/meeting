@@ -5,8 +5,9 @@ This directory is the project knowledge base. Keep root-level `README.md` focuse
 ## Recommended Reading Order
 
 1. `running-the-program.md` - commands to start, verify, restart, and stop the full local live stack.
-2. `reproducible-dev.md` - local development contract and stable runtime expectations.
-3. `stable-shell.md` - why `stable.html` owns microphone and voice state.
+2. `multi-human-webrtc.md` - initial plan/scaffold for adding second-notebook human participants.
+3. `reproducible-dev.md` - local development contract and stable runtime expectations.
+4. `stable-shell.md` - why `stable.html` owns microphone and voice state.
 4. `local-voice-models.md` - local STT/TTS provider setup and selector behavior.
 5. `speech-provider-benchmarks.md` - measured local speech results and provider recommendations.
 6. `assistant-output-delivery.md` - how assistant output reaches canvas/status surfaces.
@@ -18,6 +19,7 @@ This directory is the project knowledge base. Keep root-level `README.md` focuse
 | --- | --- |
 | `running-the-program.md` | Full local-live startup, stop, logs, smoke tests, and troubleshooting. |
 | `reproducible-dev.md` | Source checkout workflow and validation expectations. |
+| `multi-human-webrtc.md` | WebRTC/Firebase approach for multiple human participants and speaker attribution. |
 
 ## Architecture
 
@@ -28,6 +30,7 @@ This directory is the project knowledge base. Keep root-level `README.md` focuse
 | `stable-shell.md` | Long-lived browser shell and development constraints. |
 | `wiki-engine.md` | Local wiki/artifact planning work. |
 | `speech-video-market.md` | External speech/video provider market notes. |
+| `multi-human-webrtc.md` | Browser peer audio architecture for real shared meetings. |
 
 ## Speech And Realtime
 
