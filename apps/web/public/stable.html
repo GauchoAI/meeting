@@ -1942,7 +1942,6 @@
       if (!blob || !peerRoom?.broadcastAudioBlob) return 0;
       const sent = await peerRoom.broadcastAudioBlob(blob, "assistant.audio");
       if (sent) void postRealtimeTrace("agent", "Broadcast assistant TTS audio to human peers", { peers: sent, bytes: blob.size, mimeType: blob.type });
-      else void postRealtimeTrace("debug", "No human peers available for assistant TTS audio relay", { bytes: blob.size, mimeType: blob.type });
       return sent;
     }
 
@@ -2090,11 +2089,8 @@
         if (!prepared?.ok) throw prepared?.error || new Error("local TTS preparation failed");
         if (prepared.generation !== localSpeechGeneration) return;
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
-        if (prepared.kind === "blob") {
-          void broadcastAssistantAudioToHumanPeers(prepared.blob).then((sent) => {
-            if (!sent) broadcastAssistantSpeechToHumanPeers(item.text);
-          });
-        } else broadcastAssistantSpeechToHumanPeers(item.text);
+        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
+        else broadcastAssistantSpeechToHumanPeers(item.text);
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") {
@@ -2120,11 +2116,8 @@
       try {
         const prepared = await prepareLocalSpeechAudio(text, generation, {});
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
-        if (prepared.kind === "blob") {
-          void broadcastAssistantAudioToHumanPeers(prepared.blob).then((sent) => {
-            if (!sent) broadcastAssistantSpeechToHumanPeers(text);
-          });
-        } else broadcastAssistantSpeechToHumanPeers(text);
+        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
+        else broadcastAssistantSpeechToHumanPeers(text);
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") await playPreparedLocalSpeechStream(prepared);
