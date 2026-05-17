@@ -31,6 +31,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm -s typecheck
+      - name: Stable voice regression checks
+        run: pnpm -s test:stable-voice
       - name: Build web client
         run: pnpm --filter @meeting/web build
         env:
