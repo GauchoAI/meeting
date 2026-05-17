@@ -970,7 +970,10 @@
       const health = await fetch(`${api}/health`).then((res) => res.json());
       speechProvider = String(health?.speech?.provider || "unknown");
       localTtsProvider = String(health?.speech?.localTts?.provider || "unknown");
-      localStreamingTts = Boolean(health?.speech?.streamingTts);
+      localStreamingTts = Boolean(health?.speech?.streamingTts) && !localTtsProvider.includes("voxtral") && !localTtsProvider.includes("mlx");
+      if (health?.speech?.streamingTts && !localStreamingTts) {
+        void postRealtimeTrace("debug", "Disabled streaming local TTS for stable playback", { provider: localTtsProvider });
+      }
       preferLocalVoiceForLocalProvider();
       return health;
     }
