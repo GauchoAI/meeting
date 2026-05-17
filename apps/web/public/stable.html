@@ -347,9 +347,6 @@
       const signalsUrl = firebasePathUrl(`signalingRooms/${roomKey}/signals`);
       const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
       let localMicMutedForRelayUntil = 0;
-      let remotePlaybackMutedUntil = 0;
-      let remotePlaybackRestoreTimer = null;
-      const remotePlaybackOriginalVolume = new WeakMap();
 
       function muteLocalMicForRelay(ms = 9000) {
         localMicMutedForRelayUntil = Math.max(localMicMutedForRelayUntil, Date.now() + ms);
@@ -360,25 +357,6 @@
           void postRealtimeTrace("debug", "Guest mic unmuted after relay speech");
         }, ms + 150);
         void postRealtimeTrace("debug", "Guest mic muted during relay speech", { ms });
-      }
-
-      function muteRemotePlaybackForLocalSpeech(ms = 1200) {
-        remotePlaybackMutedUntil = Math.max(remotePlaybackMutedUntil, Date.now() + ms);
-        for (const state of peers.values()) {
-          if (!state.audio) continue;
-          if (!remotePlaybackOriginalVolume.has(state.audio)) remotePlaybackOriginalVolume.set(state.audio, state.audio.volume);
-          state.audio.volume = 0;
-        }
-        if (remotePlaybackRestoreTimer !== null) window.clearTimeout(remotePlaybackRestoreTimer);
-        remotePlaybackRestoreTimer = window.setTimeout(() => {
-          remotePlaybackRestoreTimer = null;
-          if (Date.now() < remotePlaybackMutedUntil) return;
-          for (const state of peers.values()) {
-            if (!state.audio) continue;
-            state.audio.volume = remotePlaybackOriginalVolume.get(state.audio) ?? 1;
-          }
-          void postRealtimeTrace("debug", "Remote human playback restored after local speech");
-        }, ms + 120);
       }
 
       async function clearSignals() {
@@ -714,7 +692,6 @@
           void postRealtimeTrace("agent", host ? "Hosting human WebRTC room" : "Joined human WebRTC room as guest", { roomId, peerId: self.id, peerName: self.name });
         },
         muteLocalMicForRelay,
-        muteRemotePlaybackForLocalSpeech,
         broadcastSpeech(text, type = "assistant.speech") {
           return broadcastHumanPeerData({ type, text, from: self, createdAtMs: Date.now() });
         },
@@ -1560,7 +1537,6 @@
       }
       const now = Date.now();
       if (localPushToTalkActive) {
-        peerRoom?.muteRemotePlaybackForLocalSpeech?.(localPushToTalkMaxMs());
         if (localSttPausedForSpeech || localSpeechAudioPlaying() || localSpeechQueuePlaying || localSpeechQueue.length) {
           stopLocalSpeechForManualInput();
         }
@@ -1605,7 +1581,6 @@
       const speaking = level >= localVoiceThreshold();
       if (speaking) {
         localSttLastVoiceAt = now;
-        peerRoom?.muteRemotePlaybackForLocalSpeech?.(localSpeechSilenceMs() + 350);
         if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
       }
       if (localSttRecorder?.state === "recording") {
