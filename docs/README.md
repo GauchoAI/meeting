@@ -5,7 +5,8 @@ This directory is the project knowledge base. Keep root-level `README.md` focuse
 ## Recommended Reading Order
 
 1. `running-the-program.md` - commands to start, verify, restart, and stop the full local live stack.
-2. `multi-human-webrtc.md` - initial plan/scaffold for adding second-notebook human participants.
+2. `github-pages.md` - static Pages deployment and how to point it at a reachable Meeting API.
+3. `multi-human-webrtc.md` - initial plan/scaffold for adding second-notebook human participants.
 3. `reproducible-dev.md` - local development contract and stable runtime expectations.
 4. `stable-shell.md` - why `stable.html` owns microphone and voice state.
 4. `local-voice-models.md` - local STT/TTS provider setup and selector behavior.
@@ -18,6 +19,7 @@ This directory is the project knowledge base. Keep root-level `README.md` focuse
 | Doc | Covers |
 | --- | --- |
 | `running-the-program.md` | Full local-live startup, stop, logs, smoke tests, and troubleshooting. |
+| `github-pages.md` | GitHub Pages deployment and hosted/tunneled API configuration. |
 | `reproducible-dev.md` | Source checkout workflow and validation expectations. |
 | `multi-human-webrtc.md` | WebRTC/Firebase approach for multiple human participants and speaker attribution. |
 

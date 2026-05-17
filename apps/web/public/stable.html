@@ -50,11 +50,14 @@
     <button id="leave" class="secondary" hidden>Leave</button>
   </div>
   <audio id="remoteAudio" autoplay></audio>
-  <iframe id="ui" src="/?embedded=1"></iframe>
+  <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const api = localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`;
-    const meetingId = localStorage.getItem("meeting.id") || "local-demo";
+    const pageParams = new URLSearchParams(window.location.search);
+    const requestedApi = pageParams.get("api") || pageParams.get("meetingApi");
+    if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
+    const api = requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`;
+    const meetingId = pageParams.get("meeting") || localStorage.getItem("meeting.id") || "local-demo";
     const autoJoinKey = "meeting.stable.autoJoin";
     const legacyAutoJoinKey = "meeting.autoJoin";
     const realtimeAgentId = "realtime-codex";
@@ -74,6 +77,8 @@
     const captureModeSelect = document.getElementById("captureMode");
     const remoteAudio = document.getElementById("remoteAudio");
     const uiFrame = document.getElementById("ui");
+    const embeddedParams = new URLSearchParams({ embedded: "1", api });
+    uiFrame.src = `./?${embeddedParams.toString()}`;
 
     let localStream = null;
     let joined = false;

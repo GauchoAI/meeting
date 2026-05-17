@@ -12,9 +12,11 @@ import { markdownToHtml } from "./markdown2.html.js";
 import { decideRealtimeWake, realtimeActivationLabel, shouldCreateRealtimeResponse, type RealtimeActivationMode } from "./realtime-sleep.js";
 import "./styles.css";
 
-const api = import.meta.env.VITE_MEETING_API_URL || `${window.location.protocol}//${window.location.hostname}:4317`;
-const autoJoinKey = "meeting.autoJoin";
 const query = new URLSearchParams(window.location.search);
+const requestedApi = query.get("api") || query.get("meetingApi");
+if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
+const api = import.meta.env.VITE_MEETING_API_URL || requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`;
+const autoJoinKey = "meeting.autoJoin";
 const isEmbedded = query.get("embedded") === "1";
 const appearanceKey = "meeting.appearance";
 const normalizeExcalidraw = false;
