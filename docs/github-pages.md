@@ -54,13 +54,22 @@ localStorage.setItem("meeting.api", "https://your-api-tunnel.example")
 
 ## Deployment
 
-The workflow is defined in:
+A ready-to-copy workflow template is committed at:
 
 ```text
-.github/workflows/pages.yml
+docs/github-pages-workflow.yml
 ```
 
-It builds `apps/web` with:
+Copy it to the actual GitHub Actions workflow path:
+
+```bash
+mkdir -p .github/workflows
+cp docs/github-pages-workflow.yml .github/workflows/pages.yml
+```
+
+Note: creating or updating `.github/workflows/pages.yml` requires a GitHub token with the `workflow` scope. Some local OAuth app credentials can push normal code but cannot push workflow files.
+
+The workflow builds `apps/web` with:
 
 ```text
 VITE_BASE_PATH=/meeting/
