@@ -68,6 +68,27 @@ Hosts publish a heartbeat while their backend is online. Guests subscribe to `pu
 
 This preserves the host/guest architecture while still making GitHub Pages the shared discovery place.
 
+## Correct objective: Peer/WebRTC + Firebase signaling
+
+The intended architecture is **not** “guests call the host API over ngrok as the primary path.” The intended architecture is:
+
+1. GitHub Pages is the public lobby.
+2. Firebase Realtime Database advertises online meetings and carries signaling messages.
+3. Browsers connect to each other with WebRTC peer connections.
+4. The host browser receives guest audio over WebRTC.
+5. The host browser forwards the relevant audio/transcript work to the local host API/model stack.
+
+That means Firebase is enough for discovery/signaling. A public tunnel is only a temporary fallback for direct API access, not the target multi-human design.
+
+The first implementation scaffold uses raw `RTCPeerConnection` with a Firebase signaling adapter. A PeerJS-style wrapper can sit above the same conceptual layer, but PeerJS's default cloud broker is not required if Firebase is the signaling transport.
+
+Code added:
+
+```text
+apps/web/src/multi-human-room.ts
+apps/web/src/firebase-signaling.ts
+```
+
 ## Signaling
 
 WebRTC peers need a side channel to find each other and exchange:
@@ -78,7 +99,13 @@ WebRTC peers need a side channel to find each other and exchange:
 - ICE candidates.
 - Presence / disconnect events.
 
-Firebase is a good fit for this because it can provide a small realtime database or Firestore collection for room signaling without running a custom signaling server.
+Firebase Realtime Database is the signaling side channel. Signals are namespaced so the database root stays clean:
+
+```text
+gauchoai-meeting/signalingRooms/{roomId}/signals/{autoId}
+```
+
+Firebase is a good fit for this because it provides realtime pub/sub without running a custom signaling server.
 
 ## Initial code scaffold
 
@@ -117,12 +144,12 @@ So there are two likely modes:
 
 1. Add Firebase project configuration via environment variables.
 2. Implement a Firebase public meeting registry / lobby.
-3. Implement `FirebaseMeetingSignalingAdapter`.
+3. Wire `FirebaseRealtimeSignalingAdapter` into the lobby/stable shell join flow.
 4. Add a small room UI: room id, display name, join/leave.
 5. Attach remote peer audio elements.
-6. Send each client's own mic to the Meeting API with that client's speaker label.
-7. Broadcast AI TTS playback to all clients, or let every client subscribe to the same TTS/event stream.
-8. Add cleanup for stale Firebase room documents.
+6. In host mode, forward guest WebRTC audio from the host browser to the local Meeting API with the guest speaker label.
+7. Broadcast AI TTS playback to all clients, or send TTS/audio events over WebRTC data/media channels.
+8. Add cleanup for stale Firebase room/signaling documents.
 
 ## Minimal Firebase data shape
 
