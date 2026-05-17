@@ -425,7 +425,10 @@
         const attachDataChannel = (channel) => {
           state.dataChannel = channel;
           channel.addEventListener("message", (event) => handleHumanPeerDataMessage(peer, event.data));
-          channel.addEventListener("open", () => postRealtimeTrace("agent", "Human peer data channel open", { peerId: peer.id, peerName: peer.name, host }));
+          channel.addEventListener("open", () => {
+            void postRealtimeTrace("agent", "Human peer data channel open", { peerId: peer.id, peerName: peer.name, host });
+            if (host) void sendEventSnapshotToChannel(channel);
+          });
         };
         pc.addEventListener("datachannel", (event) => attachDataChannel(event.channel));
         if (host) attachDataChannel(pc.createDataChannel("meeting-human-peer"));
@@ -506,6 +509,20 @@
           }
         }
         return sent;
+      }
+
+      async function sendEventSnapshotToChannel(channel) {
+        if (!api || channel?.readyState !== "open") return;
+        try {
+          const snapshot = await fetch(`${api}/events`).then((response) => response.json());
+          for (const event of (snapshot?.events || []).slice(-120)) {
+            if (channel.readyState !== "open") break;
+            channel.send(JSON.stringify({ type: "meeting.event", event, from: self, createdAtMs: Date.now() }));
+          }
+          void postRealtimeTrace("agent", "Sent meeting event snapshot to human peer", { events: (snapshot?.events || []).length, peerName: channel.label });
+        } catch (error) {
+          void postRealtimeTrace("error", "Failed to send meeting event snapshot to human peer", { error: error?.message || String(error) });
+        }
       }
 
       async function waitForChannelBuffer(channel) {
