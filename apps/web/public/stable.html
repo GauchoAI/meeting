@@ -427,33 +427,24 @@
       function startRemotePeerTranscription(peer, remoteStream) {
         const state = peers.get(peer.id);
         if (!state || state.recorder || !remoteStream.getAudioTracks().length) return;
-        let active = true;
-        let currentRecorder = null;
-        state.recorder = { stop: () => { active = false; currentRecorder?.stop?.(); } };
-        const recordOnce = () => {
-          if (!active || stopped || !remoteStream.getAudioTracks().length) return;
-          const startedAt = Date.now();
-          const chunks = [];
-          const options = MediaRecorder.isTypeSupported?.("audio/webm;codecs=opus") ? { mimeType: "audio/webm;codecs=opus" } : undefined;
-          currentRecorder = new MediaRecorder(remoteStream, options);
-          currentRecorder.ondataavailable = (event) => {
-            if (event.data?.size) chunks.push(event.data);
-          };
-          currentRecorder.onstop = () => {
-            const stoppedAt = Date.now();
-            if (chunks.length) {
-              const blob = new Blob(chunks, { type: currentRecorder.mimeType || "audio/webm" });
-              void sendPeerAudioChunk(blob, peer.name || "Guest", startedAt, stoppedAt);
-            }
-            if (active && !stopped) window.setTimeout(recordOnce, 50);
-          };
-          currentRecorder.start();
-          window.setTimeout(() => {
-            if (currentRecorder?.state === "recording") currentRecorder.stop();
-          }, 3000);
+        const mimeType = preferredMimeType();
+        const recorder = new MediaRecorder(remoteStream, mimeType ? { mimeType } : undefined);
+        const chunks = [];
+        let chunkStartedAt = Date.now();
+        state.recorder = recorder;
+        recorder.ondataavailable = (event) => {
+          if (!event.data?.size) return;
+          const stoppedAt = Date.now();
+          const blob = new Blob([event.data], { type: recorder.mimeType || mimeType || "audio/webm" });
+          void postRealtimeTrace("debug", "Forwarding guest WebRTC audio chunk", { peerId: peer.id, peerName: peer.name, bytes: blob.size, mimeType: blob.type });
+          void sendPeerAudioChunk(blob, peer.name || "Guest", chunkStartedAt, stoppedAt);
+          chunkStartedAt = stoppedAt;
         };
-        recordOnce();
-        void postRealtimeTrace("agent", "Started guest WebRTC transcription on host", { peerId: peer.id, peerName: peer.name });
+        recorder.onerror = (event) => {
+          void postRealtimeTrace("error", "Guest WebRTC recorder failed", { peerId: peer.id, error: String(event?.error?.message || event?.type || event) });
+        };
+        recorder.start(3000);
+        void postRealtimeTrace("agent", "Started guest WebRTC transcription on host", { peerId: peer.id, peerName: peer.name, audioTracks: remoteStream.getAudioTracks().length, mimeType: recorder.mimeType || mimeType || "audio/webm" });
       }
 
       function removePeer(peerId) {
