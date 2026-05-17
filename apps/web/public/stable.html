@@ -138,6 +138,7 @@
     let lastAnalysisAt = 0;
     let lastPiAgentNoticeId = null;
     let eventsSource = null;
+    let peerRoom = null;
     const transcriptDraftIds = new Map();
     const transcriptDraftText = new Map();
 
@@ -221,6 +222,7 @@
       speakButton.disabled = true;
       renderStatus(usesRealtimeVoice() ? "voice agent connecting" : "local voice listening", "ready");
       publishShellState();
+      startHumanPeerRoom(localStream);
       if (usesLocalStt()) startLocalSttCapture(localStream);
       if (usesRealtimeVoice()) {
         void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", { voiceMode, speechProvider });
@@ -247,6 +249,7 @@
       sessionStorage.removeItem(autoJoinKey);
       sessionStorage.removeItem(legacyAutoJoinKey);
       clearRealtimeReconnect();
+      disconnectHumanPeerRoom();
       disconnectRealtimeAgent({ intentional: true });
       stopLocalSttCapture({ suppressUploads: true });
       localSttPausedForSpeech = false;
@@ -265,6 +268,217 @@
       renderStatus("stable shell idle", "idle");
       publishShellState();
       void postRealtimeTrace("agent", "Stable shell left meeting", undefined);
+    }
+
+    function firebaseDatabaseUrl() {
+      return "https://signaling-dcfad-default-rtdb.europe-west1.firebasedatabase.app";
+    }
+
+    function firebaseNamespace() {
+      return "gauchoai-meeting";
+    }
+
+    function firebaseCleanKey(value) {
+      return encodeURIComponent(String(value || "local-demo")).replace(/\./g, "%2E");
+    }
+
+    function firebasePathUrl(path) {
+      return `${firebaseDatabaseUrl()}/${firebaseNamespace()}/${String(path).replace(/^\/+|\/+$/g, "")}.json`;
+    }
+
+    function peerId() {
+      let id = sessionStorage.getItem("meeting.peerId");
+      if (!id) {
+        id = crypto.randomUUID?.() || `peer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        sessionStorage.setItem("meeting.peerId", id);
+      }
+      return id;
+    }
+
+    function peerName() {
+      return pageParams.get("name") || localStorage.getItem("meeting.peerName") || (isHostPeer() ? "Host" : "Guest");
+    }
+
+    function isHostPeer() {
+      return pageParams.get("advertise") === "1" || pageParams.get("host") === "1";
+    }
+
+    function startHumanPeerRoom(stream) {
+      disconnectHumanPeerRoom();
+      if (!stream || !meetingId) return;
+      peerRoom = createHumanPeerRoom({
+        roomId: meetingId,
+        self: { id: peerId(), name: peerName() },
+        host: isHostPeer(),
+        stream
+      });
+      void peerRoom.start().catch((error) => {
+        console.warn("human peer room failed", error);
+        void postRealtimeTrace("error", "Human peer room failed", { error: error?.message || String(error) });
+      });
+    }
+
+    function disconnectHumanPeerRoom() {
+      peerRoom?.stop?.();
+      peerRoom = null;
+    }
+
+    function createHumanPeerRoom({ roomId, self, host, stream }) {
+      const peers = new Map();
+      const seenSignals = new Set();
+      let eventSource = null;
+      let pollTimer = null;
+      let stopped = false;
+      const roomKey = firebaseCleanKey(roomId);
+      const signalsUrl = firebasePathUrl(`signalingRooms/${roomKey}/signals`);
+      const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+      async function publish(signal) {
+        const response = await fetch(signalsUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ signal, createdAtMs: Date.now() })
+        });
+        if (!response.ok) throw new Error(`signal publish failed: ${response.status}`);
+      }
+
+      function acceptSignalRecord(id, record) {
+        if (!record || seenSignals.has(id)) return;
+        const signal = record.signal || record;
+        if (!signal || signal.roomId !== roomId || signal.from?.id === self.id) return;
+        if (signal.to && signal.to !== self.id) return;
+        seenSignals.add(id);
+        void handleSignal(signal).catch((error) => postRealtimeTrace("error", "Human peer signal failed", { error: error?.message || String(error), signalType: signal.type }));
+      }
+
+      function acceptSnapshot(values) {
+        for (const [id, record] of Object.entries(values || {})) acceptSignalRecord(id, record);
+      }
+
+      async function fetchSignals() {
+        const response = await fetch(signalsUrl, { cache: "no-store" });
+        if (response.ok) acceptSnapshot(await response.json());
+      }
+
+      function subscribe() {
+        try {
+          eventSource = new EventSource(signalsUrl);
+          eventSource.addEventListener("put", (event) => {
+            const payload = JSON.parse(event.data || "{}");
+            if (payload.path === "/") acceptSnapshot(payload.data || {});
+            else acceptSignalRecord(payload.path.replace(/^\//, "").split("/")[0], payload.data);
+          });
+          eventSource.addEventListener("patch", (event) => {
+            const payload = JSON.parse(event.data || "{}");
+            acceptSnapshot(payload.data || {});
+          });
+          eventSource.onerror = () => {
+            if (!pollTimer && !stopped) pollTimer = window.setInterval(() => void fetchSignals().catch(() => undefined), 2000);
+          };
+        } catch {
+          pollTimer = window.setInterval(() => void fetchSignals().catch(() => undefined), 2000);
+        }
+      }
+
+      function getOrCreatePeer(peer) {
+        const existing = peers.get(peer.id);
+        if (existing) return existing;
+        const pc = new RTCPeerConnection(rtcConfig);
+        const remoteStream = new MediaStream();
+        const audio = document.createElement("audio");
+        audio.autoplay = true;
+        audio.dataset.peerAudio = peer.id;
+        audio.srcObject = remoteStream;
+        document.body.appendChild(audio);
+        for (const track of stream.getTracks()) pc.addTrack(track, stream);
+        pc.addEventListener("icecandidate", (event) => {
+          if (event.candidate) void publish({ type: "ice", roomId, from: self, to: peer.id, candidate: event.candidate.toJSON() });
+        });
+        pc.addEventListener("track", (event) => {
+          for (const track of event.streams[0]?.getTracks() || [event.track]) {
+            if (!remoteStream.getTrackById(track.id)) remoteStream.addTrack(track);
+          }
+          if (host) startRemotePeerTranscription(peer, remoteStream);
+        });
+        pc.addEventListener("connectionstatechange", () => {
+          if (["closed", "failed", "disconnected"].includes(pc.connectionState)) removePeer(peer.id);
+        });
+        const state = { peer, pc, remoteStream, audio, recorder: null };
+        peers.set(peer.id, state);
+        return state;
+      }
+
+      function startRemotePeerTranscription(peer, remoteStream) {
+        const state = peers.get(peer.id);
+        if (!state || state.recorder || !remoteStream.getAudioTracks().length) return;
+        const recorder = new MediaRecorder(remoteStream);
+        state.recorder = recorder;
+        recorder.ondataavailable = (event) => {
+          if (!event.data?.size) return;
+          const stoppedAt = Date.now();
+          const startedAt = stoppedAt - 3000;
+          void sendPeerAudioChunk(event.data, peer.name || "Guest", startedAt, stoppedAt);
+        };
+        recorder.start(3000);
+        void postRealtimeTrace("agent", "Started guest WebRTC transcription on host", { peerId: peer.id, peerName: peer.name });
+      }
+
+      function removePeer(peerId) {
+        const state = peers.get(peerId);
+        if (!state) return;
+        state.recorder?.stop?.();
+        state.pc.close();
+        state.audio.remove();
+        peers.delete(peerId);
+      }
+
+      async function handleSignal(signal) {
+        if (signal.type === "hello") {
+          if (!host) return;
+          const state = getOrCreatePeer(signal.from);
+          const offer = await state.pc.createOffer();
+          await state.pc.setLocalDescription(offer);
+          await publish({ type: "offer", roomId, from: self, to: signal.from.id, sdp: offer });
+          return;
+        }
+        if (signal.type === "bye") {
+          removePeer(signal.from.id);
+          return;
+        }
+        if (signal.type === "offer") {
+          const state = getOrCreatePeer(signal.from);
+          await state.pc.setRemoteDescription(signal.sdp);
+          const answer = await state.pc.createAnswer();
+          await state.pc.setLocalDescription(answer);
+          await publish({ type: "answer", roomId, from: self, to: signal.from.id, sdp: answer });
+          return;
+        }
+        if (signal.type === "answer") {
+          const state = peers.get(signal.from.id);
+          if (state) await state.pc.setRemoteDescription(signal.sdp);
+          return;
+        }
+        if (signal.type === "ice") {
+          const state = peers.get(signal.from.id);
+          if (state) await state.pc.addIceCandidate(signal.candidate);
+        }
+      }
+
+      return {
+        async start() {
+          subscribe();
+          await fetchSignals().catch(() => undefined);
+          await publish({ type: "hello", roomId, from: self });
+          void postRealtimeTrace("agent", host ? "Hosting human WebRTC room" : "Joined human WebRTC room as guest", { roomId, peerId: self.id, peerName: self.name });
+        },
+        stop() {
+          stopped = true;
+          void publish({ type: "bye", roomId, from: self }).catch(() => undefined);
+          eventSource?.close?.();
+          if (pollTimer) window.clearInterval(pollTimer);
+          for (const peerId of [...peers.keys()]) removePeer(peerId);
+        }
+      };
     }
 
     function connectRealtimeAgent(stream) {
@@ -1382,6 +1596,26 @@
     function localPushToTalkMaxMs() {
       const configured = Number(localStorage.getItem("meeting.localPushToTalkMaxMs") || "600000");
       return Number.isFinite(configured) ? Math.max(30000, Math.min(1800000, configured)) : 600000;
+    }
+
+    async function sendPeerAudioChunk(blob, speakerLabel, clientStartedAt = 0, clientStoppedAt = 0) {
+      const extension = blob.type.includes("mp4") ? "mp4" : "webm";
+      try {
+        const params = new URLSearchParams({
+          extension,
+          speaker: speakerLabel || "Guest",
+          client: "stable-webrtc-peer-v1"
+        });
+        if (clientStartedAt) params.set("clientStartedAt", String(clientStartedAt));
+        if (clientStoppedAt) params.set("clientStoppedAt", String(clientStoppedAt));
+        await fetch(`${api}/audio/chunk?${params.toString()}`, {
+          method: "POST",
+          headers: { "Content-Type": blob.type || "application/octet-stream" },
+          body: await blob.arrayBuffer()
+        });
+      } catch (error) {
+        await postRealtimeTrace("error", "Peer STT audio chunk failed", { speakerLabel, error: error?.message || String(error) });
+      }
     }
 
     async function sendAudioChunk(blob, clientStartedAt = 0, clientStoppedAt = 0) {
