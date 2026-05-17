@@ -1,0 +1,15 @@
+{
+  "kind": "note",
+  "slug": "ai-wargame-design-considerations",
+  "title": "AI Wargame Design Considerations",
+  "createdAt": "2026-05-17T00:58:29.578Z",
+  "updatedAt": "2026-05-17T00:58:29.578Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "wargame",
+    "ai-arbiter",
+    "game-design",
+    "historical-simulation"
+  ],
+  "summary": "Design notes for an AI-arbitrated geopolitical/strategic wargame, including prepared historical context requirements and adjudication principles."
+}
