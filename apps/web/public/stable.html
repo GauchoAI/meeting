@@ -1605,6 +1605,7 @@
     }
 
     async function sendPeerAudioChunk(blob, speakerLabel, clientStartedAt = 0, clientStoppedAt = 0) {
+      if (!api) return;
       const extension = blob.type.includes("mp4") ? "mp4" : "webm";
       try {
         const params = new URLSearchParams({
@@ -1625,6 +1626,7 @@
     }
 
     async function sendAudioChunk(blob, clientStartedAt = 0, clientStoppedAt = 0) {
+      if (peerOnly || !api) return;
       if (Date.now() < localSttSuppressUploadsUntil) {
         await postRealtimeTrace("debug", "Skipped local STT upload during local speech output", { bytes: blob.size });
         return;

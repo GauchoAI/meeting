@@ -296,6 +296,7 @@ function App() {
   }, [activeHandRaises.length]);
 
   async function joinMeeting() {
+    if (peerOnly || !api) return;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     sessionStorage.setItem(autoJoinKey, "true");
     realtimeDesiredRef.current = true;
@@ -321,7 +322,7 @@ function App() {
   }
 
   async function connectRealtimeAgent(streamOverride?: MediaStream) {
-    if (realtimeStateRef.current !== "idle") return;
+    if (peerOnly || !api || realtimeStateRef.current !== "idle") return;
     clearRealtimeReconnect();
     realtimeDesiredRef.current = true;
     realtimeStateRef.current = "connecting";
@@ -2703,6 +2704,7 @@ function upsertEvent(events: MeetingEvent[], event: MeetingEvent): MeetingEvent[
 }
 
 async function postMeetingEvent(event: MeetingEvent): Promise<void> {
+  if (!api) return;
   await fetch(`${api}/events`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3207,6 +3209,7 @@ function decodeBase64Url(value: string): string {
 }
 
 async function sendAudioChunk(blob: Blob): Promise<void> {
+  if (!api) return;
   const extension = blob.type.includes("mp4") ? "mp4" : "webm";
   await fetch(`${api}/audio/chunk?extension=${extension}&speaker=Host`, {
     method: "POST",
