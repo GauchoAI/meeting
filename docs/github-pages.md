@@ -44,6 +44,16 @@ Example host advertisement URL:
 https://gauchoai.github.io/meeting/?advertise=1&api=https%3A%2F%2Fyour-api-tunnel.example&meeting=core&title=Core%20Meeting&hostName=Miguel
 ```
 
+A local host can also advertise from the command line while the backend is running:
+
+```bash
+./scripts/advertise-meeting.mjs \
+  --meeting core \
+  --title "Core Meeting" \
+  --host Miguel \
+  --api "http://<host-lan-ip>:4317"
+```
+
 Guests can open the normal Pages URL and click the online meeting:
 
 ```text

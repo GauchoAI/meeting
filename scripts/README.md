@@ -10,6 +10,7 @@ Scripts are grouped by how they are used. Prefer the root `package.json` command
 | `stop-local-live.sh` | Stops the local-live screen sessions and ports. |
 | `dev-source.sh` | Shell helper for local development environment variables. |
 | `meeting-daemon.sh` | Runs the local Meeting daemon process. |
+| `advertise-meeting.mjs` | Publishes/heartbeats a host meeting into the Firebase-backed GitHub Pages lobby. |
 | `meeting-mcp-stdio.sh` | Starts the MCP server over stdio. |
 | `sync-runtime.sh` | Syncs runtime assets while preserving the stable shell contract. |
 | `watch-runtime-sync.sh` | Watches and syncs runtime files during local development. |
