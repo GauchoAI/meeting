@@ -1,0 +1,16 @@
+{
+  "kind": "note",
+  "slug": "buenos-aires-1807-wargame-test",
+  "title": "Buenos Aires 1807 Wargame Test",
+  "createdAt": "2026-05-17T03:12:49.342Z",
+  "updatedAt": "2026-05-17T03:12:49.342Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "wargame",
+    "buenos-aires",
+    "1807",
+    "alternate-history",
+    "ai-arbiter"
+  ],
+  "summary": "Quick summary of the Buenos Aires 1807 alternate-history wargame test, lessons learned, and diagram-ready scenario structure."
+}
