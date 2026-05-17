@@ -56,7 +56,9 @@
     const pageParams = new URLSearchParams(window.location.search);
     const requestedApi = pageParams.get("api") || pageParams.get("meetingApi");
     if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
-    const peerOnly = pageParams.get("peerOnly") === "1" || pageParams.get("guest") === "1";
+    const insecureApiOnHttps = window.location.protocol === "https:" && String(requestedApi || localStorage.getItem("meeting.api") || "").startsWith("http://");
+    const peerOnly = pageParams.get("peerOnly") === "1" || pageParams.get("guest") === "1" || insecureApiOnHttps;
+    if (insecureApiOnHttps) localStorage.removeItem("meeting.api");
     const api = peerOnly ? "" : (requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`);
     const meetingId = pageParams.get("meeting") || localStorage.getItem("meeting.id") || "local-demo";
     const autoJoinKey = "meeting.stable.autoJoin";

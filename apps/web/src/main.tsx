@@ -15,8 +15,10 @@ import "./styles.css";
 
 const query = new URLSearchParams(window.location.search);
 const requestedApi = query.get("api") || query.get("meetingApi");
-const peerOnly = query.get("peerOnly") === "1" || query.get("guest") === "1";
-if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
+const insecureApiOnHttps = window.location.protocol === "https:" && String(requestedApi || localStorage.getItem("meeting.api") || "").startsWith("http://");
+const peerOnly = query.get("peerOnly") === "1" || query.get("guest") === "1" || insecureApiOnHttps;
+if (insecureApiOnHttps) localStorage.removeItem("meeting.api");
+else if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
 const pagesHosted = window.location.protocol === "https:" && window.location.hostname.endsWith("github.io") && !requestedApi;
 const api = (peerOnly || pagesHosted) ? "" : (import.meta.env.VITE_MEETING_API_URL || requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`);
 const autoJoinKey = "meeting.autoJoin";
