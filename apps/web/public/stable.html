@@ -53,7 +53,7 @@
   <iframe id="ui" src="/?embedded=1"></iframe>
 
   <script type="module">
-    const api = localStorage.getItem("meeting.api") || "http://localhost:4317";
+    const api = localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`;
     const meetingId = localStorage.getItem("meeting.id") || "local-demo";
     const autoJoinKey = "meeting.stable.autoJoin";
     const legacyAutoJoinKey = "meeting.autoJoin";

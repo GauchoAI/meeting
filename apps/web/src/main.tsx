@@ -12,7 +12,7 @@ import { markdownToHtml } from "./markdown2.html.js";
 import { decideRealtimeWake, realtimeActivationLabel, shouldCreateRealtimeResponse, type RealtimeActivationMode } from "./realtime-sleep.js";
 import "./styles.css";
 
-const api = import.meta.env.VITE_MEETING_API_URL || "http://localhost:4317";
+const api = import.meta.env.VITE_MEETING_API_URL || `${window.location.protocol}//${window.location.hostname}:4317`;
 const autoJoinKey = "meeting.autoJoin";
 const query = new URLSearchParams(window.location.search);
 const isEmbedded = query.get("embedded") === "1";

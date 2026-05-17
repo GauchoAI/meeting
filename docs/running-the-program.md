@@ -12,10 +12,28 @@ cp .env.example .env
 pnpm dev:local-live
 ```
 
-Then open:
+Then open on the host machine:
 
 ```text
 http://localhost:5175/stable.html
+```
+
+Or, from another computer on the same Wi-Fi/LAN, use the host machine's LAN IP:
+
+```text
+http://<host-lan-ip>:5175/stable.html
+```
+
+For example:
+
+```text
+http://192.168.0.48:5175/stable.html
+```
+
+The web client will infer the API as `http://<same-host>:4317`. If you need to override it manually, run this in the browser console and reload:
+
+```js
+localStorage.setItem("meeting.api", "http://<host-lan-ip>:4317")
 ```
 
 Click `Join meeting`, then choose a capture mode:
