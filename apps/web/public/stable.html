@@ -1983,8 +1983,9 @@
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       try {
-        peerRoom?.muteLocalMicForRelay?.(Math.min(30000, Math.max(4000, Math.round(blob.size / 24))));
+        peerRoom?.muteLocalMicForRelay?.(800);
         await audio.play();
+        audio.onended = () => peerRoom?.muteLocalMicForRelay?.(120);
         void postRealtimeTrace("agent", "Playing relayed assistant TTS audio", { bytes: blob.size, mimeType, transferMs: Date.now() - startedAt });
       } catch (error) {
         enableAudioButton.hidden = false;
@@ -2024,8 +2025,8 @@
         utterance.rate = 1;
         const estimatedMs = Math.min(18000, Math.max(2500, spoken.length * 65));
         peerRoom?.muteLocalMicForRelay?.(estimatedMs + 1200);
-        utterance.onend = () => peerRoom?.muteLocalMicForRelay?.(500);
-        utterance.onerror = () => peerRoom?.muteLocalMicForRelay?.(500);
+        utterance.onend = () => peerRoom?.muteLocalMicForRelay?.(120);
+        utterance.onerror = () => peerRoom?.muteLocalMicForRelay?.(120);
         window.speechSynthesis.speak(utterance);
         void postRealtimeTrace("agent", "Speaking assistant audio relayed from host", { textChars: spoken.length, mutedGuestMicMs: estimatedMs + 1200 });
       } catch (error) {
