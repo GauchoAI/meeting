@@ -425,7 +425,13 @@
         const attachDataChannel = (channel) => {
           state.dataChannel = channel;
           channel.addEventListener("message", (event) => handleHumanPeerDataMessage(peer, event.data));
-          channel.addEventListener("open", () => postRealtimeTrace("agent", "Human peer data channel open", { peerId: peer.id, peerName: peer.name, host }));
+          channel.addEventListener("open", () => {
+            void postRealtimeTrace("agent", "Human peer data channel open", { peerId: peer.id, peerName: peer.name, host });
+            if (host) {
+              void sendCurrentCanvasToChannel(channel);
+              window.setTimeout(() => void sendCurrentCanvasToChannel(channel), 1500);
+            }
+          });
         };
         pc.addEventListener("datachannel", (event) => attachDataChannel(event.channel));
         if (host) attachDataChannel(pc.createDataChannel("meeting-human-peer"));
@@ -509,6 +515,20 @@
           }
         }
         return sent;
+      }
+
+      async function sendCurrentCanvasToChannel(channel) {
+        if (!api || channel?.readyState !== "open") return;
+        try {
+          const snapshot = await fetch(`${api}/events`, { cache: "no-store" }).then((response) => response.json());
+          const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
+          const canvasEvent = [...events].reverse().find((event) => event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim());
+          if (!canvasEvent || channel.readyState !== "open") return;
+          channel.send(JSON.stringify({ type: "meeting.event", event: canvasEvent, from: self, createdAtMs: Date.now() }));
+          void postRealtimeTrace("agent", "Sent current canvas to human peer", { eventId: canvasEvent.id, textChars: String(canvasEvent.text || "").length });
+        } catch (error) {
+          void postRealtimeTrace("error", "Failed to send current canvas to human peer", { error: error?.message || String(error) });
+        }
       }
 
       async function waitForChannelBuffer(channel) {
