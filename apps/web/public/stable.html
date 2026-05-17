@@ -1550,16 +1550,21 @@
       if (localSttPausedForSpeech) {
         const level = currentLocalMicLevel();
         const canInterrupt = now - localSpeechStartedAt >= localBargeInGraceMs();
-        if (localAcousticBargeInEnabled() && canInterrupt && localSpeechAudioPlaying() && level >= localBargeInThreshold()) {
+        const bargeInVoice = localAcousticBargeInEnabled() && canInterrupt && localSpeechAudioPlaying() && level >= localBargeInThreshold();
+        if (bargeInVoice) {
           if (!localSpeechBargeInStartedAt) localSpeechBargeInStartedAt = now;
+          localSttSuppressUploadsUntil = 0;
+          localSttDiscardCurrentChunk = false;
+          localSttLastVoiceAt = now;
+          if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
           if (now - localSpeechBargeInStartedAt >= localBargeInHoldMs()) {
             interruptLocalSpeechForBargeIn(level);
           }
         } else {
           localSpeechBargeInStartedAt = 0;
+          localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, now + 450);
+          if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
         }
-        localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, now + 450);
-        if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
         scheduleLocalVadTick();
         return;
       }
@@ -1780,11 +1785,11 @@
     }
 
     function localBargeInGraceMs() {
-      return 220;
+      return 0;
     }
 
     function localBargeInHoldMs() {
-      const defaultMs = localCaptureMode() === "auto-vad" ? 180 : 180;
+      const defaultMs = localCaptureMode() === "auto-vad" ? 120 : 120;
       const configured = Number(localStorage.getItem("meeting.localBargeInHoldMs") || String(defaultMs));
       return Number.isFinite(configured) ? Math.max(160, Math.min(800, configured)) : defaultMs;
     }
