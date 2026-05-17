@@ -534,7 +534,7 @@
         if (!openChannels.length || !blob?.size) return 0;
         const bytes = new Uint8Array(await blob.arrayBuffer());
         const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const chunkBytes = 24000;
+        const chunkBytes = 9000;
         for (const channel of openChannels) channel.send(JSON.stringify({ type: `${type}.start`, id, mimeType: blob.type || "audio/mpeg", bytes: bytes.byteLength, createdAtMs: Date.now() }));
         for (let offset = 0, index = 0; offset < bytes.length; offset += chunkBytes, index += 1) {
           let binary = "";
@@ -605,7 +605,7 @@
                   sum += centered * centered;
                 }
                 const rms = Math.sqrt(sum / vadData.length) / 128;
-                if (rms > 0.012) {
+                if (rms > 0.018) {
                   heardSpeech = true;
                   silentSince = 0;
                 } else if (heardSpeech && !silentSince) {
@@ -613,7 +613,7 @@
                 }
               }
               const silenceMs = silentSince ? Date.now() - silentSince : 0;
-              if (recorder.state === "recording" && ((heardSpeech && elapsed > 900 && silenceMs > 700) || elapsed > 6000)) recorder.stop();
+              if (recorder.state === "recording" && ((heardSpeech && elapsed > 1300 && silenceMs > 1200) || elapsed > 20000)) recorder.stop();
             }, 120);
           } catch (error) {
             active = false;
