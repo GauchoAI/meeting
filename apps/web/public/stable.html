@@ -493,13 +493,24 @@
         if (!state || state.recorder || !audioTracks.length) return;
         const audioOnlyStream = new MediaStream(audioTracks);
         const mimeType = preferredMimeType();
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        const vadContext = AudioContextCtor ? new AudioContextCtor() : null;
+        const analyser = vadContext ? vadContext.createAnalyser() : null;
+        const vadData = analyser ? new Uint8Array(analyser.fftSize) : null;
+        if (analyser && vadContext) {
+          analyser.fftSize = 512;
+          vadContext.createMediaStreamSource(audioOnlyStream).connect(analyser);
+        }
         let active = true;
         let currentRecorder = null;
-        state.recorder = { stop: () => { active = false; currentRecorder?.stop?.(); } };
+        let currentVadTimer = null;
+        state.recorder = { stop: () => { active = false; if (currentVadTimer) window.clearInterval(currentVadTimer); currentRecorder?.stop?.(); vadContext?.close?.().catch(() => undefined); } };
         const recordSegment = () => {
           if (!active || stopped || !audioOnlyStream.getAudioTracks().some((track) => track.readyState === "live")) return;
           const chunks = [];
           const startedAt = Date.now();
+          let heardSpeech = !analyser;
+          let silentSince = 0;
           try {
             const recorder = new MediaRecorder(audioOnlyStream, mimeType ? { mimeType } : undefined);
             currentRecorder = recorder;
@@ -510,8 +521,10 @@
               void postRealtimeTrace("error", "Guest WebRTC recorder failed", { peerId: peer.id, error: String(event?.error?.message || event?.type || event) });
             };
             recorder.onstop = () => {
+              if (currentVadTimer) window.clearInterval(currentVadTimer);
+              currentVadTimer = null;
               const stoppedAt = Date.now();
-              if (chunks.length) {
+              if (chunks.length && heardSpeech) {
                 const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
                 void postRealtimeTrace("debug", "Forwarding complete guest WebRTC recording", { peerId: peer.id, peerName: peer.name, bytes: blob.size, mimeType: blob.type, segmentMs: stoppedAt - startedAt });
                 void sendPeerAudioChunk(blob, peer.name || "Guest", startedAt, stoppedAt);
@@ -519,9 +532,26 @@
               if (active && !stopped) window.setTimeout(recordSegment, 25);
             };
             recorder.start();
-            window.setTimeout(() => {
-              if (recorder.state === "recording") recorder.stop();
-            }, 6000);
+            currentVadTimer = window.setInterval(() => {
+              const elapsed = Date.now() - startedAt;
+              if (analyser && vadData) {
+                analyser.getByteTimeDomainData(vadData);
+                let sum = 0;
+                for (const value of vadData) {
+                  const centered = value - 128;
+                  sum += centered * centered;
+                }
+                const rms = Math.sqrt(sum / vadData.length) / 128;
+                if (rms > 0.018) {
+                  heardSpeech = true;
+                  silentSince = 0;
+                } else if (heardSpeech && !silentSince) {
+                  silentSince = Date.now();
+                }
+              }
+              const silenceMs = silentSince ? Date.now() - silentSince : 0;
+              if (recorder.state === "recording" && ((heardSpeech && elapsed > 1300 && silenceMs > 1200) || elapsed > 20000)) recorder.stop();
+            }, 120);
           } catch (error) {
             active = false;
             state.recorder = null;
