@@ -1835,17 +1835,21 @@
       return Number.isFinite(configured) ? Math.max(30000, Math.min(1800000, configured)) : 600000;
     }
 
-    async function sendPeerAudioChunk(blob, speakerLabel, clientStartedAt = 0, clientStoppedAt = 0) {
+    function stableGuestSpeakerId(speakerLabel) {
+      return `guest-${String(speakerLabel || "guest").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "speaker"}`;
+    }
+
+    async function sendMeetingAudioChunk({ blob, speakerLabel, speakerId, client, clientStartedAt = 0, clientStoppedAt = 0, errorText, errorDetails = {} }) {
       if (!api) return;
       const extension = blob.type.includes("mp4") ? "mp4" : "webm";
       try {
         const params = new URLSearchParams({
           extension,
-          speaker: speakerLabel || "Guest",
-          speakerId: `guest-${String(speakerLabel || "guest").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "speaker"}`,
+          speaker: speakerLabel,
           meetingId,
-          client: "stable-webrtc-peer-v1"
+          client
         });
+        if (speakerId) params.set("speakerId", speakerId);
         if (clientStartedAt) params.set("clientStartedAt", String(clientStartedAt));
         if (clientStoppedAt) params.set("clientStoppedAt", String(clientStoppedAt));
         await fetch(`${api}/audio/chunk?${params.toString()}`, {
@@ -1854,8 +1858,21 @@
           body: await blob.arrayBuffer()
         });
       } catch (error) {
-        await postRealtimeTrace("error", "Peer STT audio chunk failed", { speakerLabel, error: error?.message || String(error) });
+        await postRealtimeTrace("error", errorText || "STT audio chunk failed", { ...errorDetails, error: error?.message || String(error) });
       }
+    }
+
+    async function sendPeerAudioChunk(blob, speakerLabel, clientStartedAt = 0, clientStoppedAt = 0) {
+      await sendMeetingAudioChunk({
+        blob,
+        speakerLabel: speakerLabel || "Guest",
+        speakerId: stableGuestSpeakerId(speakerLabel),
+        client: "stable-webrtc-peer-v1",
+        clientStartedAt,
+        clientStoppedAt,
+        errorText: "Peer STT audio chunk failed",
+        errorDetails: { speakerLabel }
+      });
     }
 
     async function sendAudioChunk(blob, clientStartedAt = 0, clientStoppedAt = 0) {
@@ -1864,23 +1881,15 @@
         await postRealtimeTrace("debug", "Skipped local STT upload during local speech output", { bytes: blob.size });
         return;
       }
-      const extension = blob.type.includes("mp4") ? "mp4" : "webm";
-      try {
-        const params = new URLSearchParams({
-          extension,
-          speaker: "Host",
-          client: "stable-vad-v1"
-        });
-        if (clientStartedAt) params.set("clientStartedAt", String(clientStartedAt));
-        if (clientStoppedAt) params.set("clientStoppedAt", String(clientStoppedAt));
-        await fetch(`${api}/audio/chunk?${params.toString()}`, {
-          method: "POST",
-          headers: { "Content-Type": blob.type || "application/octet-stream" },
-          body: await blob.arrayBuffer()
-        });
-      } catch (error) {
-        await postRealtimeTrace("error", "Local STT audio chunk failed", { error: error?.message || String(error) });
-      }
+      await sendMeetingAudioChunk({
+        blob,
+        speakerLabel: "Host",
+        speakerId: "host",
+        client: "stable-vad-v1",
+        clientStartedAt,
+        clientStoppedAt,
+        errorText: "Local STT audio chunk failed"
+      });
     }
 
     async function handleLocalPiAgentUpdate(event) {

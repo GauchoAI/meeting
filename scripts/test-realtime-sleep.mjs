@@ -60,7 +60,7 @@ assert.match(stable, /\(\?=\[A-Z0-9_\]\*\(\?:\[_0-9\]\|=\)\)/, "spoken acronym s
 assert.match(stable, /id="captureMode"/, "stable shell exposes the local capture mode selector");
 assert.match(stable, /value="auto-vad">Hands-free/, "stable shell exposes hands-free local VAD capture");
 assert.match(stable, /setLocalCaptureMode/, "stable shell persists capture-mode changes");
-assert.match(stable, /return localCaptureMode\(\) === "auto-vad";/, "hands-free capture enables acoustic barge-in by default");
+assert.match(stable, /if \(configured === "false"\) return false;\s*return true;/, "local acoustic barge-in defaults on with opt-out");
 assert.match(stable, /localCaptureMode\(\) === "auto-vad" \? 1600 : 900/, "hands-free capture waits longer before closing a spoken turn");
 assert.match(stable, /waitForLocalSpeechPlaybackTurn/, "local TTS waits for the host turn before playback");
 assert.match(stable, /cancelLocalSpeechForHostContinuation/, "pending local TTS is cancelled when the host continues speaking");
