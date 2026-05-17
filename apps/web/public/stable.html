@@ -1776,15 +1776,15 @@
     }
 
     function localBargeInThreshold() {
-      return Math.max(0.045, localVoiceThreshold() * 2.5);
+      return Math.max(0.032, localVoiceThreshold() * 1.8);
     }
 
     function localBargeInGraceMs() {
-      return 700;
+      return 220;
     }
 
     function localBargeInHoldMs() {
-      const defaultMs = localCaptureMode() === "auto-vad" ? 320 : 240;
+      const defaultMs = localCaptureMode() === "auto-vad" ? 180 : 180;
       const configured = Number(localStorage.getItem("meeting.localBargeInHoldMs") || String(defaultMs));
       return Number.isFinite(configured) ? Math.max(160, Math.min(800, configured)) : defaultMs;
     }
@@ -2471,12 +2471,14 @@
       localSttPausedForSpeech = false;
       localSpeechStartedAt = 0;
       localSpeechBargeInStartedAt = 0;
-      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 220);
+      localSttSuppressUploadsUntil = 0;
+      localSttDiscardCurrentChunk = false;
       stopLocalSpeechAudio();
-      if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
-      renderStatus("local voice interrupted; listening", "ready");
+      localSttLastVoiceAt = Date.now();
+      if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
+      renderStatus("local voice interrupted; recording", "speaking");
       publishShellState();
-      void postRealtimeTrace("agent", "Local voice speech interrupted by mic activity", { level });
+      void postRealtimeTrace("agent", "Local voice speech interrupted by mic activity; recording human turn", { level });
     }
 
     async function notifyRealtimeOfPiAgentUpdate(event) {
