@@ -148,15 +148,6 @@
     let lastPiAgentNoticeId = null;
     let eventsSource = null;
     let peerRoom = null;
-    const peerAssistantAudios = new Set();
-    let peerAssistantAudioStartedAt = 0;
-    let guestBargeInAudioContext = null;
-    let guestBargeInAnalyser = null;
-    let guestBargeInData = null;
-    let guestBargeInTimer = null;
-    let guestBargeInStartedAt = 0;
-    let guestAssistantMicBaseline = 0;
-    let guestAssistantMicBaselineSamples = 0;
     const transcriptDraftIds = new Map();
     const transcriptDraftText = new Map();
 
@@ -244,7 +235,6 @@
       renderStatus(peerOnly ? "guest peer connected; waiting for host" : (usesRealtimeVoice() ? "voice agent connecting" : "local voice listening"), "ready");
       publishShellState();
       startHumanPeerRoom(localStream);
-      if (peerOnly) startGuestBargeInGuard(localStream);
       if (!peerOnly && usesLocalStt()) startLocalSttCapture(localStream);
       if (!peerOnly && usesRealtimeVoice()) {
         void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", { voiceMode, speechProvider });
@@ -282,7 +272,6 @@
         localSpeechResumeTimer = null;
       }
       stopLocalSpeechAudio();
-      stopGuestBargeInGuard();
       localStream?.getTracks().forEach((track) => track.stop());
       localStream = null;
       joinButton.hidden = false;
@@ -1993,108 +1982,16 @@
       const blob = base64ToBlob(base64Audio, mimeType);
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      let cleaned = false;
-      const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        peerAssistantAudios.delete(audio);
-        URL.revokeObjectURL(url);
-      };
-      audio.onended = cleanup;
-      audio.onerror = cleanup;
       try {
-        peerAssistantAudios.add(audio);
-        peerAssistantAudioStartedAt = Date.now();
-        guestBargeInStartedAt = 0;
-        guestAssistantMicBaseline = 0;
-        guestAssistantMicBaselineSamples = 0;
         await audio.play();
         void postRealtimeTrace("agent", "Playing relayed assistant TTS audio", { bytes: blob.size, mimeType, transferMs: Date.now() - startedAt });
       } catch (error) {
-        cleanup();
         enableAudioButton.hidden = false;
         speakPeerAssistantText("Audio is ready. Please press Enable guest audio.");
         void postRealtimeTrace("error", "Relayed assistant TTS audio playback failed", { error: error?.message || String(error), bytes: blob.size, mimeType });
       } finally {
-        window.setTimeout(cleanup, 60000);
-      }
-    }
-
-    function stopPeerAssistantAudioForGuestSpeech(level, threshold) {
-      let stoppedCount = 0;
-      for (const audio of [...peerAssistantAudios]) {
-        try {
-          if (!audio.paused && !audio.ended) {
-            audio.pause();
-            audio.removeAttribute("src");
-            audio.load();
-            stoppedCount += 1;
-          }
-        } catch {}
-        peerAssistantAudios.delete(audio);
-      }
-      try { window.speechSynthesis?.cancel?.(); } catch {}
-      guestBargeInStartedAt = 0;
-      if (stoppedCount) void postRealtimeTrace("agent", "Guest interrupted relayed assistant audio", { stoppedCount, level, threshold, baseline: guestAssistantMicBaseline });
-    }
-
-    function startGuestBargeInGuard(stream) {
-      if (!peerOnly || guestBargeInTimer || !stream?.getAudioTracks?.().length) return;
-      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextCtor) return;
-      try {
-        guestBargeInAudioContext = new AudioContextCtor();
-        guestBargeInAnalyser = guestBargeInAudioContext.createAnalyser();
-        guestBargeInAnalyser.fftSize = 1024;
-        guestBargeInData = new Uint8Array(guestBargeInAnalyser.fftSize);
-        guestBargeInAudioContext.createMediaStreamSource(new MediaStream(stream.getAudioTracks())).connect(guestBargeInAnalyser);
-        void guestBargeInAudioContext.resume?.().catch(() => undefined);
-        guestBargeInTimer = window.setInterval(runGuestBargeInGuardTick, 80);
-        void postRealtimeTrace("agent", "Guest barge-in guard started");
-      } catch (error) {
-        void postRealtimeTrace("error", "Guest barge-in guard failed", { error: error?.message || String(error) });
-      }
-    }
-
-    function stopGuestBargeInGuard() {
-      if (guestBargeInTimer !== null) window.clearInterval(guestBargeInTimer);
-      guestBargeInTimer = null;
-      guestBargeInStartedAt = 0;
-      guestBargeInAnalyser = null;
-      guestBargeInData = null;
-      void guestBargeInAudioContext?.close?.().catch(() => undefined);
-      guestBargeInAudioContext = null;
-    }
-
-    function runGuestBargeInGuardTick() {
-      if (!guestBargeInAnalyser || !guestBargeInData || !peerAssistantAudios.size) {
-        guestBargeInStartedAt = 0;
-        return;
-      }
-      void guestBargeInAudioContext?.resume?.().catch(() => undefined);
-      guestBargeInAnalyser.getByteTimeDomainData(guestBargeInData);
-      let sum = 0;
-      for (const value of guestBargeInData) {
-        const centered = (value - 128) / 128;
-        sum += centered * centered;
-      }
-      const rms = Math.sqrt(sum / guestBargeInData.length);
-      const ageMs = Date.now() - peerAssistantAudioStartedAt;
-      if (ageMs < 450) {
-        guestAssistantMicBaseline = ((guestAssistantMicBaseline * guestAssistantMicBaselineSamples) + rms) / (guestAssistantMicBaselineSamples + 1);
-        guestAssistantMicBaselineSamples += 1;
-        return;
-      }
-      const threshold = Math.max(0.026, guestAssistantMicBaseline * 2.8, localVoiceThreshold() * 1.35);
-      if (rms >= threshold) {
-        if (!guestBargeInStartedAt) guestBargeInStartedAt = Date.now();
-        if (Date.now() - guestBargeInStartedAt >= 160) stopPeerAssistantAudioForGuestSpeech(rms, threshold);
-      } else {
-        guestBargeInStartedAt = 0;
-        if (guestAssistantMicBaselineSamples < 30) {
-          guestAssistantMicBaseline = ((guestAssistantMicBaseline * guestAssistantMicBaselineSamples) + rms) / (guestAssistantMicBaselineSamples + 1);
-          guestAssistantMicBaselineSamples += 1;
-        }
+        audio.onended = () => URL.revokeObjectURL(url);
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
     }
 
