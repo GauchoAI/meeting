@@ -506,10 +506,6 @@
           if (transfer) void playPeerAssistantAudioBlob(transfer.chunks.join(""), transfer.mimeType, transfer.startedAt);
           return;
         }
-        if (message?.type === "assistant.audio.stop" && !host) {
-          stopPeerAssistantAudio(String(message.reason || "remote-barge-in"));
-          return;
-        }
         if (message?.type === "assistant.speech" && !host) {
           speakPeerAssistantText(message.text || "");
         }
@@ -588,7 +584,6 @@
         let active = true;
         let currentRecorder = null;
         let currentVadTimer = null;
-        let lastStopSignalAt = 0;
         state.recorder = { stop: () => { active = false; if (currentVadTimer) window.clearInterval(currentVadTimer); currentRecorder?.stop?.(); vadContext?.close?.().catch(() => undefined); } };
         const recordSegment = () => {
           if (!active || stopped || !audioOnlyStream.getAudioTracks().some((track) => track.readyState === "live")) return;
@@ -630,10 +625,6 @@
                 if (rms >= localVoiceThreshold()) {
                   heardSpeech = true;
                   silentSince = 0;
-                  if (Date.now() - lastStopSignalAt >= 450) {
-                    lastStopSignalAt = Date.now();
-                    state.dataChannel?.readyState === "open" && state.dataChannel.send(JSON.stringify({ type: "assistant.audio.stop", reason: "host-detected-guest-speech", createdAtMs: Date.now() }));
-                  }
                 } else if (heardSpeech && !silentSince) {
                   silentSince = Date.now();
                 }
