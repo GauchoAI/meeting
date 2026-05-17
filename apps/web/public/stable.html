@@ -490,8 +490,11 @@
           if (transfer) void playPeerAssistantAudioBlob(transfer.chunks.join(""), transfer.mimeType, transfer.startedAt);
           return;
         }
-        if ((message?.type === "assistant.speech" || message?.type === "host.speech") && !host) {
+        if (message?.type === "assistant.speech" && !host) {
           speakPeerAssistantText(message.text || "");
+        }
+        if (message?.type === "host.speech" && !host) {
+          void postRealtimeTrace("debug", "Ignored host transcript speech fallback; using real WebRTC host audio", { textChars: String(message.text || "").length });
         }
       }
 
@@ -542,9 +545,10 @@
         const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
         const vadContext = AudioContextCtor ? new AudioContextCtor() : null;
         const analyser = vadContext ? vadContext.createAnalyser() : null;
+        if (analyser) analyser.fftSize = 1024;
         const vadData = analyser ? new Uint8Array(analyser.fftSize) : null;
         if (analyser && vadContext) {
-          analyser.fftSize = 512;
+          vadContext.resume?.().catch(() => undefined);
           vadContext.createMediaStreamSource(audioOnlyStream).connect(analyser);
         }
         let active = true;
@@ -588,7 +592,7 @@
                   sum += centered * centered;
                 }
                 const rms = Math.sqrt(sum / vadData.length) / 128;
-                if (rms > 0.018) {
+                if (rms >= localVoiceThreshold()) {
                   heardSpeech = true;
                   silentSince = 0;
                 } else if (heardSpeech && !silentSince) {
@@ -596,7 +600,7 @@
                 }
               }
               const silenceMs = silentSince ? Date.now() - silentSince : 0;
-              if (recorder.state === "recording" && ((heardSpeech && elapsed > 1300 && silenceMs > 1200) || elapsed > 20000)) recorder.stop();
+              if (recorder.state === "recording" && ((heardSpeech && elapsed >= 450 && silenceMs >= localSpeechSilenceMs()) || elapsed >= localSpeechMaxMs())) recorder.stop();
             }, 120);
           } catch (error) {
             active = false;
@@ -1657,7 +1661,6 @@
 
     function handleLocalHostUtteranceForPendingSpeech(event) {
       if (!isConfirmedLocalHostUtterance(event)) return;
-      broadcastHostSpeechToHumanPeers(event.text || "");
       cancelLocalSpeechForHostContinuation("confirmed-host-utterance", {
         eventId: event.id,
         textChars: String(event.text || "").trim().length
