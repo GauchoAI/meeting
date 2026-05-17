@@ -1814,9 +1814,8 @@
 
     function localAcousticBargeInEnabled() {
       const configured = localStorage.getItem("meeting.localAcousticBargeIn");
-      if (configured === "true") return true;
       if (configured === "false") return false;
-      return localCaptureMode() === "auto-vad";
+      return true;
     }
 
     function localCaptureMode() {
