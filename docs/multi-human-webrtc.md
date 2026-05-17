@@ -37,6 +37,37 @@ For the normal case, each human uses a separate browser/device. That means the s
 
 No hard diarization is needed unless multiple people share one microphone.
 
+## Public lobby / meeting discovery
+
+GitHub Pages should be the public entry point where people can find meetings.
+
+The first version should show a simple lobby:
+
+- Online meetings.
+- Host display name.
+- Room title.
+- Whether the room is public or invite-only.
+- Participant count.
+- Last heartbeat / freshness.
+- Join button that opens the guest client with the selected host API/signaling room.
+
+Firebase can store this presence registry separately from the WebRTC signaling messages.
+
+```text
+publicMeetings/{meetingId}
+  title: string
+  host: { id, name }
+  apiUrl: string
+  signalingRoomId: string
+  visibility: public | invite-only
+  participantCount: number
+  updatedAt: server timestamp
+```
+
+Hosts publish a heartbeat while their backend is online. Guests subscribe to `publicMeetings` and only show rooms whose `updatedAt` is recent enough, for example less than 30 seconds old.
+
+This preserves the host/guest architecture while still making GitHub Pages the shared discovery place.
+
 ## Signaling
 
 WebRTC peers need a side channel to find each other and exchange:
@@ -85,12 +116,13 @@ So there are two likely modes:
 ## Next implementation steps
 
 1. Add Firebase project configuration via environment variables.
-2. Implement `FirebaseMeetingSignalingAdapter`.
-3. Add a small room UI: room id, display name, join/leave.
-4. Attach remote peer audio elements.
-5. Send each client's own mic to the Meeting API with that client's speaker label.
-6. Broadcast AI TTS playback to all clients, or let every client subscribe to the same TTS/event stream.
-7. Add cleanup for stale Firebase room documents.
+2. Implement a Firebase public meeting registry / lobby.
+3. Implement `FirebaseMeetingSignalingAdapter`.
+4. Add a small room UI: room id, display name, join/leave.
+5. Attach remote peer audio elements.
+6. Send each client's own mic to the Meeting API with that client's speaker label.
+7. Broadcast AI TTS playback to all clients, or let every client subscribe to the same TTS/event stream.
+8. Add cleanup for stale Firebase room documents.
 
 ## Minimal Firebase data shape
 
