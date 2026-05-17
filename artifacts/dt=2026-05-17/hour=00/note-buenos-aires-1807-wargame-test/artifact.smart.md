@@ -1,7 +1,3 @@
-# Hello World
-
-This is a live GitHub Pages canvas update test.
-
 # Buenos Aires 1807 Wargame Test
 
 ## What we did
