@@ -2065,7 +2065,7 @@
         guestBargeInStartedAt = 0;
         return;
       }
-      if (Date.now() - peerAssistantAudioStartedAt < 250) return;
+      void guestBargeInAudioContext?.resume?.().catch(() => undefined);
       guestBargeInAnalyser.getByteTimeDomainData(guestBargeInData);
       let sum = 0;
       for (const value of guestBargeInData) {
@@ -2073,9 +2073,10 @@
         sum += centered * centered;
       }
       const rms = Math.sqrt(sum / guestBargeInData.length);
-      if (rms >= localBargeInThreshold()) {
+      const threshold = Math.max(localVoiceThreshold(), localBargeInThreshold() * 0.55);
+      if (rms >= threshold) {
         if (!guestBargeInStartedAt) guestBargeInStartedAt = Date.now();
-        if (Date.now() - guestBargeInStartedAt >= localBargeInHoldMs()) stopPeerAssistantAudio("guest-local-mic");
+        if (Date.now() - guestBargeInStartedAt >= 80) stopPeerAssistantAudio("guest-local-mic");
       } else {
         guestBargeInStartedAt = 0;
       }
