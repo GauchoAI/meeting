@@ -398,10 +398,23 @@
           if (event.candidate) void publish({ type: "ice", roomId, from: self, to: peer.id, candidate: event.candidate.toJSON() });
         });
         pc.addEventListener("track", (event) => {
-          for (const track of event.streams[0]?.getTracks() || [event.track]) {
+          const incomingStream = event.streams[0] || remoteStream;
+          for (const track of incomingStream.getTracks?.() || [event.track]) {
             if (!remoteStream.getTrackById(track.id)) remoteStream.addTrack(track);
           }
-          if (host) startRemotePeerTranscription(peer, remoteStream);
+          audio.play?.().catch(() => undefined);
+          void postRealtimeTrace("agent", "Human peer remote track received", {
+            peerId: peer.id,
+            peerName: peer.name,
+            host,
+            trackKind: event.track?.kind,
+            remoteAudioTracks: remoteStream.getAudioTracks().length,
+            incomingAudioTracks: incomingStream.getAudioTracks?.().length || 0
+          });
+          if (host) {
+            startRemotePeerTranscription(peer, incomingStream);
+            window.setTimeout(() => startRemotePeerTranscription(peer, remoteStream), 250);
+          }
         });
         pc.addEventListener("connectionstatechange", () => {
           if (["closed", "failed", "disconnected"].includes(pc.connectionState)) removePeer(peer.id);
