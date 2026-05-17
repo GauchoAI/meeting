@@ -2130,6 +2130,7 @@
           void context.close().catch(() => undefined);
         }
       };
+      void context.resume?.().catch(() => undefined);
       playback.nextStart = context.currentTime + 0.035;
       return playback;
     }
@@ -2160,6 +2161,7 @@
       source.connect(playback.context.destination);
       source.onended = () => playback.sources.delete(source);
       playback.sources.add(source);
+      void playback.context.resume?.().catch(() => undefined);
       const startAt = Math.max(playback.nextStart, playback.context.currentTime + 0.015);
       if (!playback.playbackStartTraced) {
         playback.playbackStartTraced = true;
