@@ -16,7 +16,6 @@
     "@meeting/transcript": "workspace:*",
     "@vitejs/plugin-react": "^5.1.1",
     "dompurify": "^3.4.2",
-    "firebase": "^12.13.0",
     "lucide-react": "^0.562.0",
     "marked": "^18.0.3",
     "mermaid": "^11.14.0",

@@ -50,15 +50,17 @@ Guests can open the normal Pages URL and click the online meeting:
 https://gauchoai.github.io/meeting/
 ```
 
-Firebase config is supplied at build time with public Vite variables:
+The lobby uses Firebase Realtime Database REST/SSE directly, without auth. By default it writes only under this namespace, not at the database root:
 
 ```text
-VITE_FIREBASE_API_KEY
-VITE_FIREBASE_AUTH_DOMAIN
-VITE_FIREBASE_PROJECT_ID
-VITE_FIREBASE_STORAGE_BUCKET
-VITE_FIREBASE_MESSAGING_SENDER_ID
-VITE_FIREBASE_APP_ID
+https://signaling-dcfad-default-rtdb.europe-west1.firebasedatabase.app/gauchoai-meeting/publicMeetings
+```
+
+Optional build-time overrides:
+
+```text
+VITE_FIREBASE_DATABASE_URL=https://signaling-dcfad-default-rtdb.europe-west1.firebasedatabase.app
+VITE_FIREBASE_NAMESPACE=gauchoai-meeting
 ```
 
 ## Pages + hosted/tunneled API mode
@@ -100,7 +102,7 @@ mkdir -p .github/workflows
 cp docs/github-pages-workflow.yml .github/workflows/pages.yml
 ```
 
-Note: creating or updating `.github/workflows/pages.yml` requires a GitHub token with the `workflow` scope. Some local OAuth app credentials can push normal code but cannot push workflow files.
+Note: creating or updating `.github/workflows/pages.yml` requires a GitHub token with the `workflow` scope. The local `gh` login currently has `repo` but not `workflow`, so normal code pushes work but workflow-file pushes are rejected by GitHub. Refresh auth with `gh auth refresh -s workflow`, or create the file in the GitHub web UI.
 
 The workflow builds `apps/web` with:
 

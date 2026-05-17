@@ -1,6 +1,3 @@
-import { initializeApp, type FirebaseApp } from "firebase/app";
-import { collection, deleteDoc, doc, getFirestore, onSnapshot, orderBy, query, serverTimestamp, setDoc, type Firestore } from "firebase/firestore";
-
 export interface PublicMeetingRecord {
   id: string;
   title: string;
@@ -24,71 +21,156 @@ export interface AdvertiseMeetingOptions {
   heartbeatMs?: number;
 }
 
-let app: FirebaseApp | null = null;
-let firestore: Firestore | null = null;
+const defaultDatabaseUrl = "https://signaling-dcfad-default-rtdb.europe-west1.firebasedatabase.app";
+const defaultNamespace = "gauchoai-meeting";
 
-export function firebaseMeetingConfigStatus(): { configured: boolean; message: string } {
-  if (!import.meta.env.VITE_FIREBASE_API_KEY) return { configured: false, message: "VITE_FIREBASE_API_KEY is not configured." };
-  if (!import.meta.env.VITE_FIREBASE_PROJECT_ID) return { configured: false, message: "VITE_FIREBASE_PROJECT_ID is not configured." };
-  if (!import.meta.env.VITE_FIREBASE_APP_ID) return { configured: false, message: "VITE_FIREBASE_APP_ID is not configured." };
-  return { configured: true, message: "Firebase meeting registry configured." };
+function databaseUrl(): string {
+  return String(import.meta.env.VITE_FIREBASE_DATABASE_URL || defaultDatabaseUrl).replace(/\/+$/, "");
 }
 
-function db(): Firestore | null {
-  const status = firebaseMeetingConfigStatus();
-  if (!status.configured) return null;
-  if (!app) {
-    app = initializeApp({
-      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-      appId: import.meta.env.VITE_FIREBASE_APP_ID
-    });
-  }
-  firestore ||= getFirestore(app);
-  return firestore;
+function namespacePath(): string {
+  return String(import.meta.env.VITE_FIREBASE_NAMESPACE || defaultNamespace)
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/[^a-zA-Z0-9/_-]/g, "-");
+}
+
+function pathUrl(path: string): string {
+  const clean = path.replace(/^\/+|\/+$/g, "");
+  return `${databaseUrl()}/${namespacePath()}/${clean}.json`;
+}
+
+function meetingPath(meetingId: string): string {
+  return `publicMeetings/${encodeURIComponent(meetingId).replace(/\./g, "%2E")}`;
+}
+
+function normalizeMeeting(id: string, value: unknown): PublicMeetingRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<PublicMeetingRecord>;
+  return {
+    id,
+    title: String(record.title || id),
+    host: {
+      id: String(record.host?.id || "host"),
+      name: String(record.host?.name || "Host")
+    },
+    apiUrl: String(record.apiUrl || ""),
+    signalingRoomId: String(record.signalingRoomId || id),
+    visibility: record.visibility === "invite-only" ? "invite-only" : "public",
+    participantCount: Number(record.participantCount || 1),
+    updatedAtMs: Number(record.updatedAtMs || 0)
+  };
+}
+
+function freshPublicMeetings(values: Record<string, unknown>): PublicMeetingRecord[] {
+  const now = Date.now();
+  const freshWindowMs = 45_000;
+  return Object.entries(values || {})
+    .map(([id, value]) => normalizeMeeting(id, value))
+    .filter((meeting): meeting is PublicMeetingRecord => Boolean(meeting))
+    .filter((meeting) => meeting.visibility === "public" && Boolean(meeting.apiUrl) && now - meeting.updatedAtMs <= freshWindowMs)
+    .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+}
+
+export function firebaseMeetingConfigStatus(): { configured: boolean; message: string } {
+  return {
+    configured: true,
+    message: `Firebase Realtime Database registry: ${databaseUrl()}/${namespacePath()}/publicMeetings`
+  };
 }
 
 export function subscribePublicMeetings(onMeetings: (meetings: PublicMeetingRecord[]) => void, onError?: (error: Error) => void): () => void {
-  const store = db();
-  if (!store) {
-    onMeetings([]);
-    return () => undefined;
+  const url = pathUrl("publicMeetings");
+  let closed = false;
+  let lastValues: Record<string, unknown> = {};
+  let pollTimer = 0;
+  let eventSource: EventSource | null = null;
+
+  const publish = () => onMeetings(freshPublicMeetings(lastValues));
+
+  const fetchSnapshot = async () => {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Firebase lobby fetch failed: ${response.status}`);
+      lastValues = (await response.json()) || {};
+      publish();
+    } catch (error) {
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+
+  const startPolling = () => {
+    if (pollTimer) return;
+    void fetchSnapshot();
+    pollTimer = window.setInterval(() => void fetchSnapshot(), 10_000);
+  };
+
+  try {
+    eventSource = new EventSource(url);
+    eventSource.addEventListener("put", (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as { path: string; data: unknown };
+        if (payload.path === "/") {
+          lastValues = (payload.data as Record<string, unknown>) || {};
+        } else {
+          const key = payload.path.replace(/^\//, "").split("/")[0];
+          if (key) {
+            if (payload.data === null) delete lastValues[key];
+            else lastValues[key] = payload.data;
+          }
+        }
+        publish();
+      } catch (error) {
+        onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+    eventSource.addEventListener("patch", (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as { path: string; data: Record<string, unknown> };
+        if (payload.path === "/") lastValues = { ...lastValues, ...payload.data };
+        publish();
+      } catch (error) {
+        onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+    eventSource.onerror = () => {
+      if (!closed) startPolling();
+    };
+  } catch {
+    startPolling();
   }
-  const publicMeetings = query(collection(store, "publicMeetings"), orderBy("updatedAtMs", "desc"));
-  return onSnapshot(publicMeetings, (snapshot) => {
-    const now = Date.now();
-    const freshWindowMs = 45_000;
-    const meetings = snapshot.docs
-      .map((entry) => ({ id: entry.id, ...entry.data() }) as PublicMeetingRecord)
-      .filter((meeting) => meeting.visibility === "public" && now - Number(meeting.updatedAtMs || 0) <= freshWindowMs);
-    onMeetings(meetings);
-  }, (error) => onError?.(error));
+
+  void fetchSnapshot();
+  const freshnessTimer = window.setInterval(publish, 5000);
+
+  return () => {
+    closed = true;
+    eventSource?.close();
+    window.clearInterval(freshnessTimer);
+    if (pollTimer) window.clearInterval(pollTimer);
+  };
 }
 
 export function advertisePublicMeeting(options: AdvertiseMeetingOptions, onError?: (error: Error) => void): () => void {
-  const store = db();
-  if (!store) return () => undefined;
-
-  const meetingRef = doc(store, "publicMeetings", options.meetingId);
   const heartbeatMs = Math.max(5000, options.heartbeatMs || 10_000);
   let stopped = false;
 
   const publish = async () => {
     if (stopped) return;
     try {
-      await setDoc(meetingRef, {
-        title: options.title,
-        host: { id: options.hostId, name: options.hostName },
-        apiUrl: options.apiUrl,
-        signalingRoomId: options.signalingRoomId || options.meetingId,
-        visibility: options.visibility || "public",
-        participantCount: options.participantCount || 1,
-        updatedAt: serverTimestamp(),
-        updatedAtMs: Date.now()
-      }, { merge: true });
+      const response = await fetch(pathUrl(meetingPath(options.meetingId)), {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: options.title,
+          host: { id: options.hostId, name: options.hostName },
+          apiUrl: options.apiUrl,
+          signalingRoomId: options.signalingRoomId || options.meetingId,
+          visibility: options.visibility || "public",
+          participantCount: options.participantCount || 1,
+          updatedAtMs: Date.now()
+        })
+      });
+      if (!response.ok) throw new Error(`Firebase advertisement failed: ${response.status}`);
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error(String(error)));
     }
@@ -100,6 +182,6 @@ export function advertisePublicMeeting(options: AdvertiseMeetingOptions, onError
   return () => {
     stopped = true;
     window.clearInterval(timer);
-    void deleteDoc(meetingRef).catch((error) => onError?.(error instanceof Error ? error : new Error(String(error))));
+    void fetch(pathUrl(meetingPath(options.meetingId)), { method: "DELETE" }).catch((error) => onError?.(error instanceof Error ? error : new Error(String(error))));
   };
 }
