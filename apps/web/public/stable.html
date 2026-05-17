@@ -338,6 +338,11 @@
       const signalsUrl = firebasePathUrl(`signalingRooms/${roomKey}/signals`);
       const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
+      async function clearSignals() {
+        await fetch(signalsUrl, { method: "DELETE" }).catch(() => undefined);
+        seenSignals.clear();
+      }
+
       async function publish(signal) {
         const response = await fetch(signalsUrl, {
           method: "POST",
@@ -521,6 +526,7 @@
         if (signal.type === "hello") {
           if (!host) return;
           const state = getOrCreatePeer(signal.from);
+          if (state.pc.signalingState !== "stable") return;
           const offer = await state.pc.createOffer();
           await state.pc.setLocalDescription(offer);
           await publish({ type: "offer", roomId, from: self, to: signal.from.id, sdp: offer });
@@ -558,6 +564,7 @@
 
       return {
         async start() {
+          if (host) await clearSignals();
           subscribe();
           pollTimer = window.setInterval(() => void fetchSignals().catch(() => undefined), 2000);
           await fetchSignals().catch(() => undefined);
