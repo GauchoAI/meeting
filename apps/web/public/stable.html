@@ -56,7 +56,8 @@
     const pageParams = new URLSearchParams(window.location.search);
     const requestedApi = pageParams.get("api") || pageParams.get("meetingApi");
     if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
-    const api = requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`;
+    const peerOnly = pageParams.get("peerOnly") === "1" || pageParams.get("guest") === "1";
+    const api = peerOnly ? "" : (requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`);
     const meetingId = pageParams.get("meeting") || localStorage.getItem("meeting.id") || "local-demo";
     const autoJoinKey = "meeting.stable.autoJoin";
     const legacyAutoJoinKey = "meeting.autoJoin";
@@ -77,8 +78,10 @@
     const captureModeSelect = document.getElementById("captureMode");
     const remoteAudio = document.getElementById("remoteAudio");
     const uiFrame = document.getElementById("ui");
-    const embeddedParams = new URLSearchParams({ embedded: "1", api, meeting: meetingId });
-    for (const key of ["advertise", "host", "title", "hostName"]) {
+    const embeddedParams = new URLSearchParams({ embedded: "1", meeting: meetingId });
+    if (api) embeddedParams.set("api", api);
+    if (peerOnly) embeddedParams.set("peerOnly", "1");
+    for (const key of ["advertise", "host", "title", "hostName", "name"]) {
       const value = pageParams.get(key);
       if (value) embeddedParams.set(key, value);
     }
@@ -194,7 +197,7 @@
     }).catch((error) => {
       void postRealtimeTrace("error", "Speech provider status failed", { error: error?.message || String(error) });
     });
-    connectEventStream();
+    if (!peerOnly) connectEventStream();
     if (sessionStorage.getItem(autoJoinKey) === "true" || sessionStorage.getItem(legacyAutoJoinKey) === "true") {
       void join().catch((error) => {
         console.warn("stable shell auto-join failed", error);
@@ -210,25 +213,25 @@
         if (usesRealtimeVoice()) ensureRealtimeConnected("join requested while already joined");
         return;
       }
-      await loadSpeechStatus().catch(() => undefined);
+      if (!peerOnly) await loadSpeechStatus().catch(() => undefined);
       localStream = await getMeetingMediaStream();
       joined = true;
-      realtimeDesired = usesRealtimeVoice();
+      realtimeDesired = !peerOnly && usesRealtimeVoice();
       sessionStorage.setItem(autoJoinKey, "true");
       sessionStorage.setItem(legacyAutoJoinKey, "true");
       joinButton.hidden = true;
       leaveButton.hidden = false;
       muteButton.disabled = false;
       speakButton.disabled = true;
-      renderStatus(usesRealtimeVoice() ? "voice agent connecting" : "local voice listening", "ready");
+      renderStatus(peerOnly ? "guest peer connected; waiting for host" : (usesRealtimeVoice() ? "voice agent connecting" : "local voice listening"), "ready");
       publishShellState();
       startHumanPeerRoom(localStream);
-      if (usesLocalStt()) startLocalSttCapture(localStream);
-      if (usesRealtimeVoice()) {
+      if (!peerOnly && usesLocalStt()) startLocalSttCapture(localStream);
+      if (!peerOnly && usesRealtimeVoice()) {
         void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", { voiceMode, speechProvider });
         connectRealtimeAgent(localStream);
       } else {
-        void postRealtimeTrace("agent", "Stable shell joined meeting with local voice mode", { voiceMode, speechProvider });
+        void postRealtimeTrace("agent", peerOnly ? "Stable shell joined as WebRTC guest" : "Stable shell joined meeting with local voice mode", { voiceMode, speechProvider, peerOnly });
         renderStatus();
         publishShellState();
       }
@@ -300,7 +303,7 @@
     }
 
     function isHostPeer() {
-      return pageParams.get("advertise") === "1" || pageParams.get("host") === "1";
+      return !peerOnly && (pageParams.get("advertise") === "1" || pageParams.get("host") === "1");
     }
 
     function startHumanPeerRoom(stream) {
@@ -843,6 +846,7 @@
     }
 
     async function loadSpeechStatus() {
+      if (peerOnly || !api) return { ok: true, peerOnly: true };
       const health = await fetch(`${api}/health`).then((res) => res.json());
       speechProvider = String(health?.speech?.provider || "unknown");
       localTtsProvider = String(health?.speech?.localTts?.provider || "unknown");
@@ -2561,6 +2565,7 @@
     }
 
     async function postMeetingEvent(event) {
+      if (peerOnly || !api) return;
       try {
         await fetch(`${api}/events`, {
           method: "POST",

@@ -82,7 +82,13 @@ export function MeetingLobby({ api, query }: MeetingLobbyProps) {
   }, [api, hostId, hostName, isAdvertising, meetingId, title]);
 
   function joinMeeting(meeting: PublicMeetingRecord) {
-    const params = new URLSearchParams({ api: meeting.apiUrl, meeting: meeting.id });
+    const params = new URLSearchParams({ meeting: meeting.id, peerOnly: "1", name: localStorage.getItem("meeting.peerName") || "Guest" });
+    // HTTPS Pages cannot call a plain HTTP host API because of browser mixed-content rules.
+    // In guest mode, the browser should join over WebRTC/Firebase and let the host browser
+    // forward audio to its local API/model stack.
+    if (!(window.location.protocol === "https:" && meeting.apiUrl.startsWith("http://"))) {
+      params.set("api", meeting.apiUrl);
+    }
     window.location.href = `./stable.html?${params.toString()}`;
   }
 
