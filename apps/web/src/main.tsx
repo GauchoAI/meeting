@@ -22,6 +22,8 @@ else if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
 const pagesHosted = window.location.protocol === "https:" && window.location.hostname.endsWith("github.io") && !requestedApi;
 const api = (peerOnly || pagesHosted) ? "" : (import.meta.env.VITE_MEETING_API_URL || requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`);
 const autoJoinKey = "meeting.autoJoin";
+const meetingId = query.get("meeting") || localStorage.getItem("meeting.id") || "local-demo";
+const guestCanvasStorageKey = `meeting.currentCanvas.${meetingId}`;
 const isEmbedded = query.get("embedded") === "1";
 const appearanceKey = "meeting.appearance";
 const normalizeExcalidraw = false;
@@ -79,7 +81,15 @@ const availableRealtimeTools = [
 
 function App() {
   const transcript = useMemo(() => new TranscriptBuffer(), []);
-  const [events, setEvents] = useState<MeetingEvent[]>([]);
+  const [events, setEvents] = useState<MeetingEvent[]>(() => {
+    if (!peerOnly && !pagesHosted) return [];
+    try {
+      const raw = localStorage.getItem(guestCanvasStorageKey);
+      return raw ? [JSON.parse(raw) as MeetingEvent] : [];
+    } catch {
+      return [];
+    }
+  });
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [connected, setConnected] = useState(false);
@@ -135,6 +145,9 @@ function App() {
     const onMessage = (message: MessageEvent) => {
       if (message.data?.type !== "meeting.event" || !message.data.event) return;
       const event = message.data.event as MeetingEvent;
+      if (event.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) {
+        try { localStorage.setItem(guestCanvasStorageKey, JSON.stringify(event)); } catch {}
+      }
       setEvents((current) => upsertEvent(current, event).slice(0, 100));
       transcript.apply(event);
     };

@@ -478,6 +478,7 @@
           return;
         }
         if (message?.type === "meeting.event" && !host) {
+          rememberGuestMeetingEvent(message.event);
           uiFrame.contentWindow?.postMessage({ type: "meeting.event", event: message.event }, "*");
           return;
         }
@@ -1951,6 +1952,24 @@
       const sent = peerRoom.broadcastSpeech(spoken, "host.speech");
       if (sent) void postRealtimeTrace("agent", "Broadcast host speech transcript to human peers", { peers: sent, textChars: spoken.length });
     }
+
+    function guestCanvasStorageKey() {
+      return `meeting.currentCanvas.${meetingId}`;
+    }
+
+    function rememberGuestMeetingEvent(event) {
+      if (event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) {
+        try { localStorage.setItem(guestCanvasStorageKey(), JSON.stringify(event)); } catch {}
+      }
+    }
+
+    uiFrame.addEventListener("load", () => {
+      if (!peerOnly) return;
+      try {
+        const raw = localStorage.getItem(guestCanvasStorageKey());
+        if (raw) uiFrame.contentWindow?.postMessage({ type: "meeting.event", event: JSON.parse(raw) }, "*");
+      } catch {}
+    });
 
     function base64ToBlob(base64, mimeType = "audio/mpeg") {
       const binary = window.atob(base64);
