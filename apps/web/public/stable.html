@@ -377,11 +377,9 @@
             const payload = JSON.parse(event.data || "{}");
             acceptSnapshot(payload.data || {});
           });
-          eventSource.onerror = () => {
-            if (!pollTimer && !stopped) pollTimer = window.setInterval(() => void fetchSignals().catch(() => undefined), 2000);
-          };
+          eventSource.onerror = () => void fetchSignals().catch(() => undefined);
         } catch {
-          pollTimer = window.setInterval(() => void fetchSignals().catch(() => undefined), 2000);
+          void fetchSignals().catch(() => undefined);
         }
       }
 
@@ -416,15 +414,32 @@
       function startRemotePeerTranscription(peer, remoteStream) {
         const state = peers.get(peer.id);
         if (!state || state.recorder || !remoteStream.getAudioTracks().length) return;
-        const recorder = new MediaRecorder(remoteStream);
-        state.recorder = recorder;
-        recorder.ondataavailable = (event) => {
-          if (!event.data?.size) return;
-          const stoppedAt = Date.now();
-          const startedAt = stoppedAt - 3000;
-          void sendPeerAudioChunk(event.data, peer.name || "Guest", startedAt, stoppedAt);
+        let active = true;
+        let currentRecorder = null;
+        state.recorder = { stop: () => { active = false; currentRecorder?.stop?.(); } };
+        const recordOnce = () => {
+          if (!active || stopped || !remoteStream.getAudioTracks().length) return;
+          const startedAt = Date.now();
+          const chunks = [];
+          const options = MediaRecorder.isTypeSupported?.("audio/webm;codecs=opus") ? { mimeType: "audio/webm;codecs=opus" } : undefined;
+          currentRecorder = new MediaRecorder(remoteStream, options);
+          currentRecorder.ondataavailable = (event) => {
+            if (event.data?.size) chunks.push(event.data);
+          };
+          currentRecorder.onstop = () => {
+            const stoppedAt = Date.now();
+            if (chunks.length) {
+              const blob = new Blob(chunks, { type: currentRecorder.mimeType || "audio/webm" });
+              void sendPeerAudioChunk(blob, peer.name || "Guest", startedAt, stoppedAt);
+            }
+            if (active && !stopped) window.setTimeout(recordOnce, 50);
+          };
+          currentRecorder.start();
+          window.setTimeout(() => {
+            if (currentRecorder?.state === "recording") currentRecorder.stop();
+          }, 3000);
         };
-        recorder.start(3000);
+        recordOnce();
         void postRealtimeTrace("agent", "Started guest WebRTC transcription on host", { peerId: peer.id, peerName: peer.name });
       }
 
@@ -472,6 +487,7 @@
       return {
         async start() {
           subscribe();
+          pollTimer = window.setInterval(() => void fetchSignals().catch(() => undefined), 2000);
           await fetchSignals().catch(() => undefined);
           await publish({ type: "hello", roomId, from: self });
           void postRealtimeTrace("agent", host ? "Hosting human WebRTC room" : "Joined human WebRTC room as guest", { roomId, peerId: self.id, peerName: self.name });
