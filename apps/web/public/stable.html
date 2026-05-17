@@ -77,7 +77,11 @@
     const captureModeSelect = document.getElementById("captureMode");
     const remoteAudio = document.getElementById("remoteAudio");
     const uiFrame = document.getElementById("ui");
-    const embeddedParams = new URLSearchParams({ embedded: "1", api });
+    const embeddedParams = new URLSearchParams({ embedded: "1", api, meeting: meetingId });
+    for (const key of ["advertise", "host", "title", "hostName"]) {
+      const value = pageParams.get(key);
+      if (value) embeddedParams.set(key, value);
+    }
     uiFrame.src = `./?${embeddedParams.toString()}`;
 
     let localStream = null;

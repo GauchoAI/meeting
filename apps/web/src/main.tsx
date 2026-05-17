@@ -10,6 +10,7 @@ import { RoughGenerator } from "roughjs/bin/generator";
 // @ts-expect-error TypeScript does not attach declarations to this dotted filename.
 import { markdownToHtml } from "./markdown2.html.js";
 import { decideRealtimeWake, realtimeActivationLabel, shouldCreateRealtimeResponse, type RealtimeActivationMode } from "./realtime-sleep.js";
+import { MeetingAdvertiser, MeetingLobby } from "./meeting-lobby.js";
 import "./styles.css";
 
 const query = new URLSearchParams(window.location.search);
@@ -1267,6 +1268,8 @@ function App() {
           )}
         </aside>
       )}
+
+      {isEmbedded ? <MeetingAdvertiser api={api} query={query} /> : <MeetingLobby api={api} query={query} />}
 
       {terminalOpen && (
         <aside className="floatingPanel terminalPanel">

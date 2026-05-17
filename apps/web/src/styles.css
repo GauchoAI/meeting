@@ -1036,3 +1036,88 @@ article.partial { opacity: 0.65; }
   .videoGrid { grid-template-columns: 1fr; }
   .tile.primary { grid-row: span 1; }
 }
+
+.meetingLobby {
+  position: absolute;
+  top: 64px;
+  left: 18px;
+  z-index: 25;
+  width: min(520px, calc(100vw - 36px));
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  backdrop-filter: blur(16px);
+}
+.meetingLobbyHeader {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.meetingLobby h1,
+.meetingLobby h2,
+.meetingLobby p { margin: 0; }
+.meetingLobby h1 { font-size: 24px; line-height: 1.05; }
+.meetingLobby h2 { font-size: 17px; }
+.meetingLobby p { color: var(--muted); margin-top: 6px; }
+.meetingLobby .eyebrow {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.lobbyBadge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+.lobbyBadge.live {
+  border-color: rgba(var(--accent-rgb), .7);
+  color: var(--accent);
+}
+.lobbyNotice,
+.emptyLobby,
+.hostCard,
+.meetingCard,
+.hostHelp {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel2);
+  margin-top: 12px;
+  padding: 12px;
+}
+.lobbyNotice.error { border-color: var(--bad); color: var(--bad); }
+.hostCard {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+}
+.hostCard strong { color: var(--ink); }
+.hostCard small { margin-top: 4px; }
+.lobbyGrid {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.meetingCard {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.meetingCard small { color: var(--muted); display: block; margin-top: 6px; }
+.emptyLobby { color: var(--muted); }
+.hostHelp code {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

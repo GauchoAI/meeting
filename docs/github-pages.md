@@ -34,14 +34,47 @@ Example:
 http://192.168.0.48:5175/stable.html
 ```
 
+## Public lobby
+
+The root Pages app shows an online meeting lobby when Firebase is configured. Hosts can advertise the current meeting by opening the Pages app or stable shell with `advertise=1` and an HTTPS API URL.
+
+Example host advertisement URL:
+
+```text
+https://gauchoai.github.io/meeting/?advertise=1&api=https%3A%2F%2Fyour-api-tunnel.example&meeting=core&title=Core%20Meeting&hostName=Miguel
+```
+
+Guests can open the normal Pages URL and click the online meeting:
+
+```text
+https://gauchoai.github.io/meeting/
+```
+
+Firebase config is supplied at build time with public Vite variables:
+
+```text
+VITE_FIREBASE_API_KEY
+VITE_FIREBASE_AUTH_DOMAIN
+VITE_FIREBASE_PROJECT_ID
+VITE_FIREBASE_STORAGE_BUCKET
+VITE_FIREBASE_MESSAGING_SENDER_ID
+VITE_FIREBASE_APP_ID
+```
+
 ## Pages + hosted/tunneled API mode
 
 Because GitHub Pages is HTTPS, browsers will generally block calls from the Pages site to a plain `http://` local API as mixed content. For Pages, expose the API through HTTPS, for example with a tunnel such as Cloudflare Tunnel or ngrok.
 
-Then open:
+Then open directly:
 
 ```text
 https://gauchoai.github.io/meeting/stable.html?api=https%3A%2F%2Fyour-api-tunnel.example
+```
+
+Or advertise it in the public lobby:
+
+```text
+https://gauchoai.github.io/meeting/?advertise=1&api=https%3A%2F%2Fyour-api-tunnel.example&meeting=core&title=Core%20Meeting
 ```
 
 The `api` query parameter is saved into `localStorage` as `meeting.api`, so future reloads use the same API until changed.
