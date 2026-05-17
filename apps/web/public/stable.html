@@ -1611,6 +1611,8 @@
         const params = new URLSearchParams({
           extension,
           speaker: speakerLabel || "Guest",
+          speakerId: `guest-${String(speakerLabel || "guest").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "speaker"}`,
+          meetingId,
           client: "stable-webrtc-peer-v1"
         });
         if (clientStartedAt) params.set("clientStartedAt", String(clientStartedAt));

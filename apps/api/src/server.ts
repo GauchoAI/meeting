@@ -89,6 +89,8 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/audio/chunk") {
     const extension = url.searchParams.get("extension") || "webm";
     const speakerLabel = url.searchParams.get("speaker") || "Host";
+    const audioMeetingId = url.searchParams.get("meetingId") || meetingId;
+    const speakerId = url.searchParams.get("speakerId") || (speakerLabel.toLowerCase() === "host" ? "host" : `guest-${speakerLabel.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "speaker"}`);
     const client = url.searchParams.get("client") || "";
     const clientStartedAt = Number(url.searchParams.get("clientStartedAt") || 0) || undefined;
     const clientStoppedAt = Number(url.searchParams.get("clientStoppedAt") || 0) || undefined;
@@ -125,9 +127,9 @@ const server = createServer(async (req, res) => {
           id: newEventId("utt"),
           type: "utterance.final",
           stream: "conversation",
-          meetingId,
+          meetingId: audioMeetingId,
           createdAt: nowIso(),
-          speakerId: "host",
+          speakerId,
           speakerLabel,
           text: result.text,
           startMs,
@@ -147,7 +149,7 @@ const server = createServer(async (req, res) => {
       appendEvent({
         id: newEventId("sys"),
         type: "system",
-        meetingId,
+        meetingId: audioMeetingId,
         createdAt: nowIso(),
         level: "warn",
         text: `Local STT transcription failed: ${message}`
@@ -162,7 +164,7 @@ function shouldIgnoreLegacyAudioChunk(client: string): boolean {
   if (process.env.MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS === "true") return false;
   const provider = selectedSttProvider();
   if (provider !== "local-whisper" && provider !== "voxtral-http" && provider !== "moshi-http" && provider !== "parakeet-http") return false;
-  return client !== "stable-vad-v1";
+  return client !== "stable-vad-v1" && client !== "stable-webrtc-peer-v1";
 }
 
 server.listen(port, () => {
