@@ -46,6 +46,7 @@
     <button id="join">Join meeting</button>
     <button id="mute" class="secondary" disabled>Mute agent</button>
     <button id="sleep" class="secondary" disabled>Sleep until prompted</button>
+    <button id="enableAudio" class="secondary" hidden>Enable guest audio</button>
     <button id="speak" class="speak" disabled hidden>Hold Space to speak</button>
     <button id="leave" class="secondary" hidden>Leave</button>
   </div>
@@ -75,6 +76,7 @@
     const leaveButton = document.getElementById("leave");
     const muteButton = document.getElementById("mute");
     const sleepButton = document.getElementById("sleep");
+    const enableAudioButton = document.getElementById("enableAudio");
     const speakButton = document.getElementById("speak");
     const voiceModeSelect = document.getElementById("voiceMode");
     const captureModeSelect = document.getElementById("captureMode");
@@ -102,6 +104,7 @@
     let realtimeResponseMode = "speak";
     let realtimeActivationMode = "active";
     let lastRealtimeWakeAt = 0;
+    let peerAudioUnlocked = false;
     let realtimeReconnectTimer = null;
     let realtimeReconnectAttempt = 0;
     let localTtsProvider = "unknown";
@@ -146,6 +149,8 @@
     let peerRoom = null;
     const transcriptDraftIds = new Map();
     const transcriptDraftText = new Map();
+
+    enableAudioButton.addEventListener("click", () => unlockPeerAudio(true));
 
     joinButton.addEventListener("click", () => join().catch((error) => {
       console.warn(error);
@@ -224,6 +229,7 @@
       joinButton.hidden = true;
       leaveButton.hidden = false;
       muteButton.disabled = false;
+      enableAudioButton.hidden = !peerOnly;
       speakButton.disabled = true;
       renderStatus(peerOnly ? "guest peer connected; waiting for host" : (usesRealtimeVoice() ? "voice agent connecting" : "local voice listening"), "ready");
       publishShellState();
@@ -270,6 +276,7 @@
       joinButton.hidden = false;
       leaveButton.hidden = true;
       muteButton.disabled = true;
+      enableAudioButton.hidden = true;
       renderStatus("stable shell idle", "idle");
       publishShellState();
       void postRealtimeTrace("agent", "Stable shell left meeting", undefined);
@@ -1831,9 +1838,27 @@
       if (sent) void postRealtimeTrace("agent", "Broadcast host speech transcript to human peers", { peers: sent, textChars: spoken.length });
     }
 
+    function unlockPeerAudio(withTest = false) {
+      peerAudioUnlocked = true;
+      enableAudioButton.hidden = true;
+      try {
+        window.speechSynthesis?.resume?.();
+        if (withTest && window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance("Guest audio enabled.");
+          utterance.lang = "en-US";
+          window.speechSynthesis.speak(utterance);
+        }
+      } catch {}
+      void postRealtimeTrace("agent", "Guest audio output unlocked", { withTest });
+    }
+
     function speakPeerAssistantText(text) {
       const spoken = sanitizeSpokenText(String(text || "")).trim();
       if (!spoken || !window.speechSynthesis) return;
+      if (!peerAudioUnlocked && peerOnly) {
+        enableAudioButton.hidden = false;
+        void postRealtimeTrace("debug", "Guest speech relay waiting for audio unlock", { textChars: spoken.length });
+      }
       try {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(clipText(spoken, 700));
