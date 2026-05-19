@@ -44,6 +44,8 @@ const runLocalVadTick = section("runLocalVadTick");
 const sendMeetingAudioChunk = section("sendMeetingAudioChunk");
 const sendPeerAudioChunk = section("sendPeerAudioChunk");
 const sendAudioChunk = section("sendAudioChunk");
+const setSelfMuted = section("setSelfMuted");
+const applySelfMutedToLocalTracks = section("applySelfMutedToLocalTracks");
 
 // Guest playback must remain the stable relay path. Past guest barge-in attempts broke this.
 assert(!source.includes("peerAssistantAudios"), "guest assistant audio registry must not be enabled by default");
@@ -55,6 +57,8 @@ assert(sendPeerAudioChunk.includes("sendMeetingAudioChunk({"), "guest STT upload
 assert(sendPeerAudioChunk.includes('client: "stable-webrtc-peer-v1"'), "guest STT upload should keep the stable WebRTC client id");
 
 // Local host barge-in should be available independent of push-to-talk/auto-vad mode.
+assert(source.includes('return localStorage.getItem("meeting.localCaptureMode") === "push-to-talk" ? "push-to-talk" : "auto-vad";'), "hands-free VAD should be the implicit local capture default");
+assert(source.includes('localStorage.setItem("meeting.localCaptureMode", "push-to-talk");'), "push-to-talk should persist as an explicit override");
 assert(localAcousticBargeInEnabled.includes('if (configured === "false") return false;'), "local acoustic barge-in should keep opt-out");
 assert(localAcousticBargeInEnabled.includes("return true;"), "local acoustic barge-in should default on");
 assert(source.includes("function localBargeInGraceMs() {\n      return 0;\n    }"), "local barge-in should have no startup grace delay");
@@ -69,6 +73,11 @@ assert(interruptLocalSpeechForBargeIn.includes("localSttDiscardCurrentChunk = fa
 assert(interruptLocalSpeechForBargeIn.includes("local voice interrupted; recording"), "interrupt status should say recording");
 assert(sendAudioChunk.includes("sendMeetingAudioChunk({"), "host STT upload should use the shared audio chunk sender");
 assert(sendAudioChunk.includes('client: "stable-vad-v1"'), "host STT upload should keep the stable local VAD client id");
+assert(source.includes('id="selfMute"'), "stable shell should expose a self-mute control");
+assert(setSelfMuted.includes("stopLocalSttCapture({ suppressUploads: true, suppressMs: 800 });"), "self-mute should stop local STT capture");
+assert(setSelfMuted.includes("startLocalSttCapture(localStream);"), "self-unmute should restart local STT capture");
+assert(applySelfMutedToLocalTracks.includes("track.enabled = !selfMuted"), "self-mute should disable the local browser mic track");
+assert(source.includes("if (selfMuted) return;"), "relay mic auto-unmute should not override self-mute");
 
 // Perceived latency depends on browser speech-stop timestamps and first playback traces.
 assert(source.includes("_meetingStoppedAt = Date.now();"), "host recorder should capture the speech-stop timestamp");

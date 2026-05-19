@@ -45,6 +45,7 @@
     </select>
     <button id="join">Join meeting</button>
     <button id="mute" class="secondary" disabled>Mute agent</button>
+    <button id="selfMute" class="secondary" disabled>Mute self</button>
     <button id="sleep" class="secondary" disabled>Sleep until prompted</button>
     <button id="enableAudio" class="secondary" hidden>Enable guest audio</button>
     <button id="speak" class="speak" disabled hidden>Hold Space to speak</button>
@@ -75,6 +76,7 @@
     const joinButton = document.getElementById("join");
     const leaveButton = document.getElementById("leave");
     const muteButton = document.getElementById("mute");
+    const selfMuteButton = document.getElementById("selfMute");
     const sleepButton = document.getElementById("sleep");
     const enableAudioButton = document.getElementById("enableAudio");
     const speakButton = document.getElementById("speak");
@@ -102,6 +104,7 @@
     let realtimeState = "idle";
     let realtimeDesired = usesRealtimeVoice();
     let realtimeMuted = false;
+    let selfMuted = pageParams.get("selfMuted") === "1" || sessionStorage.getItem("meeting.selfMuted") === "true";
     let realtimeResponseMode = "speak";
     let realtimeActivationMode = "active";
     let lastRealtimeWakeAt = 0;
@@ -160,6 +163,7 @@
     }));
     leaveButton.addEventListener("click", leave);
     muteButton.addEventListener("click", () => setRealtimeAgentMuted(!realtimeMuted));
+    selfMuteButton.addEventListener("click", () => setSelfMuted(!selfMuted));
     sleepButton.addEventListener("click", () => setRealtimeAgentActivationMode(realtimeActivationMode === "sleeping" ? "active" : "sleeping", "stable shell toggle"));
     voiceModeSelect.addEventListener("change", () => {
       voiceModeManuallySelected = true;
@@ -230,17 +234,19 @@
       joinButton.hidden = true;
       leaveButton.hidden = false;
       muteButton.disabled = false;
+      selfMuteButton.disabled = false;
       enableAudioButton.hidden = !peerOnly;
       speakButton.disabled = true;
+      applySelfMutedToLocalTracks();
       renderStatus(peerOnly ? "guest peer connected; waiting for host" : (usesRealtimeVoice() ? "voice agent connecting" : "local voice listening"), "ready");
       publishShellState();
       startHumanPeerRoom(localStream);
-      if (!peerOnly && usesLocalStt()) startLocalSttCapture(localStream);
+      if (!peerOnly && usesLocalStt() && !selfMuted) startLocalSttCapture(localStream);
       if (!peerOnly && usesRealtimeVoice()) {
         void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", { voiceMode, speechProvider });
         connectRealtimeAgent(localStream);
       } else {
-        void postRealtimeTrace("agent", peerOnly ? "Stable shell joined as WebRTC guest" : "Stable shell joined meeting with local voice mode", { voiceMode, speechProvider, peerOnly });
+        void postRealtimeTrace("agent", peerOnly ? "Stable shell joined as WebRTC guest" : "Stable shell joined meeting with local voice mode", { voiceMode, captureMode: localCaptureMode(), speechProvider, peerOnly });
         renderStatus();
         publishShellState();
       }
@@ -277,6 +283,7 @@
       joinButton.hidden = false;
       leaveButton.hidden = true;
       muteButton.disabled = true;
+      selfMuteButton.disabled = true;
       enableAudioButton.hidden = true;
       renderStatus("stable shell idle", "idle");
       publishShellState();
@@ -353,6 +360,7 @@
         for (const track of stream.getAudioTracks?.() || []) track.enabled = false;
         window.setTimeout(() => {
           if (Date.now() < localMicMutedForRelayUntil) return;
+          if (selfMuted) return;
           for (const track of stream.getAudioTracks?.() || []) track.enabled = true;
           void postRealtimeTrace("debug", "Guest mic unmuted after relay speech");
         }, ms + 150);
@@ -1152,6 +1160,31 @@
       publishShellState();
     }
 
+    function setSelfMuted(muted) {
+      selfMuted = Boolean(muted);
+      if (selfMuted) sessionStorage.setItem("meeting.selfMuted", "true");
+      else sessionStorage.removeItem("meeting.selfMuted");
+      if (selfMuted) {
+        stopLocalPushToTalk({ discard: true });
+        stopLocalSttCapture({ suppressUploads: true, suppressMs: 800 });
+      } else if (joined && !peerOnly && usesLocalStt() && localStream) {
+        startLocalSttCapture(localStream);
+      }
+      applySelfMutedToLocalTracks();
+      void postRealtimeTrace("agent", selfMuted ? "Self mic muted in stable shell" : "Self mic unmuted in stable shell", {
+        localSttActive,
+        peerOnly,
+        voiceMode,
+        captureMode: localCaptureMode()
+      });
+      renderStatus();
+      publishShellState();
+    }
+
+    function applySelfMutedToLocalTracks() {
+      for (const track of localStream?.getAudioTracks?.() || []) track.enabled = !selfMuted;
+    }
+
     function setRealtimeAgentActivationMode(mode, reason = "manual") {
       realtimeActivationMode = mode === "sleeping" ? "sleeping" : "active";
       if (realtimeActivationMode === "sleeping") {
@@ -1496,13 +1529,14 @@
     }
 
     function startLocalSttCapture(stream) {
+      if (selfMuted) return;
       if (localSttActive) return;
       const audioTracks = stream?.getAudioTracks?.() || [];
       if (!audioTracks.length) return;
       localSttStream = new MediaStream(audioTracks);
       localSttActive = true;
       startLocalVadLoop();
-      void postRealtimeTrace("agent", "Local STT capture started in stable shell", { provider: speechProvider, voiceMode });
+      void postRealtimeTrace("agent", "Local STT capture started in stable shell", { provider: speechProvider, voiceMode, captureMode: localCaptureMode() });
       renderStatus();
       publishShellState();
     }
@@ -1801,7 +1835,7 @@
     }
 
     function localCaptureMode() {
-      return localStorage.getItem("meeting.localCaptureMode") === "auto-vad" ? "auto-vad" : "push-to-talk";
+      return localStorage.getItem("meeting.localCaptureMode") === "push-to-talk" ? "push-to-talk" : "auto-vad";
     }
 
     function setLocalCaptureMode(mode) {
@@ -1812,7 +1846,7 @@
         if (joined && localStream && usesLocalStt() && !localSttActive) startLocalSttCapture(localStream);
         renderStatus("hands-free listening enabled", "ready");
       } else {
-        localStorage.removeItem("meeting.localCaptureMode");
+        localStorage.setItem("meeting.localCaptureMode", "push-to-talk");
         if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
         renderStatus("hold Space to speak", "ready");
       }
@@ -2943,12 +2977,13 @@
       } else if (!joined) {
         statusEl.textContent = "stable shell idle";
       } else if (!usesRealtimeVoice()) {
-        if (localPushToTalkActive) statusEl.textContent = `${speechProviderLabel()} recording; release Space to send`;
+        if (selfMuted) statusEl.textContent = `${speechProviderLabel()} self muted`;
+        else if (localPushToTalkActive) statusEl.textContent = `${speechProviderLabel()} recording; release Space to send`;
         else statusEl.textContent = localCaptureMode() === "push-to-talk"
           ? `${speechProviderLabel()} ready (hold Space to speak)`
           : `${speechProviderLabel()} listening (${localSttActive ? "local STT active" : "local STT idle"})`;
       } else if (realtimeState === "connected") {
-        statusEl.textContent = `voice agent live (${voiceMode === "hybrid" ? `${speechProviderLabel()} + ` : ""}${realtimeMuted ? "muted listener" : "audio responder"}, ${realtimeActivationLabel()})`;
+        statusEl.textContent = `voice agent live (${selfMuted ? "self muted, " : ""}${voiceMode === "hybrid" ? `${speechProviderLabel()} + ` : ""}${realtimeMuted ? "muted listener" : "audio responder"}, ${realtimeActivationLabel()})`;
       } else if (realtimeState === "connecting") {
         statusEl.textContent = "voice agent connecting";
       } else {
@@ -2958,6 +2993,8 @@
       dotEl.className = `dot ${state === "ready" ? "ready" : state === "speaking" ? "speaking" : ""}`;
       muteButton.textContent = realtimeMuted ? "Unmute agent" : "Mute agent";
       muteButton.disabled = !joined;
+      selfMuteButton.textContent = selfMuted ? "Unmute self" : "Mute self";
+      selfMuteButton.disabled = !joined;
       sleepButton.textContent = realtimeActivationMode === "sleeping" ? "Wake agent" : "Sleep until prompted";
       sleepButton.disabled = !joined || !usesRealtimeVoice();
       speakButton.hidden = !joined || !usesLocalStt() || localCaptureMode() !== "push-to-talk";
@@ -2978,6 +3015,7 @@
         realtimeMuted,
         realtimeResponseMode,
         realtimeActivationMode,
+        selfMuted,
         voiceMode,
         captureMode: localCaptureMode(),
         localSttActive,

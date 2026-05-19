@@ -5,7 +5,7 @@ The reliable voice architecture is: browser capture sends explicit speech turns,
 ## Runtime Shape
 
 - The stable shell at `http://localhost:5175/stable.html` owns mic capture and speech output so the meeting UI can hot reload without dropping voice state.
-- Local capture defaults to push-to-talk: hold Space while speaking, release Space to send one clip to Whisper.
+- Local capture defaults to hands-free VAD so the host can speak normally after joining. `Hold Space` remains available from the capture selector for explicit push-to-talk turns.
 - The API receives only stable-shell chunks with `client=stable-vad-v1`; legacy chunks are ignored for local providers unless `MEETING_ACCEPT_LEGACY_AUDIO_CHUNKS=true`.
 - `STT_PROVIDER=parakeet-http` is the current committed local default. `local-whisper`, `voxtral-http`, and `moshi-http` are still available for explicit tests.
 - Local STT providers keep OpenAI Realtime disabled by default. Set `MEETING_ALLOW_OPENAI_REALTIME=true` only for explicit paid realtime tests.
@@ -52,14 +52,16 @@ PARAKEET_STT_URL=http://127.0.0.1:8793/transcribe
 
 ## Capture Mode
 
-The default local capture mode is explicit push-to-talk. This is more reliable than acoustic VAD while tuning because it avoids sending tiny or badly cut chunks to the selected local STT provider.
+The default local capture mode is `Hands-free`, which enables automatic VAD capture so the host can speak without holding Space. This is the natural conversation mode, but it is more sensitive to room noise, laptop speaker echo, and silence-threshold tuning.
 
-The stable shell also exposes `Hands-free`, which enables automatic VAD capture so the host can speak without holding Space. This is the natural conversation mode, but it is more sensitive to room noise, laptop speaker echo, and silence-threshold tuning.
+The stable shell also exposes `Hold Space` for explicit push-to-talk. Use it when room noise makes VAD unreliable or when you want one manually bounded utterance.
 
 Use the capture selector in the stable-shell toolbar:
 
 - `Hold Space`: press and hold Space while speaking, then release to send one clip.
 - `Hands-free`: local VAD starts recording when the mic level crosses the speech threshold and sends the clip after sustained silence. The default silence window is 1600 ms so short thinking pauses are less likely to make the agent answer over the host.
+
+Use `Mute self` when the local host shell should stay connected but should not use this browser's microphone. This is useful when you also join from the GitHub Pages peer URL and want that page to be the active listen/speak surface. `Mute self` disables this tab's mic track and stops local STT capture without muting the agent or disconnecting the human peer room.
 
 The selector persists in local storage. The equivalent console command is:
 
@@ -68,6 +70,12 @@ localStorage.setItem("meeting.localCaptureMode", "auto-vad")
 ```
 
 To return to push-to-talk from the console:
+
+```js
+localStorage.setItem("meeting.localCaptureMode", "push-to-talk")
+```
+
+To return to the hands-free default, remove the override:
 
 ```js
 localStorage.removeItem("meeting.localCaptureMode")

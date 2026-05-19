@@ -53,6 +53,10 @@ assert.match(main, /shouldCreateRealtimeResponse\(\{ mode: activationMode, muted
 assert.match(stable, /meeting:realtime:activation/, "stable shell accepts sleep\/wake command from embedded UI");
 assert.match(stable, /create_response: shouldCreateRealtimeResponse\(\)/, "stable shell disables auto responses while sleeping");
 assert.match(stable, /handleSleepingRealtimeTurn/, "stable shell handles VAD wake gate");
+assert.match(stable, /id="selfMute"/, "stable shell exposes a separate self-mute button");
+assert.match(stable, /function setSelfMuted/, "stable shell can mute local microphone input without muting the agent");
+assert.match(stable, /stopLocalSttCapture\(\{ suppressUploads: true, suppressMs: 800 \}\)/, "self-mute stops local STT capture");
+assert.match(stable, /track\.enabled = !selfMuted/, "self-mute disables the local browser mic track");
 assert.match(stable, /function enqueueLocalVoiceSegments/, "stable shell chunks full local voice messages instead of clipping them");
 assert.match(stable, /enqueueLocalVoiceSegments\(message, \{ clearExisting: direct \}\)/, "direct Pi voice messages use segmented local TTS");
 assert.doesNotMatch(stable, /clipText\(envelope\.message[^)]*,\s*360\)/, "direct Pi voice messages are not capped at 360 chars");
@@ -60,6 +64,8 @@ assert.match(stable, /\(\?=\[A-Z0-9_\]\*\(\?:\[_0-9\]\|=\)\)/, "spoken acronym s
 assert.match(stable, /id="captureMode"/, "stable shell exposes the local capture mode selector");
 assert.match(stable, /value="auto-vad">Hands-free/, "stable shell exposes hands-free local VAD capture");
 assert.match(stable, /setLocalCaptureMode/, "stable shell persists capture-mode changes");
+assert.match(stable, /localStorage\.getItem\("meeting\.localCaptureMode"\) === "push-to-talk" \? "push-to-talk" : "auto-vad"/, "hands-free capture is the default local mode");
+assert.match(stable, /localStorage\.setItem\("meeting\.localCaptureMode", "push-to-talk"\)/, "push-to-talk is stored explicitly instead of being the implicit default");
 assert.match(stable, /if \(configured === "false"\) return false;\s*return true;/, "local acoustic barge-in defaults on with opt-out");
 assert.match(stable, /localCaptureMode\(\) === "auto-vad" \? 1600 : 900/, "hands-free capture waits longer before closing a spoken turn");
 assert.match(stable, /waitForLocalSpeechPlaybackTurn/, "local TTS waits for the host turn before playback");
