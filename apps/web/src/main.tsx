@@ -54,9 +54,13 @@ type MeetingStream = "conversation" | "implementation";
 type AgentRequestedMode = AgentHandRaiseEvent["requestedMode"];
 
 function isPersistableCanvasEvent(event: MeetingEvent): event is AgentMessageEvent {
-  return event.type === "agent.message"
-    && event.surface === "canvas"
-    && String(event.text || "").trim().length > 0;
+  if (event.type !== "agent.message" || event.surface !== "canvas") return false;
+  const text = String(event.text || "");
+  return text.trim().length > 0 && !hasBrokenArtifactAssetReferences(text);
+}
+
+function hasBrokenArtifactAssetReferences(text: string): boolean {
+  return /!\[[^\]]*\]\((?:\.\/)?assets\//.test(text);
 }
 
 function loadStoredCanvasEvent(): MeetingEvent[] {

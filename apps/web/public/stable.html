@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.1.2";
+    const MEETING_STABLE_VERSION = "0.1.3";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -2074,8 +2074,19 @@
       return `meeting.currentCanvas.${meetingId}`;
     }
 
+    function hasBrokenArtifactAssetReferences(text) {
+      return /!\[[^\]]*\]\((?:\.\/)?assets\//.test(String(text || ""));
+    }
+
+    function isPersistableGuestCanvasEvent(event) {
+      return event?.type === "agent.message"
+        && event.surface === "canvas"
+        && String(event.text || "").trim()
+        && !hasBrokenArtifactAssetReferences(event.text);
+    }
+
     function rememberGuestMeetingEvent(event) {
-      if (event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) {
+      if (isPersistableGuestCanvasEvent(event)) {
         try { localStorage.setItem(guestCanvasStorageKey(), JSON.stringify(event)); } catch {}
       }
     }
@@ -2084,7 +2095,10 @@
       if (!peerOnly) return;
       try {
         const raw = localStorage.getItem(guestCanvasStorageKey());
-        if (raw) uiFrame.contentWindow?.postMessage({ type: "meeting.event", event: JSON.parse(raw) }, "*");
+        if (!raw) return;
+        const event = JSON.parse(raw);
+        if (isPersistableGuestCanvasEvent(event)) uiFrame.contentWindow?.postMessage({ type: "meeting.event", event }, "*");
+        else localStorage.removeItem(guestCanvasStorageKey());
       } catch {}
     });
 
