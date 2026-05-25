@@ -37,7 +37,7 @@ Current defaults:
 ```text
 artifact.render  -> openai-codex/gpt-5.3-codex-spark:low
 artifact.edit    -> openai-codex/gpt-5.3-codex-spark:low
-conversation     -> openai-codex/gpt-5.5:medium
+conversation     -> openai-codex/gpt-5.3-codex-spark:low
 code.change      -> openai-codex/gpt-5.5:high
 research.explore -> openai-codex/gpt-5.5:high
 critique.review  -> openai-codex/gpt-5.5:high

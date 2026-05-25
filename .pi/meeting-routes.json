@@ -20,7 +20,7 @@
     "fallback": { "provider": "anthropic", "model": "claude-sonnet-4-5", "thinking": "high" }
   },
   "conversation": {
-    "primary": { "provider": "openai-codex", "model": "gpt-5.5", "thinking": "medium" },
-    "fallback": { "provider": "anthropic", "model": "claude-sonnet-4-5", "thinking": "medium" }
+    "primary": { "provider": "openai-codex", "model": "gpt-5.3-codex-spark", "thinking": "low" },
+    "fallback": { "provider": "openai-codex", "model": "gpt-5.4-mini", "thinking": "low" }
   }
 }
