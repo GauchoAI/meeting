@@ -29,6 +29,13 @@ const appearanceKey = "meeting.appearance";
 const normalizeExcalidraw = false;
 const useNativeDiagramRenderer = true;
 const roughGenerator = new RoughGenerator({ options: { roughness: 1.15, bowing: 1.8, curveFitting: 0.95 } });
+console.info("[meeting-web] client build", {
+  mode: import.meta.env.MODE,
+  dev: import.meta.env.DEV,
+  url: import.meta.url,
+  loadedAt: new Date().toISOString()
+});
+
 const LazyExcalidraw = React.lazy(async () => {
   const module = await import("@excalidraw/excalidraw");
   return { default: module.Excalidraw };
@@ -42,6 +49,34 @@ type RealtimeState = "idle" | "connecting" | "connected";
 type RealtimeResponseMode = "silent" | "speak";
 type MeetingStream = "conversation" | "implementation";
 type AgentRequestedMode = AgentHandRaiseEvent["requestedMode"];
+
+function isPersistableCanvasEvent(event: MeetingEvent): event is AgentMessageEvent {
+  return event.type === "agent.message"
+    && event.surface === "canvas"
+    && String(event.text || "").trim().length > 0;
+}
+
+function loadStoredCanvasEvent(): MeetingEvent[] {
+  try {
+    const raw = localStorage.getItem(guestCanvasStorageKey);
+    if (!raw) return [];
+    const event = JSON.parse(raw) as MeetingEvent;
+    return isPersistableCanvasEvent(event) ? [event] : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberCanvasEvent(event: MeetingEvent): void {
+  if (!isPersistableCanvasEvent(event)) return;
+  try { localStorage.setItem(guestCanvasStorageKey, JSON.stringify(event)); } catch {}
+}
+
+function latestPersistableCanvasEvent(events: MeetingEvent[]): AgentMessageEvent | undefined {
+  return [...events]
+    .reverse()
+    .find((event): event is AgentMessageEvent => isPersistableCanvasEvent(event));
+}
 
 interface RenderSample {
   markdownMs: number;
@@ -81,15 +116,7 @@ const availableRealtimeTools = [
 
 function App() {
   const transcript = useMemo(() => new TranscriptBuffer(), []);
-  const [events, setEvents] = useState<MeetingEvent[]>(() => {
-    if (!peerOnly && !pagesHosted) return [];
-    try {
-      const raw = localStorage.getItem(guestCanvasStorageKey);
-      return raw ? [JSON.parse(raw) as MeetingEvent] : [];
-    } catch {
-      return [];
-    }
-  });
+  const [events, setEvents] = useState<MeetingEvent[]>(() => loadStoredCanvasEvent());
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [connected, setConnected] = useState(false);
@@ -145,10 +172,8 @@ function App() {
     const onMessage = (message: MessageEvent) => {
       if (message.data?.type !== "meeting.event" || !message.data.event) return;
       const event = message.data.event as MeetingEvent;
-      if (event.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) {
-        try { localStorage.setItem(guestCanvasStorageKey, JSON.stringify(event)); } catch {}
-      }
-      setEvents((current) => upsertEvent(current, event).slice(0, 100));
+      rememberCanvasEvent(event);
+      setEvents((current) => upsertEvent(current, event).slice(0, 500));
       transcript.apply(event);
     };
     window.addEventListener("message", onMessage);
@@ -164,16 +189,21 @@ function App() {
       .then((response) => response.json() as Promise<{ events: MeetingEvent[] }>)
       .then((snapshot) => {
         if (!alive) return;
-        setEvents([...snapshot.events.slice(-100)].reverse());
+        const recent = [...snapshot.events.slice(-500)].reverse();
+        const latestCanvas = latestPersistableCanvasEvent(snapshot.events);
+        if (latestCanvas) rememberCanvasEvent(latestCanvas);
+        const fallbackCanvas = latestCanvas || loadStoredCanvasEvent()[0];
+        setEvents(fallbackCanvas && !recent.some((event) => event.id === fallbackCanvas.id) ? [fallbackCanvas, ...recent].slice(0, 500) : recent);
         transcript.applyAll(snapshot.events);
         source = new EventSource(`${api}/events/stream`);
         source.addEventListener("meeting", (message) => {
           const event = JSON.parse((message as MessageEvent).data) as MeetingEvent;
-          setEvents((current) => upsertEvent(current, event).slice(0, 100));
+          rememberCanvasEvent(event);
+          setEvents((current) => upsertEvent(current, event).slice(0, 500));
           transcript.apply(event);
         });
       })
-      .catch((error) => console.warn("event stream failed", error));
+      .catch((error) => console.warn(`event stream failed (api=${api || "(empty)"})`, error));
 
     return () => {
       alive = false;
@@ -1670,8 +1700,33 @@ function MarkdownDocument({
   );
 }
 
+// Persist open/closed state for collapsible sections (.md-collapsible-section)
+// across re-renders. Keyed by summary text so two unrelated artifacts that
+// happen to share a section title (e.g. "Conversation") will share state, which
+// is the usually-desired behavior. State survives MarkdownHtml unmount/remount
+// because this Map lives at module scope.
+const collapsibleOpenState = new Map<string, boolean>();
+
+function applyAndTrackCollapsibleState(container: HTMLElement | null): () => void {
+  if (!container) return () => {};
+  const details = Array.from(container.querySelectorAll<HTMLDetailsElement>(".md-collapsible-section"));
+  const cleanups: Array<() => void> = [];
+  for (const detail of details) {
+    const summary = detail.querySelector("summary");
+    const key = summary?.textContent?.trim() || "";
+    if (!key) continue;
+    const saved = collapsibleOpenState.get(key);
+    if (saved !== undefined) detail.open = saved;
+    const handler = () => collapsibleOpenState.set(key, detail.open);
+    detail.addEventListener("toggle", handler);
+    cleanups.push(() => detail.removeEventListener("toggle", handler));
+  }
+  return () => { for (const c of cleanups) c(); };
+}
+
 function MarkdownHtml({ text, index, createdAt, assetBase, onRender }: { text: string; index: number; createdAt?: string; assetBase?: string; onRender?: (sample: RenderSample) => void }) {
   const [html, setHtml] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let alive = true;
     const started = performance.now();
@@ -1687,20 +1742,25 @@ function MarkdownHtml({ text, index, createdAt, assetBase, onRender }: { text: s
     });
     return () => { alive = false; };
   }, [text, createdAt, assetBase, onRender]);
+  useEffect(() => applyAndTrackCollapsibleState(containerRef.current), [html]);
   if (!text.trim()) return null;
-  return <div className="markdown" data-inspect-markdown={index} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div ref={containerRef} className="markdown" data-inspect-markdown={index} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 function resolveAssetBase(documentId: string | undefined, params: URLSearchParams): string | undefined {
   const explicit = params.get("assetBase");
-  if (explicit) return explicit;
-  if (!documentId) return undefined;
+  if (isAbsoluteUrl(explicit)) return explicit;
+  if (!documentId || !isAbsoluteUrl(api)) return undefined;
   const normalized = documentId.replace(/\\/g, "/");
   const artifactIndex = normalized.indexOf("artifacts/");
   if (artifactIndex < 0) return undefined;
   const relative = normalized.slice(artifactIndex + "artifacts/".length);
   const dir = relative.includes("/") ? relative.slice(0, relative.lastIndexOf("/") + 1) : "";
   return `${api}/artifacts/${dir}`;
+}
+
+function isAbsoluteUrl(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
 function prepareMarkdownHtml(html: string, assetBase: string | undefined): string {
@@ -1710,7 +1770,7 @@ function prepareMarkdownHtml(html: string, assetBase: string | undefined): strin
   for (const [index, image] of Array.from(doc.querySelectorAll("img")).entries()) {
     image.setAttribute("data-inspect-image", String(index));
     const src = image.getAttribute("src") || "";
-    if (!assetBase) continue;
+    if (!assetBase || !isAbsoluteUrl(assetBase)) continue;
     if (!src.startsWith("./") && !src.startsWith("../")) continue;
     const resolved = new URL(src, assetBase.endsWith("/") ? assetBase : `${assetBase}/`);
     image.setAttribute("src", resolved.toString());
@@ -3256,4 +3316,12 @@ function isEditableElement(target: EventTarget | null): boolean {
   return tag === "input" || tag === "textarea" || target.isContentEditable;
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+// HMR-safe: vite re-executes this module on hot updates. Caching the root on
+// the container itself prevents the "called createRoot() on a container that
+// has already been passed to createRoot() before" warning while still letting
+// re-render pick up the new <App />.
+const rootElement = document.getElementById("root")!;
+type ReactRootContainer = HTMLElement & { __meetingReactRoot?: ReturnType<typeof createRoot> };
+const rootContainer = rootElement as ReactRootContainer;
+rootContainer.__meetingReactRoot ??= createRoot(rootElement);
+rootContainer.__meetingReactRoot.render(<App />);

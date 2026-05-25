@@ -80,7 +80,8 @@ function collapseLongConversationSections(doc, root) {
     details.removeAttribute("open");
   }
 
-  const headings = Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+  const headings = Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6"))
+    .filter((heading) => !heading.closest("details"));
   for (const heading of headings) {
     const title = heading.textContent?.trim() || "";
     if (!/\b(conversation|transcript|dialogue|conversaci[oó]n|transcripci[oó]n|di[aá]logo)\b/i.test(title)) continue;
@@ -98,7 +99,7 @@ function collapseLongConversationSections(doc, root) {
     details.className = "md-collapsible-section md-conversation-section";
     details.setAttribute("data-collapsed-default", "true");
     const summary = doc.createElement("summary");
-    summary.textContent = `Show ${title}`;
+    summary.textContent = `Mostrar / ocultar ${title}`;
     details.appendChild(summary);
     heading.after(details);
     for (const node of sectionNodes) details.appendChild(node);

@@ -55,6 +55,10 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
+    console.info("[meeting-stable] shell build", {
+      url: import.meta.url,
+      loadedAt: new Date().toISOString()
+    });
     const pageParams = new URLSearchParams(window.location.search);
     const requestedApi = pageParams.get("api") || pageParams.get("meetingApi");
     if (requestedApi) localStorage.setItem("meeting.api", requestedApi);
@@ -347,6 +351,7 @@
       const peers = new Map();
       const seenSignals = new Set();
       const incomingPeerAudio = new Map();
+      const incomingPeerEvents = new Map();
       let eventSource = null;
       let pollTimer = null;
       let stopped = false;
@@ -490,6 +495,29 @@
           uiFrame.contentWindow?.postMessage({ type: "meeting.event", event: message.event }, "*");
           return;
         }
+        if (message?.type === "meeting.event.start" && !host) {
+          incomingPeerEvents.set(message.id, { chunks: [], startedAt: Date.now() });
+          return;
+        }
+        if (message?.type === "meeting.event.chunk" && !host) {
+          const transfer = incomingPeerEvents.get(message.id);
+          if (transfer) transfer.chunks[message.index || 0] = message.data || "";
+          return;
+        }
+        if (message?.type === "meeting.event.end" && !host) {
+          const transfer = incomingPeerEvents.get(message.id);
+          incomingPeerEvents.delete(message.id);
+          if (transfer) {
+            try {
+              const event = JSON.parse(transfer.chunks.join(""));
+              rememberGuestMeetingEvent(event);
+              uiFrame.contentWindow?.postMessage({ type: "meeting.event", event }, "*");
+            } catch (error) {
+              console.warn("meeting event transfer failed", error);
+            }
+          }
+          return;
+        }
         if (message?.type === "assistant.audio.start" && !host) {
           incomingPeerAudio.set(message.id, { chunks: [], mimeType: message.mimeType || "audio/mpeg", startedAt: Date.now() });
           return;
@@ -526,6 +554,31 @@
         return sent;
       }
 
+      function sendMeetingEventToChannel(channel, event) {
+        if (channel?.readyState !== "open") return false;
+        const eventPayload = JSON.stringify(event);
+        if (eventPayload.length <= 120000) {
+          channel.send(JSON.stringify({ type: "meeting.event", event, from: self, createdAtMs: Date.now() }));
+          return true;
+        }
+        const id = `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+        const chunkSize = 60000;
+        channel.send(JSON.stringify({ type: "meeting.event.start", id, from: self, createdAtMs: Date.now() }));
+        for (let offset = 0, index = 0; offset < eventPayload.length; offset += chunkSize, index += 1) {
+          channel.send(JSON.stringify({ type: "meeting.event.chunk", id, index, data: eventPayload.slice(offset, offset + chunkSize) }));
+        }
+        channel.send(JSON.stringify({ type: "meeting.event.end", id, from: self, createdAtMs: Date.now() }));
+        return true;
+      }
+
+      function broadcastHumanPeerEvent(event) {
+        let sent = 0;
+        for (const state of peers.values()) {
+          if (sendMeetingEventToChannel(state.dataChannel, event)) sent += 1;
+        }
+        return sent;
+      }
+
       async function sendCurrentCanvasToChannel(channel) {
         if (!api || channel?.readyState !== "open") return;
         try {
@@ -533,7 +586,7 @@
           const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
           const canvasEvent = [...events].reverse().find((event) => event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim());
           if (!canvasEvent || channel.readyState !== "open") return;
-          channel.send(JSON.stringify({ type: "meeting.event", event: canvasEvent, from: self, createdAtMs: Date.now() }));
+          sendMeetingEventToChannel(channel, canvasEvent);
           void postRealtimeTrace("agent", "Sent current canvas to human peer", { eventId: canvasEvent.id, textChars: String(canvasEvent.text || "").length });
         } catch (error) {
           void postRealtimeTrace("error", "Failed to send current canvas to human peer", { error: error?.message || String(error) });
@@ -704,7 +757,7 @@
           return broadcastHumanPeerData({ type, text, from: self, createdAtMs: Date.now() });
         },
         broadcastEvent(event) {
-          return broadcastHumanPeerData({ type: "meeting.event", event, from: self, createdAtMs: Date.now() });
+          return broadcastHumanPeerEvent(event);
         },
         broadcastAudioBlob,
         stop() {
