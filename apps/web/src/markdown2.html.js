@@ -26,8 +26,8 @@ export async function markdownToHtml(markdown) {
   });
   const unsafe = marked.parse(withDiagramPlaceholders, { async: false, breaks: true });
   let html = DOMPurify.sanitize(unsafe, {
-    ADD_ATTR: ["target", "data-mermaid-index"],
-    ADD_TAGS: ["button"]
+    ADD_ATTR: ["target", "data-mermaid-index", "data-collapsed-default"],
+    ADD_TAGS: ["button", "details", "summary"]
   });
   for (let index = 0; index < diagrams.length; index += 1) {
     try {
@@ -40,7 +40,70 @@ export async function markdownToHtml(markdown) {
       );
     }
   }
-  return html;
+  return prepareLongConversationSections(html);
+}
+
+function prepareLongConversationSections(html) {
+  if (typeof DOMParser === "undefined") return html;
+  const doc = new DOMParser().parseFromString(`<main>${html}</main>`, "text/html");
+  const root = doc.body.firstElementChild;
+  if (!root) return html;
+  renderNestedMarkdownCodeBlocks(doc, root);
+  collapseLongConversationSections(doc, root);
+  return root.innerHTML;
+}
+
+function renderNestedMarkdownCodeBlocks(doc, root) {
+  const blocks = Array.from(root.querySelectorAll("details pre > code.language-markdown, details pre > code[class~='language-md']"));
+  for (const code of blocks) {
+    const source = code.textContent || "";
+    if (source.trim().length < 200) continue;
+    const rendered = doc.createElement("div");
+    rendered.className = "md-rendered-nested-markdown";
+    rendered.innerHTML = DOMPurify.sanitize(marked.parse(source, { async: false, breaks: true }), {
+      ADD_ATTR: ["target", "data-collapsed-default"],
+      ADD_TAGS: ["button", "details", "summary"]
+    });
+    code.closest("pre")?.replaceWith(rendered);
+  }
+}
+
+function collapseLongConversationSections(doc, root) {
+  const existingDetails = Array.from(root.querySelectorAll("details"));
+  for (const details of existingDetails) {
+    const title = details.querySelector("summary")?.textContent?.trim() || "";
+    const bodyText = details.textContent?.trim() || "";
+    if (!/\b(conversation|transcript|dialogue|conversaci[oó]n|transcripci[oó]n|di[aá]logo)\b/i.test(title)) continue;
+    if (bodyText.length < 1200) continue;
+    details.classList.add("md-collapsible-section", "md-conversation-section");
+    details.setAttribute("data-collapsed-default", "true");
+    details.removeAttribute("open");
+  }
+
+  const headings = Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+  for (const heading of headings) {
+    const title = heading.textContent?.trim() || "";
+    if (!/\b(conversation|transcript|dialogue|conversaci[oó]n|transcripci[oó]n|di[aá]logo)\b/i.test(title)) continue;
+    const level = Number(heading.tagName.slice(1));
+    const sectionNodes = [];
+    let cursor = heading.nextSibling;
+    while (cursor) {
+      if (cursor.nodeType === Node.ELEMENT_NODE && /^H[1-6]$/.test(cursor.nodeName) && Number(cursor.nodeName.slice(1)) <= level) break;
+      sectionNodes.push(cursor);
+      cursor = cursor.nextSibling;
+    }
+    const sectionText = sectionNodes.map((node) => node.textContent || "").join(" ").trim();
+    if (sectionText.length < 1200 && sectionNodes.length < 10) continue;
+    const details = doc.createElement("details");
+    details.className = "md-collapsible-section md-conversation-section";
+    details.setAttribute("data-collapsed-default", "true");
+    const summary = doc.createElement("summary");
+    summary.textContent = `Show ${title}`;
+    details.appendChild(summary);
+    heading.after(details);
+    for (const node of sectionNodes) details.appendChild(node);
+  }
+  return root.innerHTML;
 }
 
 function getMermaidThemeVariables() {

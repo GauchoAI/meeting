@@ -19,9 +19,15 @@ kill_port() {
 stop_screen meeting-dev
 stop_screen meeting-voxtral-tts
 stop_screen meeting-parakeet-stt
+stop_screen meeting-advertise
+stop_screen meeting-pi  # harmless no-op for the AppleScript-launched Pi flow
 
 for port in 5175 4317 8792 8793; do
   kill_port "$port"
 done
+
+# Stop the Pi agent if it's running in a user terminal tab. SIGTERM lets Pi
+# clean up; the terminal tab drops back to its shell prompt.
+pkill -x pi 2>/dev/null || true
 
 echo "Stopped Meeting local-live stack."

@@ -16,9 +16,15 @@ Starts the source Meeting app plus the local live speech stack:
   - API on http://localhost:4317
   - MLX Voxtral TTS on http://127.0.0.1:8792
   - Parakeet STT on http://127.0.0.1:8793
+  - public-meeting advertiser heartbeating to the GitHub Pages lobby
+  - Pi agent (the brain that routes meeting turns to Codex)
 
 Without --restart, already-running services are left alone.
 With --restart, existing Meeting local-live ports and screen sessions are reset.
+
+Environment toggles:
+  MEETING_LIVE_ADVERTISE=false   skip the Firebase lobby advertiser
+  MEETING_LIVE_PI=false          skip launching the Pi agent in screen
 EOF
 }
 
@@ -74,6 +80,10 @@ start_screen() {
   screen -dmS "$name" bash -lc "cd $(printf '%q' "$ROOT") && exec $command"
 }
 
+screen_running() {
+  screen -ls 2>/dev/null | grep -qE "[0-9]+\.${1}[[:space:]]"
+}
+
 wait_for_port() {
   local port="$1"
   local label="$2"
@@ -110,6 +120,8 @@ if (( FORCE_RESTART )); then
   stop_screen meeting-dev
   stop_screen meeting-voxtral-tts
   stop_screen meeting-parakeet-stt
+  stop_screen meeting-advertise
+  stop_screen meeting-pi
   for port in 5173 5175 4317 8792 8793; do
     kill_port "$port"
   done
@@ -140,6 +152,27 @@ wait_for_port 8793 "Parakeet STT"
 wait_for_http "http://127.0.0.1:4317/health" "Meeting API health"
 wait_for_http "http://127.0.0.1:8793/health" "Parakeet STT health"
 
+# Public-meeting advertiser: heartbeats this meeting to the Firebase lobby that
+# powers https://gauchoai.github.io/meeting/. Defaults publish "Core Meeting" (id
+# "core") with host "Miguel"; override with MEETING_PUBLIC_* env vars.
+if [[ "${MEETING_LIVE_ADVERTISE:-true}" != "false" ]] && ! screen_running meeting-advertise; then
+  ADVERTISE_MEETING_ID="${MEETING_PUBLIC_ID:-core}"
+  ADVERTISE_TITLE="${MEETING_PUBLIC_TITLE:-Core Meeting}"
+  ADVERTISE_HOST="${MEETING_PUBLIC_HOST:-Miguel}"
+  start_screen meeting-advertise "node scripts/advertise-meeting.mjs --meeting $(printf '%q' "$ADVERTISE_MEETING_ID") --title $(printf '%q' "$ADVERTISE_TITLE") --host $(printf '%q' "$ADVERTISE_HOST") >> .meeting/advertise-meeting.log 2>&1"
+fi
+
+# Pi agent: the brain that routes meeting turns to Codex via the project-local
+# extensions in .pi/. Runs detached in a screen session; attach with
+# `screen -r meeting-pi` (detach with Ctrl-A then D).
+if [[ "${MEETING_LIVE_PI:-true}" != "false" ]] && ! screen_running meeting-pi; then
+  if ! command -v pi >/dev/null 2>&1; then
+    echo "[start-local-live] Pi CLI not found on PATH; skipping Pi launch (install @mariozechner/pi-coding-agent or set MEETING_LIVE_PI=false)." >&2
+  else
+    start_screen meeting-pi "pi"
+  fi
+fi
+
 cat <<EOF
 Meeting local-live stack is running.
 
@@ -149,10 +182,17 @@ Open:
 Use:
   Click "Join meeting", then hold Space to speak.
 
+Lobby:
+  https://gauchoai.github.io/meeting/ (advertiser publishes every 10s)
+
+Attach to Pi:
+  screen -r meeting-pi      (detach with Ctrl-A then D)
+
 Logs:
   /tmp/meeting-source-dev.log
   .meeting/voxtral-mlx-tts.log
   .meeting/parakeet-stt.log
+  .meeting/advertise-meeting.log
 
 Smoke checks:
   curl http://127.0.0.1:4317/health

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { newEventId, nowIso, type AgentTaskEvent, type MeetingEvent } from "@meeting/protocol";
@@ -544,20 +544,45 @@ function buildHandoffContextBlock(workingDir?: string): string {
   ].filter(Boolean).join("\n\n");
 }
 
+// Read only the bytes appended after `offset`. Uses a streaming descriptor read so
+// it works on files larger than Node's readFileSync ~2 GiB limit. If the appended
+// chunk is itself larger than the cap (runaway producer or long gap between polls),
+// we tail the chunk: keep the last MAX_CHUNK bytes and advance the offset so the
+// next call returns to a normal incremental read. Drops a partial leading line
+// when we skip ahead.
 function readAppendedLines(path: string, offset: number): { lines: string[]; offset: number } {
+  const MAX_CHUNK = 8 * 1024 * 1024; // 8 MiB per poll
   if (!existsSync(path)) return { lines: [], offset: 0 };
-  const buffer = readFileSync(path);
-  const safeOffset = offset > buffer.length ? 0 : offset;
-  const text = buffer.subarray(safeOffset).toString("utf8");
-  return {
-    lines: text.split("\n").map((line) => line.trim()).filter(Boolean),
-    offset: buffer.length
-  };
+  const size = statSync(path).size;
+  if (size === 0) return { lines: [], offset: 0 };
+  const safeOffset = offset > size ? 0 : offset;
+  let readFrom = safeOffset;
+  if (size - safeOffset > MAX_CHUNK) readFrom = size - MAX_CHUNK;
+  const fd = openSync(path, "r");
+  try {
+    const length = size - readFrom;
+    const buf = Buffer.alloc(length);
+    let read = 0;
+    while (read < length) {
+      const n = readSync(fd, buf, read, length - read, readFrom + read);
+      if (n <= 0) break;
+      read += n;
+    }
+    const text = buf.subarray(0, read).toString("utf8");
+    const segments = text.split("\n");
+    const startIdx = readFrom > safeOffset && segments.length > 0 ? 1 : 0;
+    return {
+      lines: segments.slice(startIdx).map((line) => line.trim()).filter(Boolean),
+      offset: size
+    };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function fileSize(path: string): number {
   if (!existsSync(path)) return 0;
-  return readFileSync(path).byteLength;
+  return statSync(path).size;
 }
 
 function readTextIfExists(path: string): string {

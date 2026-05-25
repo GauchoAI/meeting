@@ -1,6 +1,61 @@
 {
-  "updatedAt": "2026-05-17T03:12:49.369Z",
+  "updatedAt": "2026-05-25T00:22:52.710412Z",
   "artifacts": [
+    {
+      "kind": "note",
+      "slug": "buenos-aires-1807-transcript-v1",
+      "title": "Buenos Aires 1807 — Transcript versión 1",
+      "createdAt": "2026-05-25T00:22:52.710412Z",
+      "updatedAt": "2026-05-25T00:22:52.710412Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "buenos-aires",
+        "1807",
+        "wargame",
+        "transcript"
+      ],
+      "summary": "Conversación completa de la versión 1 del wargame: defensa urbana de Buenos Aires.",
+      "path": "artifacts/dt=2026-05-25/hour=21/note-buenos-aires-1807-transcript-v1/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-25/hour=21/note-buenos-aires-1807-transcript-v1",
+      "mtime": "2026-05-25T00:22:52.710412Z"
+    },
+    {
+      "kind": "note",
+      "slug": "buenos-aires-1807-transcript-v2",
+      "title": "Buenos Aires 1807 — Transcript versión 2",
+      "createdAt": "2026-05-25T00:22:52.710412Z",
+      "updatedAt": "2026-05-25T00:22:52.710412Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "buenos-aires",
+        "1807",
+        "wargame",
+        "transcript"
+      ],
+      "summary": "Conversación completa de la versión 2 del wargame: bloqueo, Montevideo y negociación.",
+      "path": "artifacts/dt=2026-05-25/hour=21/note-buenos-aires-1807-transcript-v2/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-25/hour=21/note-buenos-aires-1807-transcript-v2",
+      "mtime": "2026-05-25T00:22:52.710412Z"
+    },
+    {
+      "kind": "note",
+      "slug": "buenos-aires-1807-before-after",
+      "title": "Buenos Aires 1807 — Before and After",
+      "createdAt": "2026-05-25T00:07:30.209Z",
+      "updatedAt": "2026-05-25T00:07:30.209Z",
+      "artifact": "artifact.smart.md",
+      "tags": [
+        "buenos-aires",
+        "1807",
+        "wargame",
+        "alternate-history",
+        "image"
+      ],
+      "summary": "Before/after visual pair for the alternate Buenos Aires 1807 wargame: fortified city under British pressure, then negotiated handshake between Whitelocke and Álzaga.",
+      "path": "artifacts/dt=2026-05-25/hour=21/note-buenos-aires-1807-before-after/artifact.smart.md",
+      "dir": "artifacts/dt=2026-05-25/hour=21/note-buenos-aires-1807-before-after",
+      "mtime": "2026-05-25T00:07:30.230Z"
+    },
     {
       "kind": "note",
       "slug": "buenos-aires-1807-wargame-test",
@@ -18,7 +73,7 @@
       "summary": "Quick summary of the Buenos Aires 1807 alternate-history wargame test, lessons learned, and diagram-ready scenario structure.",
       "path": "artifacts/dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/artifact.smart.md",
       "dir": "artifacts/dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test",
-      "mtime": "2026-05-17T03:12:49.358Z"
+      "mtime": "2026-05-17T06:21:02.908Z"
     },
     {
       "kind": "note",

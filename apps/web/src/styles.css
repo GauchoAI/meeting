@@ -754,6 +754,49 @@ article.partial { opacity: 0.65; }
   padding: 0;
   white-space: pre;
 }
+.markdown details,
+.markdown .md-collapsible-section {
+  background: color-mix(in srgb, var(--canvas) 90%, var(--panel2));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+  display: block;
+  margin: 4px 0 12px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 10px 12px;
+  width: 100%;
+}
+.markdown details > summary,
+.markdown .md-collapsible-section > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+}
+.markdown details[open] > summary,
+.markdown .md-collapsible-section[open] > summary {
+  margin-bottom: 10px;
+}
+.markdown details > *,
+.markdown .md-collapsible-section > * {
+  max-width: 100%;
+  min-width: 0;
+}
+.markdown details pre,
+.markdown .md-collapsible-section pre {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.markdown .md-rendered-nested-markdown {
+  display: grid;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .markdown pre code .token.comment,
 .markdown pre code .token.prolog,
 .markdown pre code .token.doctype,

@@ -74,6 +74,13 @@ export default function (pi: ExtensionAPI) {
 	let lastHostUtterance = "Update smart-down artifact";
 	let currentTaskClass: string | undefined;
 	const artifactDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+	// Guard against artifact-watcher feedback loops: track the last-published
+	// content per path so identical re-fires are skipped, and abort the watcher
+	// entirely if the same content is seen `IDENTICAL_PUBLISH_LIMIT` times in a
+	// row (something is re-touching the file without changing it).
+	const lastPublishedArtifactContent = new Map<string, string>();
+	const consecutiveIdenticalPublishes = new Map<string, number>();
+	const IDENTICAL_PUBLISH_LIMIT = 3;
 	const seen = new Set<string>();
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -186,7 +193,7 @@ export default function (pi: ExtensionAPI) {
 			path: Type.Optional(Type.String({ description: "Path to artifact.smart.md. If omitted, uses slug lookup or the most recent artifact." })),
 			slug: Type.Optional(Type.String({ description: "Artifact slug from manifest.json, e.g. diagram-project-flow or project-flow." })),
 			query: Type.Optional(Type.String({ description: "Natural-language artifact search query, e.g. Tristan document or King Arthur evidence map." })),
-			delayMs: Type.Optional(Type.Number({ description: "Delay between streamed lines. Defaults to 35ms." })),
+			delayMs: Type.Optional(Type.Number({ description: "Deprecated: artifacts are posted once instead of streamed line-by-line." })),
 		}),
 		async execute(_toolCallId, params, ctx) {
 			const cwd = effectiveCwd(ctx.cwd);
@@ -243,7 +250,7 @@ export default function (pi: ExtensionAPI) {
 			summary: Type.Optional(Type.String({ description: "Short artifact summary for the manifest and search index." })),
 			tags: Type.Optional(Type.Array(Type.String({ description: "Search/index tags." }))),
 			markdown: Type.String({ description: "Complete smart-down Markdown body to write." }),
-			delayMs: Type.Optional(Type.Number({ description: "Delay between streamed lines. Defaults to 20ms." })),
+			delayMs: Type.Optional(Type.Number({ description: "Deprecated: artifacts are posted once instead of streamed line-by-line." })),
 		}),
 		async execute(_toolCallId, params, ctx) {
 			const cwd = effectiveCwd(ctx.cwd);
@@ -538,6 +545,24 @@ export default function (pi: ExtensionAPI) {
 		try {
 			if (!(await stat(artifactPath)).isFile()) return;
 			const markdown = await readFile(artifactPath, "utf8");
+			// Loop guard: if the file fired the watcher but its content is identical
+			// to what we last streamed, skip the re-publish. After IDENTICAL_PUBLISH_LIMIT
+			// consecutive no-op fires, shut down the watcher — something is touching
+			// the file without changing it (e.g. a self-triggering write/commit cycle).
+			if (lastPublishedArtifactContent.get(artifactPath) === markdown) {
+				const count = (consecutiveIdenticalPublishes.get(artifactPath) || 0) + 1;
+				consecutiveIdenticalPublishes.set(artifactPath, count);
+				await postTrace("debug", "artifact watcher skipped identical re-fire", { artifactPath, count });
+				if (count >= IDENTICAL_PUBLISH_LIMIT) {
+					await postTrace("error", "artifact watcher disabled after repeated identical re-fires", { artifactPath, count });
+					ctx.ui.notify(`Artifact watcher loop detected at ${artifactPath}; watcher disabled.`, "warning");
+					artifactWatcher?.close();
+					artifactWatcher = undefined;
+				}
+				return;
+			}
+			lastPublishedArtifactContent.set(artifactPath, markdown);
+			consecutiveIdenticalPublishes.set(artifactPath, 0);
 			const messageId = `artifact_${Buffer.from(artifactPath).toString("base64url").slice(0, 18)}_${Date.now().toString(36)}`;
 			await streamMarkdownToMeeting(messageId, markdown, 20, artifactPath);
 			await commitArtifactChange(artifactPath, lastHostUtterance, ctx);
@@ -546,14 +571,10 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	async function streamMarkdownToMeeting(messageId: string, markdown: string, delayMs: number, documentId?: string) {
-		const lines = markdown.split(/(?<=\n)/);
-		let buffer = "";
-		for (const line of lines) {
-			buffer += line;
-			await postAgentMessage(messageId, buffer, true, { surface: "canvas", lifecycle: "draft", documentId });
-			if (delayMs > 0) await sleep(delayMs);
-		}
+	async function streamMarkdownToMeeting(messageId: string, markdown: string, _delayMs: number, documentId?: string) {
+		// Artifacts should become available as a complete document immediately.
+		// Incremental draft events force the UI to re-render markdown, images, and
+		// conversation blocks repeatedly, which is slow and visually distracting.
 		await postAgentMessage(messageId, markdown, false, { surface: "canvas", lifecycle: "final", documentId });
 	}
 
