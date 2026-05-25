@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.3.0";
+    const MEETING_STABLE_VERSION = "0.3.1";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -165,6 +165,8 @@
     let liveAnalysisTimer = null;
     let lastAnalysisAt = 0;
     let lastPiAgentNoticeId = null;
+    let latestSpeechStopAt = 0;
+    const liveLatencyRows = [];
     let eventsSource = null;
     let peerRoom = null;
     const transcriptDraftIds = new Map();
@@ -1615,6 +1617,32 @@
       publishShellState();
     }
 
+    function recordSpeechStopLatencyPoint(label, stoppedAt = 0) {
+      if (stoppedAt) latestSpeechStopAt = stoppedAt;
+      if (!stoppedAt) return;
+      console.info("[meeting-stable] live latency speech-stop", { label, stoppedAt });
+    }
+
+    function recordPlaybackLatencyPoint(kind, details = {}) {
+      const playbackStartedAt = Date.now();
+      const speechEndToPlaybackMs = latestSpeechStopAt ? playbackStartedAt - latestSpeechStopAt : null;
+      const row = { at: playbackStartedAt, kind, speechEndToPlaybackMs, ...details };
+      liveLatencyRows.push(row);
+      while (liveLatencyRows.length > 50) liveLatencyRows.shift();
+      const values = liveLatencyRows.map((item) => item.speechEndToPlaybackMs).filter((value) => Number.isFinite(value));
+      const sorted = [...values].sort((a, b) => a - b);
+      const median = sorted.length ? sorted[Math.floor((sorted.length - 1) * 0.5)] : null;
+      const p90 = sorted.length ? sorted[Math.floor((sorted.length - 1) * 0.9)] : null;
+      console.info("[meeting-stable] live latency", {
+        kind,
+        speechEndToPlaybackMs,
+        rollingN: values.length,
+        rollingMedianMs: median,
+        rollingP90Ms: p90
+      });
+      return { speechEndToPlaybackMs, rollingN: values.length, rollingMedianMs: median, rollingP90Ms: p90 };
+    }
+
     function responseModeFromEvent(event) {
       const response = event.response && typeof event.response === "object" ? event.response : {};
       const modalities = Array.isArray(response.output_modalities) ? response.output_modalities.map(String) : [];
@@ -2077,6 +2105,7 @@
     }
 
     async function sendMeetingAudioChunk({ blob, speakerLabel, speakerId, client, clientStartedAt = 0, clientStoppedAt = 0, errorText, errorDetails = {} }) {
+      recordSpeechStopLatencyPoint(speakerLabel, clientStoppedAt);
       if (!api) return;
       const extension = blob.type.includes("mp4") ? "mp4" : "webm";
       try {
@@ -2571,10 +2600,12 @@
         audio.onerror = finish;
         renderStatus("local voice speaking", "speaking");
         void audio.play().then(() => {
+          const liveLatency = recordPlaybackLatencyPoint("blob", { generation });
           void postRealtimeTrace("latency", "local.tts.playback.start", {
             kind: "blob",
             generation,
-            clientPlaybackStartedAt: Date.now()
+            clientPlaybackStartedAt: Date.now(),
+            ...liveLatency
           });
         }).catch((error) => {
           void postRealtimeTrace("error", "Local TTS playback failed", { error: error?.message || String(error) });
@@ -2641,12 +2672,14 @@
       const startAt = Math.max(playback.nextStart, playback.context.currentTime + 0.015);
       if (!playback.playbackStartTraced) {
         playback.playbackStartTraced = true;
+        const liveLatency = recordPlaybackLatencyPoint("stream", { generation: playback.generation });
         void postRealtimeTrace("latency", "local.tts.playback.start", {
           kind: "stream",
           generation: playback.generation,
           clientPlaybackStartedAt: Date.now(),
           audioContextCurrentTime: playback.context.currentTime,
-          scheduledAt: startAt
+          scheduledAt: startAt,
+          ...liveLatency
         });
       }
       source.start(startAt);
