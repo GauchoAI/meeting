@@ -1763,6 +1763,10 @@ function isAbsoluteUrl(value: string | null | undefined): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value);
 }
 
+function isRelativeAssetUrl(value: string): boolean {
+  return Boolean(value) && !/^(?:[a-z][a-z0-9+.-]*:|#|\/)/i.test(value);
+}
+
 function prepareMarkdownHtml(html: string, assetBase: string | undefined): string {
   if (!html.includes("<img")) return html;
   const parser = new DOMParser();
@@ -1771,7 +1775,7 @@ function prepareMarkdownHtml(html: string, assetBase: string | undefined): strin
     image.setAttribute("data-inspect-image", String(index));
     const src = image.getAttribute("src") || "";
     if (!assetBase || !isAbsoluteUrl(assetBase)) continue;
-    if (!src.startsWith("./") && !src.startsWith("../")) continue;
+    if (!isRelativeAssetUrl(src)) continue;
     const resolved = new URL(src, assetBase.endsWith("/") ? assetBase : `${assetBase}/`);
     image.setAttribute("src", resolved.toString());
   }

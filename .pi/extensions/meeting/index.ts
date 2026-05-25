@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { execFile } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import { Type } from "typebox";
 import { isMeetingTaskClass, setNextMeetingRoute } from "../../lib/meeting-route-state";
 
@@ -575,7 +575,47 @@ export default function (pi: ExtensionAPI) {
 		// Artifacts should become available as a complete document immediately.
 		// Incremental draft events force the UI to re-render markdown, images, and
 		// conversation blocks repeatedly, which is slow and visually distracting.
-		await postAgentMessage(messageId, markdown, false, { surface: "canvas", lifecycle: "final", documentId });
+		// Inline local artifact images so GitHub Pages guests do not try to load
+		// ./assets from /meeting/assets (or depend on a localhost API they cannot reach).
+		const portableMarkdown = documentId ? await inlineLocalMarkdownImages(markdown, documentId) : markdown;
+		await postAgentMessage(messageId, portableMarkdown, false, { surface: "canvas", lifecycle: "final", documentId });
+	}
+
+	async function inlineLocalMarkdownImages(markdown: string, documentId: string): Promise<string> {
+		const artifactDir = dirname(documentId);
+		const replacements: Array<{ from: string; to: string }> = [];
+		for (const match of markdown.matchAll(/!\[([^\]]*)\]\(([^)\s]+)([^)]*)\)/g)) {
+			const full = match[0];
+			const alt = match[1] || "";
+			const rawSrc = match[2] || "";
+			const suffix = match[3] || "";
+			const src = rawSrc.replace(/^<|>$/g, "");
+			if (!src || /^(?:https?:|data:|blob:|#|\/)/i.test(src)) continue;
+			const imagePath = resolve(artifactDir, decodeURIComponent(src));
+			if (!imagePath.startsWith(`${artifactDir}/`)) continue;
+			try {
+				const bytes = await readFile(imagePath);
+				const mime = mimeTypeForPath(imagePath);
+				replacements.push({ from: full, to: `![${alt}](data:${mime};base64,${bytes.toString("base64")}${suffix})` });
+			} catch {
+				// Leave broken/missing images untouched; the UI may still resolve them locally.
+			}
+		}
+		let output = markdown;
+		for (const replacement of replacements) output = output.replace(replacement.from, replacement.to);
+		return output;
+	}
+
+	function mimeTypeForPath(path: string): string {
+		switch (extname(path).toLowerCase()) {
+			case ".jpg":
+			case ".jpeg": return "image/jpeg";
+			case ".webp": return "image/webp";
+			case ".gif": return "image/gif";
+			case ".svg": return "image/svg+xml";
+			case ".png":
+			default: return "image/png";
+		}
 	}
 
 	async function commitArtifactChange(artifactPath: string, message: string, ctx: ExtensionContext) {
