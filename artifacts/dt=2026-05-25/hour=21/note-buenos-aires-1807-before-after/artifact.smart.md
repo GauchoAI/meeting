@@ -5,8 +5,8 @@
 **Meeting ID:** `local-demo`  
 **Session UID / generación visual:** `019e32fe-bbd9-728c-8771-e349a4ae0586`  
 **Tramo de conversación:** empieza aprox. en `utt_mp91qzd1_smoajs`  
-**Artefacto fuente:** `buenos-aires-1807-wargame-test`  
-**Fecha:** 2026-05-17
+**Artefacto fuente / sesión anterior:** `buenos-aires-1807-wargame-test`  
+**Fecha de sesión:** 2026-05-17
 
 Esta fue la primera versión del juego: Buenos Aires preparada para resistir, con Álzaga, milicias, barricadas, azoteas y defensa urbana. La conclusión fue que un asalto británico directo contra una ciudad ya organizada era muy difícil y probablemente fracasaba.
 
@@ -20,7 +20,7 @@ Esta fue la primera versión del juego: Buenos Aires preparada para resistir, co
 **Session UID / generación visual:** `019e5c28-a35c-7386-9973-5f5b39b00c8e`  
 **Tramo de conversación:** empieza aprox. en `utt_mpkd8gpw_dbh3bm`; imagen pedida en `utt_mpkg2u3h_cc8203`  
 **Artefacto actual:** `buenos-aires-1807-before-after`  
-**Fecha:** 2026-05-25
+**Fecha de sesión:** 2026-05-25
 
 Esta fue la segunda versión del juego: en vez de intentar conquistar Buenos Aires calle por calle, el mando británico conserva Montevideo, mantiene el bloqueo del Río de la Plata, presiona económicamente y abre negociación política/comercial con Buenos Aires.
 
