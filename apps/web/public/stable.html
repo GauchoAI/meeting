@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.1.8";
+    const MEETING_STABLE_VERSION = "0.1.9";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -785,8 +785,16 @@
           return;
         }
         if (signal.type === "offer") {
-          console.info("[meeting-stable] guest received host offer", { peerId: signal.from.id, peerName: signal.from.name });
           const state = getOrCreatePeer(signal.from);
+          if (state.pc.signalingState !== "stable" && state.pc.signalingState !== "have-remote-offer") {
+            console.info("[meeting-stable] guest ignored duplicate host offer while negotiating", { peerId: signal.from.id, peerName: signal.from.name, signalingState: state.pc.signalingState });
+            return;
+          }
+          if (state.pc.remoteDescription?.type === "offer" && state.pc.localDescription?.type === "answer") {
+            console.info("[meeting-stable] guest ignored already-answered host offer", { peerId: signal.from.id, peerName: signal.from.name, signalingState: state.pc.signalingState });
+            return;
+          }
+          console.info("[meeting-stable] guest received host offer", { peerId: signal.from.id, peerName: signal.from.name, signalingState: state.pc.signalingState });
           await state.pc.setRemoteDescription(signal.sdp);
           for (const candidate of state.pendingIce.splice(0)) await state.pc.addIceCandidate(candidate).catch(() => undefined);
           const answer = await state.pc.createAnswer();
@@ -799,6 +807,10 @@
           console.info("[meeting-stable] host received guest answer", { peerId: signal.from.id, peerName: signal.from.name });
           const state = peers.get(signal.from.id);
           if (state) {
+            if (state.pc.signalingState !== "have-local-offer") {
+              console.info("[meeting-stable] host ignored answer in non-offer state", { peerId: signal.from.id, peerName: signal.from.name, signalingState: state.pc.signalingState });
+              return;
+            }
             await state.pc.setRemoteDescription(signal.sdp);
             for (const candidate of state.pendingIce.splice(0)) await state.pc.addIceCandidate(candidate).catch(() => undefined);
           }
