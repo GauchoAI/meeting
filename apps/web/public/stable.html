@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.7";
+    const MEETING_STABLE_VERSION = "0.2.8";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -154,6 +154,7 @@
     let localSpeechResumeTimer = null;
     let remotePeerSpeechUntil = 0;
     let remotePeerSpeechLastInterruptAt = 0;
+    let remotePeerSpeechRestoreTimer = null;
     let peerAssistantAudio = null;
     let peerAssistantAudioUrl = null;
     let localSpeechGeneration = 0;
@@ -1539,7 +1540,7 @@
     }
 
     function shouldCreateRealtimeResponse() {
-      return realtimeActivationMode === "active" && !realtimeMuted;
+      return realtimeActivationMode === "active" && !realtimeMuted && !remoteHumanSpeechActive();
     }
 
     function isLikelyPrompt(text) {
@@ -2690,18 +2691,44 @@
     function noteRemotePeerSpeechActivity(peer, level = 0) {
       const now = Date.now();
       remotePeerSpeechUntil = Math.max(remotePeerSpeechUntil, now + localSpeechPlaybackQuietMs());
-      if (!localSpeechAudioPlaying() && !localSpeechQueue.length && !localSpeechQueuePlaying) return;
+      scheduleRealtimeRestoreAfterRemoteSpeech();
       if (now - remotePeerSpeechLastInterruptAt < 900) return;
       remotePeerSpeechLastInterruptAt = now;
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
       stopLocalSpeechAudio();
+      stopPeerAssistantOutput("Guest is speaking");
+      stopRealtimeAssistantOutputForHumanSpeech("Guest is speaking");
       peerRoom?.broadcastAssistantStop?.("Guest is speaking");
       resumeLocalSttAfterSpeech();
       renderStatus("Guest is speaking; agent voice paused", "ready");
       publishShellState();
       void postRealtimeTrace("agent", "Local voice interrupted by Guest speech; queue compressed", { peerId: peer?.id, peerName: peer?.name, level });
+    }
+
+    function stopRealtimeAssistantOutputForHumanSpeech(reason = "human speech") {
+      beginRealtimeResponse("silent");
+      remoteAudio.muted = true;
+      if (realtimeState === "connected") {
+        sendRealtimeEvent({ type: "response.cancel" });
+        configureRealtimeSession();
+      }
+      void postRealtimeTrace("agent", "Realtime assistant output stopped for human speech", { reason });
+    }
+
+    function scheduleRealtimeRestoreAfterRemoteSpeech() {
+      if (remotePeerSpeechRestoreTimer !== null) window.clearTimeout(remotePeerSpeechRestoreTimer);
+      remotePeerSpeechRestoreTimer = window.setTimeout(() => {
+        remotePeerSpeechRestoreTimer = null;
+        if (remoteHumanSpeechActive()) {
+          scheduleRealtimeRestoreAfterRemoteSpeech();
+          return;
+        }
+        restoreRealtimeBaseMode();
+        if (realtimeState === "connected") configureRealtimeSession();
+        void postRealtimeTrace("agent", "Realtime assistant output restored after Guest silence", undefined);
+      }, localSpeechPlaybackQuietMs() + 120);
     }
 
     function localUnconfirmedMicDeferMs() {
@@ -2774,6 +2801,7 @@
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
+      stopRealtimeAssistantOutputForHumanSpeech("Host is speaking");
       peerRoom?.broadcastAssistantStop?.("Host is speaking");
       localSttPausedForSpeech = false;
       localSpeechStartedAt = 0;
