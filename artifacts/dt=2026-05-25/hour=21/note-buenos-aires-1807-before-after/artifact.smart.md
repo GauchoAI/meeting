@@ -1,23 +1,37 @@
-# Buenos Aires 1807 — Before and After
+# Buenos Aires 1807 — Before / After del juego
 
-## Before: Buenos Aires preparada para resistir
+## Versión de juego 1 — Defensa histórica de Buenos Aires
 
-La imagen anterior muestra el punto de partida de la simulación: Buenos Aires fortificada, milicias urbanas preparadas, calles listas para una defensa casa por casa y la fuerza británica contenida cerca del Río de la Plata.
+**Session / conversación:** `local-demo`  
+**Tramo de conversación:** empieza aprox. en `utt_mp91qzd1_smoajs`  
+**Artefacto fuente:** `buenos-aires-1807-wargame-test`  
+**Fecha:** 2026-05-17
 
-![Before: Buenos Aires fortificada en 1807](../dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/assets/before-fortified-buenos-aires-1807.png)
+Esta fue la primera versión del juego: Buenos Aires preparada para resistir, con Álzaga, milicias, barricadas, azoteas y defensa urbana. La conclusión fue que un asalto británico directo contra una ciudad ya organizada era muy difícil y probablemente fracasaba.
 
-## After: negociación en vez de asalto urbano
+![Versión 1: Buenos Aires fortificada en 1807](../dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/assets/before-fortified-buenos-aires-1807.png)
 
-La nueva imagen representa la línea alternativa que acabamos de jugar: Whitelocke evita destruir su ejército en las calles, usa Montevideo y el bloqueo como palanca, y termina negociando con Martín de Álzaga / autoridades porteñas una salida político-comercial.
+---
 
-![After: Whitelocke y Álzaga sellan una negociación](../dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/assets/after-whitelocke-alzaga-handshake.png)
+## Versión de juego 2 — Bloqueo, Montevideo y negociación
 
-## Lectura del “before / after”
+**Session / conversación:** `core`  
+**Tramo de conversación:** empieza aprox. en `utt_mpkd8gpw_dbh3bm`; imagen pedida en `utt_mpkg2u3h_cc8203`  
+**Artefacto actual:** `buenos-aires-1807-before-after`  
+**Fecha:** 2026-05-25
 
-- **Before:** victoria defensiva porteña probable si el británico entra al casco urbano.
-- **After:** victoria británica indirecta: bloqueo, comercio, presión diplomática y autonomía local.
-- **Idea central:** no conquistar Buenos Aires calle por calle, sino convertir Montevideo y la Royal Navy en instrumentos políticos.
+Esta fue la segunda versión del juego: en vez de intentar conquistar Buenos Aires calle por calle, el mando británico conserva Montevideo, mantiene el bloqueo del Río de la Plata, presiona económicamente y abre negociación política/comercial con Buenos Aires.
 
-## Prompt usado para la nueva imagen
+![Versión 2: Whitelocke y Álzaga sellan una negociación](../dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/assets/after-whitelocke-alzaga-handshake.png)
+
+---
+
+## Lectura rápida
+
+- **Juego 1:** defensa urbana; Buenos Aires resiste.
+- **Juego 2:** estrategia indirecta; Montevideo + bloqueo + comercio + negociación.
+- **Cambio clave:** no gastar el ejército británico en una semana de combate urbano, sino usar la superioridad naval como palanca política.
+
+## Prompt usado para la imagen de la versión 2
 
 > Históricamente inspirada, óleo alternativo de principios del siglo XIX en el Río de la Plata: General John Whitelocke con uniforme británico rojo y bicornio estrecha la mano de Martín de Álzaga, líder civil de Buenos Aires, en una sala colonial de gobierno o pórtico. Al fondo, oficiales navales británicos, representantes del Cabildo, mapas del Río de la Plata, banderas y vista sutil de barcos en el río. Ambiente tenso pero ceremonial: una negociación político-comercial tras una estrategia de bloqueo, no una batalla. Estilo óleo histórico del siglo XIX, realista, tonos tierra, composición de museo, sin texto legible ni objetos modernos.
