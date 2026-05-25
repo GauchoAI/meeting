@@ -582,7 +582,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function inlineLocalMarkdownImages(markdown: string, documentId: string): Promise<string> {
-		const artifactDir = dirname(documentId);
+		const artifactDir = resolve(dirname(documentId));
 		const replacements: Array<{ from: string; to: string }> = [];
 		for (const match of markdown.matchAll(/!\[([^\]]*)\]\(([^)\s]+)([^)]*)\)/g)) {
 			const full = match[0];
@@ -592,7 +592,7 @@ export default function (pi: ExtensionAPI) {
 			const src = rawSrc.replace(/^<|>$/g, "");
 			if (!src || /^(?:https?:|data:|blob:|#|\/)/i.test(src)) continue;
 			const imagePath = resolve(artifactDir, decodeURIComponent(src));
-			if (!imagePath.startsWith(`${artifactDir}/`)) continue;
+			if (imagePath !== artifactDir && !imagePath.startsWith(`${artifactDir}/`)) continue;
 			try {
 				const bytes = await readFile(imagePath);
 				const mime = mimeTypeForPath(imagePath);
