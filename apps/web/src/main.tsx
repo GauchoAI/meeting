@@ -192,7 +192,7 @@ function App() {
     let source: EventSource | undefined;
 
     if (peerOnly || pagesHosted || !api) return;
-    void fetch(`${api}/events`)
+    void fetch(`${api}/events?limit=500`)
       .then((response) => response.json() as Promise<{ events: MeetingEvent[] }>)
       .then((snapshot) => {
         if (!alive) return;

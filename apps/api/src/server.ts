@@ -53,8 +53,13 @@ const server = createServer(async (req, res) => {
     return sendJson(res, { ok: true, meetingId, events: events.length, speech: speechProviderStatus() });
   }
   if (req.method === "GET" && url.pathname === "/events") {
-    const since = Number(url.searchParams.get("since") || 0);
-    return sendJson(res, { events: events.slice(since), next: events.length });
+    const since = parseBoundedInteger(url.searchParams.get("since"), 0, events.length, 0);
+    const limit = parseBoundedInteger(url.searchParams.get("limit"), 0, 5000, 0);
+    const start = url.searchParams.has("since")
+      ? since
+      : (limit > 0 ? Math.max(0, events.length - limit) : 0);
+    const end = limit > 0 && url.searchParams.has("since") ? Math.min(events.length, start + limit) : undefined;
+    return sendJson(res, { events: events.slice(start, end), next: events.length });
   }
   if (req.method === "GET" && url.pathname === "/events/stream") {
     return attachSse(req, res);
@@ -357,6 +362,13 @@ function sendJson(res: ServerResponse, payload: unknown, status = 200): void {
   sendCorsHeaders(res);
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+function parseBoundedInteger(value: string | null, min: number, max: number, fallback: number): number {
+  if (value === null || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
 }
 
 function sendBinary(res: ServerResponse, body: Buffer, contentTypeValue: string, extraHeaders: Record<string, string> = {}): void {
