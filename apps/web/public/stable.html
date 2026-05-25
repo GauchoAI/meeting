@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.1.1";
+    const MEETING_STABLE_VERSION = "0.1.2";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -565,12 +565,26 @@
           return true;
         }
         const id = `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
-        const chunkSize = 60000;
-        channel.send(JSON.stringify({ type: "meeting.event.start", id, from: self, createdAtMs: Date.now() }));
-        for (let offset = 0, index = 0; offset < eventPayload.length; offset += chunkSize, index += 1) {
-          channel.send(JSON.stringify({ type: "meeting.event.chunk", id, index, data: eventPayload.slice(offset, offset + chunkSize) }));
-        }
-        channel.send(JSON.stringify({ type: "meeting.event.end", id, from: self, createdAtMs: Date.now() }));
+        const chunkSize = 32000;
+        const maxBufferedBytes = 512000;
+        let offset = 0;
+        let index = 0;
+        channel.bufferedAmountLowThreshold = Math.min(channel.bufferedAmountLowThreshold || maxBufferedBytes, maxBufferedBytes);
+        channel.send(JSON.stringify({ type: "meeting.event.start", id, from: self, createdAtMs: Date.now(), bytes: eventPayload.length }));
+        const pump = () => {
+          if (channel?.readyState !== "open") return;
+          while (offset < eventPayload.length && channel.bufferedAmount < maxBufferedBytes) {
+            channel.send(JSON.stringify({ type: "meeting.event.chunk", id, index, data: eventPayload.slice(offset, offset + chunkSize) }));
+            offset += chunkSize;
+            index += 1;
+          }
+          if (offset >= eventPayload.length) {
+            channel.send(JSON.stringify({ type: "meeting.event.end", id, from: self, createdAtMs: Date.now(), chunks: index }));
+            return;
+          }
+          setTimeout(pump, 20);
+        };
+        setTimeout(pump, 0);
         return true;
       }
 
