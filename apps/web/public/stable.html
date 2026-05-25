@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.0";
+    const MEETING_STABLE_VERSION = "0.2.1";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -327,10 +327,10 @@
 
     function peerId() {
       let id = sessionStorage.getItem("meeting.peerId");
-      if (!id || isGuestPeer()) {
+      if (!id || peerOnly) {
         id = crypto.randomUUID?.() || `peer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         sessionStorage.setItem("meeting.peerId", id);
-        console.info("[meeting-stable] generated fresh peer id", { peerId: id, guest: isGuestPeer() });
+        console.info("[meeting-stable] generated fresh peer id", { peerId: id, guest: peerOnly });
       }
       return id;
     }
@@ -634,7 +634,7 @@
         try {
           let canvasEvent = latestHostCanvasEvent;
           if (api) {
-            const snapshot = await fetch(`${api}/events`, { cache: "no-store" }).then((response) => response.json());
+            const snapshot = await fetch(`${api}/events?limit=500`, { cache: "no-store" }).then((response) => response.json());
             const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
             canvasEvent = [...events].reverse().find((event) => event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) || canvasEvent;
           }
