@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.6";
+    const MEETING_STABLE_VERSION = "0.2.7";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -2101,7 +2101,7 @@
     function enqueueLocalVoiceMessage(message, options = {}) {
       const text = clipText(sanitizeSpokenText(String(message || "")).trim(), options.maxChars || 700);
       if (!text) return 0;
-      if (options.clearExisting) clearLocalSpeechQueue();
+      if (options.clearExisting || remoteHumanSpeechActive()) clearLocalSpeechQueue();
       localSpeechQueue.push(createLocalSpeechQueueItem(text));
       warmLocalSpeechQueue();
       void playLocalSpeechQueue();
@@ -2111,7 +2111,7 @@
     function enqueueLocalVoiceSegments(message, options = {}) {
       const text = sanitizeSpokenText(String(message || "")).trim();
       if (!text) return 0;
-      if (options.clearExisting) clearLocalSpeechQueue();
+      if (options.clearExisting || remoteHumanSpeechActive()) clearLocalSpeechQueue();
       const maxChars = Number(options.maxChars || 640);
       const extraction = extractSpeakableSegments(text, true, { first: true });
       const extracted = extraction.segments.map((segment) => segment.text);
@@ -2642,6 +2642,15 @@
       const waitStartedAt = Date.now();
       while (generation === localSpeechGeneration && joined && usesLocalSpeechOutput()) {
         if (!localShouldDeferSpeechPlayback()) return true;
+        if (remoteHumanSpeechActive()) {
+          if (!notedWait) {
+            notedWait = true;
+            renderStatus("Guest is speaking; agent voice waiting", "ready");
+            void postRealtimeTrace("agent", "Local voice waiting because Guest is speaking", { quietUntilMs: remotePeerSpeechUntil });
+          }
+          await waitMs(80);
+          continue;
+        }
         const waitedMs = Date.now() - waitStartedAt;
         if (waitedMs >= localUnconfirmedMicDeferMs()) {
           void postRealtimeTrace("agent", "Continuing local voice after unconfirmed mic activity", {
@@ -2665,13 +2674,17 @@
     }
 
     function localShouldDeferSpeechPlayback() {
-      if (Date.now() < remotePeerSpeechUntil) return true;
+      if (remoteHumanSpeechActive()) return true;
       if (localCaptureMode() !== "auto-vad" || !localSttActive) return false;
       if (localPushToTalkActive) return true;
       if (localSttRecorder?.state === "recording") return true;
       const now = Date.now();
       const recentVoice = localSttLastVoiceAt > 0 && now - localSttLastVoiceAt < localSpeechPlaybackQuietMs();
       return recentVoice || currentLocalMicLevel() >= localVoiceThreshold();
+    }
+
+    function remoteHumanSpeechActive() {
+      return Date.now() < remotePeerSpeechUntil;
     }
 
     function noteRemotePeerSpeechActivity(peer, level = 0) {
