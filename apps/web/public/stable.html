@@ -55,7 +55,10 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
+    const MEETING_STABLE_VERSION = "0.1.1";
+    console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
+      version: MEETING_STABLE_VERSION,
       url: import.meta.url,
       loadedAt: new Date().toISOString()
     });

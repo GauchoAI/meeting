@@ -6,6 +6,7 @@ import { TranscriptBuffer } from "@meeting/transcript";
 import { isAssistantStatusTemplate, newEventId, nowIso, type AgentHandRaiseEvent, type AgentMessageEvent, type AgentTaskEvent, type MeetingEvent, type PartialUtteranceEvent, type UtteranceEvent } from "@meeting/protocol";
 import { layoutWithLines, prepareWithSegments, measureLineStats } from "@chenglou/pretext";
 import { RoughGenerator } from "roughjs/bin/generator";
+import webPackage from "../package.json";
 // markdown2.html.js is intentionally a runtime JS translator file.
 // @ts-expect-error TypeScript does not attach declarations to this dotted filename.
 import { markdownToHtml } from "./markdown2.html.js";
@@ -29,7 +30,9 @@ const appearanceKey = "meeting.appearance";
 const normalizeExcalidraw = false;
 const useNativeDiagramRenderer = true;
 const roughGenerator = new RoughGenerator({ options: { roughness: 1.15, bowing: 1.8, curveFitting: 0.95 } });
+console.log(`[meeting-web] version ${webPackage.version}`);
 console.info("[meeting-web] client build", {
+  version: webPackage.version,
   mode: import.meta.env.MODE,
   dev: import.meta.env.DEV,
   url: import.meta.url,
