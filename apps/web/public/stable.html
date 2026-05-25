@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.4";
+    const MEETING_STABLE_VERSION = "0.2.5";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -2226,11 +2226,11 @@
         speakPeerAssistantText("Audio is ready. Please press Enable guest audio.");
         void postRealtimeTrace("error", "Relayed assistant TTS audio playback failed", { error: error?.message || String(error), bytes: blob.size, mimeType });
       } finally {
-        audio.onended = () => {
+        audio.addEventListener("ended", () => {
           if (peerAssistantAudio === audio) peerAssistantAudio = null;
           if (peerAssistantAudioUrl === url) peerAssistantAudioUrl = null;
-          URL.revokeObjectURL(url);
-        };
+        }, { once: true });
+        audio.onended = () => URL.revokeObjectURL(url);
         window.setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
     }
