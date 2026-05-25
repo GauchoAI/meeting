@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.8";
+    const MEETING_STABLE_VERSION = "0.2.9";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -157,6 +157,7 @@
     let remotePeerSpeechRestoreTimer = null;
     let peerAssistantAudio = null;
     let peerAssistantAudioUrl = null;
+    let peerMicPriorityGuard = null;
     let localSpeechGeneration = 0;
     let directVoiceTurnActive = false;
     let directVoiceTurnToolCalled = false;
@@ -264,6 +265,7 @@
       renderStatus(peerOnly ? "guest peer connected; waiting for host" : (usesRealtimeVoice() ? "voice agent connecting" : "local voice listening"), "ready");
       publishShellState();
       startHumanPeerRoom(localStream);
+      if (peerOnly) startPeerMicPriorityMonitor(localStream);
       if (!peerOnly && usesLocalStt() && !selfMuted) startLocalSttCapture(localStream);
       if (!peerOnly && usesRealtimeVoice()) {
         void postRealtimeTrace("agent", "Stable shell joined meeting; starting Realtime voice", { voiceMode, speechProvider });
@@ -293,6 +295,7 @@
       clearRealtimeReconnect();
       disconnectHumanPeerRoom();
       disconnectRealtimeAgent({ intentional: true });
+      stopPeerMicPriorityMonitor();
       stopLocalSttCapture({ suppressUploads: true });
       localSttPausedForSpeech = false;
       localSpeechGeneration += 1;
@@ -383,6 +386,10 @@
 
       function muteLocalMicForRelay(ms = 9000) {
         localMicMutedForRelayUntil = Math.max(localMicMutedForRelayUntil, Date.now() + ms);
+        if (peerOnly) {
+          void postRealtimeTrace("debug", "Guest mic kept live during relay speech for interruption detection", { ms });
+          return;
+        }
         for (const track of stream.getAudioTracks?.() || []) track.enabled = false;
         window.setTimeout(() => {
           if (Date.now() < localMicMutedForRelayUntil) return;
@@ -561,8 +568,9 @@
           if (transfer) void playPeerAssistantAudioBlob(transfer.chunks.join(""), transfer.mimeType, transfer.startedAt);
           return;
         }
-        if (message?.type === "assistant.output.stop" && !host) {
-          stopPeerAssistantOutput(message.reason || "human speech");
+        if (message?.type === "assistant.output.stop") {
+          if (host) stopAllAssistantOutputForHumanSpeech(message.reason || "human speech from peer");
+          else stopPeerAssistantOutput(message.reason || "human speech");
           return;
         }
         if (message?.type === "assistant.speech" && !host) {
@@ -2717,6 +2725,17 @@
       void postRealtimeTrace("agent", "Realtime assistant output stopped for human speech", { reason });
     }
 
+    function stopAllAssistantOutputForHumanSpeech(reason = "human speech") {
+      localSpeechGeneration += 1;
+      abortLocalSpeechCurrentItem();
+      clearLocalSpeechQueue();
+      stopLocalSpeechAudio();
+      stopPeerAssistantOutput(reason);
+      stopRealtimeAssistantOutputForHumanSpeech(reason);
+      renderStatus("human speaking; agent muted", "ready");
+      publishShellState();
+    }
+
     function scheduleRealtimeRestoreAfterRemoteSpeech() {
       if (remotePeerSpeechRestoreTimer !== null) window.clearTimeout(remotePeerSpeechRestoreTimer);
       remotePeerSpeechRestoreTimer = window.setTimeout(() => {
@@ -2729,6 +2748,47 @@
         if (realtimeState === "connected") configureRealtimeSession();
         void postRealtimeTrace("agent", "Realtime assistant output restored after Guest silence", undefined);
       }, localSpeechPlaybackQuietMs() + 120);
+    }
+
+    function startPeerMicPriorityMonitor(stream) {
+      stopPeerMicPriorityMonitor();
+      const audioTracks = stream?.getAudioTracks?.() || [];
+      if (!peerOnly || !audioTracks.length) return;
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return;
+      const context = new AudioContextCtor();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      const data = new Uint8Array(analyser.fftSize);
+      context.createMediaStreamSource(new MediaStream(audioTracks)).connect(analyser);
+      let stopped = false;
+      let lastStopAt = 0;
+      const tick = () => {
+        if (stopped) return;
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (const value of data) {
+          const centered = value - 128;
+          sum += centered * centered;
+        }
+        const level = Math.sqrt(sum / data.length) / 128;
+        const now = Date.now();
+        if (level >= localVoiceThreshold() && now - lastStopAt > 180) {
+          lastStopAt = now;
+          stopPeerAssistantOutput("Guest mic active");
+          peerRoom?.broadcastAssistantStop?.("Guest mic active");
+        }
+        window.setTimeout(tick, 40);
+      };
+      context.resume?.().catch(() => undefined);
+      tick();
+      peerMicPriorityGuard = { stop: () => { stopped = true; context.close?.().catch(() => undefined); } };
+      void postRealtimeTrace("agent", "Guest immediate mic priority monitor started", { audioTracks: audioTracks.length });
+    }
+
+    function stopPeerMicPriorityMonitor() {
+      peerMicPriorityGuard?.stop?.();
+      peerMicPriorityGuard = null;
     }
 
     function localUnconfirmedMicDeferMs() {
