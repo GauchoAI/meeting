@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.3.2";
+    const MEETING_STABLE_VERSION = "0.3.3";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -2087,7 +2087,7 @@
     }
 
     function localSpeechSilenceMs() {
-      const defaultMs = localCaptureMode() === "auto-vad" ? 1600 : 900;
+      const defaultMs = localCaptureMode() === "auto-vad" ? 1000 : 900;
       const configured = Number(localStorage.getItem("meeting.localSpeechSilenceMs") || String(defaultMs));
       return Number.isFinite(configured) ? Math.max(450, Math.min(4000, configured)) : defaultMs;
     }
@@ -2866,12 +2866,12 @@
     }
 
     function localUnconfirmedMicDeferMs() {
-      const configured = Number(localStorage.getItem("meeting.localUnconfirmedMicDeferMs") || "1800");
+      const configured = Number(localStorage.getItem("meeting.localUnconfirmedMicDeferMs") || "1200");
       return Number.isFinite(configured) ? Math.max(0, Math.min(8000, configured)) : 1800;
     }
 
     function localSpeechPlaybackQuietMs() {
-      const configured = Number(localStorage.getItem("meeting.localSpeechPlaybackQuietMs") || "650");
+      const configured = Number(localStorage.getItem("meeting.localSpeechPlaybackQuietMs") || "500");
       return Number.isFinite(configured) ? Math.max(0, Math.min(3000, configured)) : 650;
     }
 
