@@ -48,13 +48,18 @@ Estas conversaciones fueron extraídas automáticamente desde los JSONL de Meeti
 node scripts/extract-transcript-range.mjs --start <ISO> --end <ISO> --out <archivo.md>
 ```
 
-Archivos fuente completos:
+Transcripts como artefactos separados:
 
-- [transcript-version-1.md](./transcript-version-1.md)
-- [transcript-version-2.md](./transcript-version-2.md)
+- [Buenos Aires 1807 — Transcript versión 1](../note-buenos-aires-1807-transcript-v1/artifact.smart.md)
+- [Buenos Aires 1807 — Transcript versión 2](../note-buenos-aires-1807-transcript-v2/artifact.smart.md)
 
-<details>
-<summary>Mostrar conversación completa — Versión 1: defensa urbana</summary>
+Copias locales de respaldo:
+
+- `./transcript-version-1.md`
+- `./transcript-version-2.md`
+
+<details open>
+<summary>Conversación completa — Versión 1: defensa urbana</summary>
 
 ```markdown
 # Conversación completa — Versión 1: defensa urbana
@@ -1926,8 +1931,8 @@ What about the diagrams and you know the type of thing that we were discussing i
 
 </details>
 
-<details>
-<summary>Mostrar conversación completa — Versión 2: bloqueo y negociación</summary>
+<details open>
+<summary>Conversación completa — Versión 2: bloqueo y negociación</summary>
 
 ```markdown
 # Conversación completa — Versión 2: bloqueo y negociación
