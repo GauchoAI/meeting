@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.9";
+    const MEETING_STABLE_VERSION = "0.3.0";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -1181,6 +1181,25 @@
         } catch {
           parsedArgs = { raw: argsText };
         }
+        if (asyncRealtimeToolName(name)) {
+          const accepted = { ok: true, output: { accepted: true, async: true, message: "Tool accepted and running in the background. Keep the spoken conversation responsive." } };
+          sendRealtimeEvent({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id: callId,
+              output: JSON.stringify(accepted)
+            }
+          });
+          void runRealtimeToolInBackground(name, parsedArgs, implementationToolName(name) ? "implementation" : "conversation");
+          if (isDirectVoicePiReply) {
+            directVoiceTurnActive = false;
+            directVoiceTurnToolCalled = false;
+            return;
+          }
+          sendFollowupResponse();
+          return;
+        }
         const toolResponse = await fetch(`${api}/realtime/tool`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1226,6 +1245,20 @@
           content: [{ type: "input_text", text }]
         }
       });
+    }
+
+    async function runRealtimeToolInBackground(name, parsedArgs, channel = "conversation") {
+      const startedAt = Date.now();
+      try {
+        const toolResponse = await fetch(`${api}/realtime/tool`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, arguments: parsedArgs })
+        }).then((res) => res.json());
+        await postRealtimeTrace(toolResponse.ok ? "tool" : "error", `Async tool result: ${name}`, { ...toolResponse, elapsedMs: Date.now() - startedAt }, channel);
+      } catch (error) {
+        await postRealtimeTrace("error", `Async tool failed: ${name}`, { error: error?.message || String(error), elapsedMs: Date.now() - startedAt }, channel);
+      }
     }
 
     async function readRealtimeMeetingContext() {
@@ -3384,6 +3417,10 @@
 
     function implementationToolName(name) {
       return name === "run_codex_task" || name === "publish_task_result" || name === "deliver_assistant_output" || name === "message_pi_agent";
+    }
+
+    function asyncRealtimeToolName(name) {
+      return implementationToolName(name) || name === "run_shell_command";
     }
 
     function isRealtimeTextDelta(type) {
