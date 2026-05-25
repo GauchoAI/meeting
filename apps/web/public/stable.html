@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.5";
+    const MEETING_STABLE_VERSION = "0.2.6";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -1302,10 +1302,17 @@
     function setRealtimeAgentMuted(muted) {
       realtimeMuted = muted;
       remoteAudio.muted = muted;
+      if (muted) {
+        localSpeechGeneration += 1;
+        abortLocalSpeechCurrentItem();
+        clearLocalSpeechQueue();
+        stopLocalSpeechAudio();
+        stopPeerAssistantOutput("agent muted here");
+      }
       restoreRealtimeBaseMode();
       if (realtimeState === "connected") {
         configureRealtimeSession();
-        void postRealtimeTrace("agent", muted ? "Realtime agent muted locally in stable shell" : "Realtime agent unmuted locally in stable shell", { audioResponses: shouldCreateRealtimeResponse(), peerRelayUnaffected: true });
+        void postRealtimeTrace("agent", muted ? "Realtime agent muted locally in stable shell; current playback stopped" : "Realtime agent unmuted locally in stable shell", { audioResponses: shouldCreateRealtimeResponse(), peerRelayUnaffected: true });
       }
       renderStatus();
       publishShellState();
