@@ -149,6 +149,9 @@
     let localSpeechQueuePlaying = false;
     let localSpeechCurrentItem = null;
     const codexStreamingSpeech = new Map();
+    const assistantReplyQueueSeen = new Map();
+    const assistantSpeechEventSeen = new Map();
+    let assistantSpeechContinuationText = "";
     const assistantVoiceVolume = 0.35;
     let localSpeechStartedAt = 0;
     let localSpeechBargeInStartedAt = 0;
@@ -159,6 +162,7 @@
     let peerAssistantAudio = null;
     let peerAssistantAudioUrl = null;
     let peerMicPriorityGuard = null;
+    let assistantOutputEpoch = 0;
     let localSpeechGeneration = 0;
     let directVoiceTurnActive = false;
     let directVoiceTurnToolCalled = false;
@@ -301,6 +305,7 @@
       stopPeerMicPriorityMonitor();
       stopLocalSttCapture({ suppressUploads: true });
       localSttPausedForSpeech = false;
+      assistantOutputEpoch += 1;
       localSpeechGeneration += 1;
       clearLocalSpeechQueue();
       if (localSpeechResumeTimer !== null) {
@@ -379,6 +384,7 @@
       const seenSignals = new Set();
       const incomingPeerAudio = new Map();
       const incomingPeerEvents = new Map();
+      let latestIncomingAssistantAudioId = null;
       let eventSource = null;
       let pollTimer = null;
       let stopped = false;
@@ -557,10 +563,14 @@
           return;
         }
         if (message?.type === "assistant.audio.start" && !host) {
+          latestIncomingAssistantAudioId = message.id;
+          incomingPeerAudio.clear();
+          stopPeerAssistantOutput("new assistant audio");
           incomingPeerAudio.set(message.id, { chunks: [], mimeType: message.mimeType || "audio/mpeg", startedAt: Date.now() });
           return;
         }
         if (message?.type === "assistant.audio.chunk" && !host) {
+          if (message.id !== latestIncomingAssistantAudioId) return;
           const transfer = incomingPeerAudio.get(message.id);
           if (transfer) transfer.chunks[message.index || 0] = message.data || "";
           return;
@@ -568,15 +578,20 @@
         if (message?.type === "assistant.audio.end" && !host) {
           const transfer = incomingPeerAudio.get(message.id);
           incomingPeerAudio.delete(message.id);
-          if (transfer) void playPeerAssistantAudioBlob(transfer.chunks.join(""), transfer.mimeType, transfer.startedAt);
+          if (transfer && message.id === latestIncomingAssistantAudioId) void playPeerAssistantAudioBlob(transfer.chunks.join(""), transfer.mimeType, transfer.startedAt);
           return;
         }
         if (message?.type === "assistant.output.stop") {
-          if (host) stopAllAssistantOutputForHumanSpeech(message.reason || "human speech from peer");
+          incomingPeerAudio.clear();
+          latestIncomingAssistantAudioId = null;
+          if (host) stopAllAssistantOutputForHumanSpeech(message.reason || "human speech from peer", { broadcastStop: false });
           else stopPeerAssistantOutput(message.reason || "human speech");
           return;
         }
         if (message?.type === "assistant.speech" && !host) {
+          latestIncomingAssistantAudioId = null;
+          incomingPeerAudio.clear();
+          stopPeerAssistantOutput("new assistant speech");
           speakPeerAssistantText(message.text || "");
         }
         if (message?.type === "host.speech" && !host) {
@@ -675,27 +690,42 @@
         }
       }
 
-      async function waitForChannelBuffer(channel) {
-        while (channel.bufferedAmount > 768000) await waitMs(25);
+      async function waitForChannelBuffer(channel, shouldContinue = () => true) {
+        while (channel.bufferedAmount > 768000) {
+          if (!shouldContinue()) return false;
+          await waitMs(25);
+        }
+        return shouldContinue();
       }
 
-      async function broadcastAudioBlob(blob, type = "assistant.audio") {
+      async function broadcastAudioBlob(blob, type = "assistant.audio", options = {}) {
+        const shouldContinue = typeof options.shouldContinue === "function" ? options.shouldContinue : () => true;
         const openChannels = [...peers.values()].map((state) => state.dataChannel).filter((channel) => channel?.readyState === "open");
-        if (!openChannels.length || !blob?.size) return 0;
+        if (!openChannels.length || !blob?.size || !shouldContinue()) return 0;
         const bytes = new Uint8Array(await blob.arrayBuffer());
+        if (!shouldContinue()) return 0;
         const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const chunkBytes = 9000;
+        for (const channel of openChannels) if (channel.readyState === "open") channel.send(JSON.stringify({ type: "assistant.output.stop", reason: "new assistant audio", from: self, createdAtMs: Date.now() }));
         for (const channel of openChannels) channel.send(JSON.stringify({ type: `${type}.start`, id, mimeType: blob.type || "audio/mpeg", bytes: bytes.byteLength, createdAtMs: Date.now() }));
         for (let offset = 0, index = 0; offset < bytes.length; offset += chunkBytes, index += 1) {
+          if (!shouldContinue()) {
+            for (const channel of openChannels) if (channel.readyState === "open") channel.send(JSON.stringify({ type: "assistant.output.stop", reason: options.stopReason || "stale assistant audio", from: self, createdAtMs: Date.now() }));
+            return 0;
+          }
           let binary = "";
           const slice = bytes.subarray(offset, Math.min(offset + chunkBytes, bytes.length));
           for (const byte of slice) binary += String.fromCharCode(byte);
           const payload = JSON.stringify({ type: `${type}.chunk`, id, index, data: window.btoa(binary) });
           for (const channel of openChannels) {
-            await waitForChannelBuffer(channel);
+            if (!await waitForChannelBuffer(channel, shouldContinue)) {
+              for (const channel of openChannels) if (channel.readyState === "open") channel.send(JSON.stringify({ type: "assistant.output.stop", reason: options.stopReason || "stale assistant audio", from: self, createdAtMs: Date.now() }));
+              return 0;
+            }
             if (channel.readyState === "open") channel.send(payload);
           }
         }
+        if (!shouldContinue()) return 0;
         for (const channel of openChannels) if (channel.readyState === "open") channel.send(JSON.stringify({ type: `${type}.end`, id, createdAtMs: Date.now() }));
         return openChannels.length;
       }
@@ -1115,6 +1145,12 @@
         return;
       }
       if (type === "conversation.item.input_audio_transcription.completed") {
+        const itemId = String(event.item_id || "");
+        if (itemId && shouldSuppressDuplicateRealtimeItem(itemId, "user-completed")) {
+          await postRealtimeTrace("debug", "Skipped duplicate user transcript completion", { itemId, reason: "stuck in queue" });
+          return;
+        }
+        if (itemId) markRealtimeItemSeen(itemId, "user-completed");
         await persistRealtimeTranscriptCompleted(event);
         if (realtimeActivationMode === "sleeping") {
           handleSleepingRealtimeTurn(String(event.transcript || event.text || ""));
@@ -1136,28 +1172,41 @@
       }
       if ((isRealtimeTextDone(type) && realtimeResponseMode === "silent")
         || (isRealtimeAudioTranscriptDone(type) && realtimeResponseMode === "speak")) {
+        const doneItemId = String(event.item_id || event.message_id || "");
+        if (doneItemId && shouldSuppressDuplicateRealtimeItem(doneItemId, "assistant-complete")) {
+          await postRealtimeTrace("debug", "Skipped duplicate assistant completion", { itemId: doneItemId, responseMode: realtimeResponseMode });
+          return;
+        }
+        if (doneItemId) markRealtimeItemSeen(doneItemId, "assistant-complete");
         const completedText = String(event.transcript || event.text || "").trim();
         if (!assistantDraft.trim() && completedText) assistantDraft = completedText;
         if (assistantDraft.trim() && assistantDraft.trim() !== "NO_ACTION") {
-          if (directVoiceTurnActive) {
-            if (!directVoiceTurnToolCalled && shouldRelayDirectVoiceText(assistantDraft)) {
-              await relayDirectVoiceTextToPiAgent(assistantDraft.trim());
+          const finalText = mergeWithSpeechContinuity(assistantDraft.trim());
+          if (!finalText) {
+            await postRealtimeTrace("debug", "Skipped assistant final text as continuity-tail", { textChars: assistantDraft.trim().length });
+          } else if (shouldSuppressDuplicateAssistantText(finalText)) {
+            await postRealtimeTrace("debug", "Skipped duplicate assistant final text", { textChars: finalText.length });
+          } else if (directVoiceTurnActive) {
+            if (!directVoiceTurnToolCalled && shouldRelayDirectVoiceText(finalText)) {
+              await relayDirectVoiceTextToPiAgent(finalText);
             } else {
-              await postRealtimeTrace("debug", "Suppressed direct voice-agent internal text", { text: assistantDraft.trim(), toolCalled: directVoiceTurnToolCalled });
+              await postRealtimeTrace("debug", "Suppressed direct voice-agent internal text", { text: finalText, toolCalled: directVoiceTurnToolCalled });
             }
+            updateSpeechContinuityText(finalText);
           } else {
             await postMeetingEvent({
               id: assistantDraftMessageId || newEventId("msg"),
-              type: "agent.message",
               stream: "conversation",
-              meetingId,
               createdAt: nowIso(),
+              type: "agent.message",
+              meetingId,
               agentId: realtimeAgentId,
               format: "markdown",
               surface: "status",
               lifecycle: "final",
-              text: assistantDraft.trim()
+              text: finalText
             });
+            updateSpeechContinuityText(finalText);
           }
         }
         directVoiceTurnActive = false;
@@ -1348,6 +1397,7 @@
       realtimeMuted = muted;
       remoteAudio.muted = muted;
       if (muted) {
+        assistantOutputEpoch += 1;
         localSpeechGeneration += 1;
         abortLocalSpeechCurrentItem();
         clearLocalSpeechQueue();
@@ -1621,6 +1671,7 @@
     function recordSpeechStopLatencyPoint(label, stoppedAt = 0) {
       if (stoppedAt) latestSpeechStopAt = stoppedAt;
       if (!stoppedAt) return;
+      stopAssistantOutputForNewerHumanSpeech("human speech stopped", { label, stoppedAt });
       console.info("[meeting-stable] live latency speech-stop", { label, stoppedAt });
     }
 
@@ -1744,7 +1795,7 @@
         if (usesLocalSpeechOutput() && isSpeakableCodexFinal(event) && finalizeCodexStreamingSpeech(event)) {
           return;
         }
-        if (usesLocalSpeechOutput()) handleLocalHostUtteranceForPendingSpeech(event);
+        handleHumanUtteranceForPendingSpeech(event);
         if (isPiAgentReviewEvent(event) || (usesLocalSpeechOutput() && isLocalSpeakablePiAgentMessage(event))) {
           if (usesRealtimeVoice() && realtimeState === "connected") {
             void notifyRealtimeOfPiAgentUpdate(event);
@@ -1935,6 +1986,7 @@
     }
 
     function stopLocalSpeechForManualInput() {
+      assistantOutputEpoch += 1;
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
@@ -1948,27 +2000,33 @@
       localSttSuppressUploadsUntil = 0;
       localSttDiscardCurrentChunk = false;
       stopLocalSpeechAudio();
+      peerRoom?.broadcastAssistantStop?.("Host started speaking");
+      updateSpeechContinuityText("");
       void postRealtimeTrace("agent", "Local voice speech interrupted by push-to-talk", undefined);
     }
 
-    function handleLocalHostUtteranceForPendingSpeech(event) {
-      if (!isConfirmedLocalHostUtterance(event)) return;
-      cancelLocalSpeechForHostContinuation("confirmed-host-utterance", {
+    function handleHumanUtteranceForPendingSpeech(event) {
+      if (!isConfirmedHumanUtterance(event)) return;
+      stopAssistantOutputForNewerHumanSpeech("confirmed-human-utterance", {
         eventId: event.id,
+        speakerId: event.speakerId,
+        speakerLabel: event.speakerLabel,
         textChars: String(event.text || "").trim().length
       });
     }
 
-    function isConfirmedLocalHostUtterance(event) {
+    function isConfirmedHumanUtterance(event) {
       if (!event || event.type !== "utterance.final") return false;
       const text = String(event.text || "").trim();
       if (!text) return false;
       const speaker = `${event.speakerId || ""} ${event.speakerLabel || ""}`.toLowerCase();
-      return speaker.includes("host");
+      return !speaker.includes("agent") && !speaker.includes("assistant");
     }
 
-    function cancelLocalSpeechForHostContinuation(reason, details = {}) {
-      if (!localSpeechCurrentItem && !localSpeechQueue.length && !localSpeechAudioPlaying()) return;
+    function stopAssistantOutputForNewerHumanSpeech(reason, details = {}, options = {}) {
+      const hadOutput = localSpeechCurrentItem || localSpeechQueue.length || localSpeechQueuePlaying || localSpeechAudioPlaying() || peerAssistantAudio || peerAssistantAudioUrl;
+      assistantOutputEpoch += 1;
+      if (!hadOutput) return;
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
@@ -1982,16 +2040,21 @@
       localSpeechBargeInStartedAt = 0;
       localSttSuppressUploadsUntil = 0;
       localSttDiscardCurrentChunk = false;
-      renderStatus("host still speaking; local voice cancelled", "ready");
+      updateSpeechContinuityText("");
+      stopPeerAssistantOutput(reason);
+      if (options.broadcastStop !== false) peerRoom?.broadcastAssistantStop?.(reason);
+      renderStatus("human speaking; local voice cancelled", "ready");
       publishShellState();
-      void postRealtimeTrace("agent", "Cancelled pending local voice because host continued speaking", { reason, ...details });
+      void postRealtimeTrace("agent", "Cancelled pending assistant audio because a human spoke", { reason, ...details });
     }
 
     function abortLocalSpeechCurrentItem() {
       if (!localSpeechCurrentItem?.controller) {
+        if (localSpeechCurrentItem) localSpeechCurrentItem.cancelled = true;
         localSpeechCurrentItem = null;
         return;
       }
+      localSpeechCurrentItem.cancelled = true;
       localSpeechCurrentItem.controller.abort();
       localSpeechCurrentItem = null;
     }
@@ -2160,27 +2223,34 @@
     }
 
     async function handleLocalPiAgentUpdate(event) {
+      const sourceCreatedAtMs = eventCreatedAtMs(event);
+      if (isStaleAssistantSource(sourceCreatedAtMs)) {
+        await postRealtimeTrace("agent", "Skipped stale local TTS for older Pi/Codex message", { eventId: event.id, sourceCreatedAtMs, latestSpeechStopAt });
+        return;
+      }
       const message = localSpeechTextForPiAgentUpdate(event);
       if (!message) return;
       const direct = isVoiceAgentDirectMessage(event);
       const segmented = direct || (event?.type === "agent.message" && event.surface === "status");
       const queued = segmented
-        ? enqueueLocalVoiceSegments(message, { clearExisting: direct })
-        : enqueueLocalVoiceMessage(message, { clearExisting: direct });
+        ? enqueueLocalVoiceSegments(message, { clearExisting: direct, sourceCreatedAtMs })
+        : enqueueLocalVoiceMessage(message, { clearExisting: direct, sourceCreatedAtMs });
       await postRealtimeTrace("agent", "Queued local TTS for Pi/Codex message", { eventId: event.id, direct, queuedSegments: queued });
     }
 
     function enqueueLocalVoiceMessage(message, options = {}) {
-      const text = clipText(sanitizeSpokenText(String(message || "")).trim(), options.maxChars || 700);
-      if (!text) return 0;
+      if (isStaleAssistantSource(options.sourceCreatedAtMs)) return 0;
+      const mergedText = mergeWithSpeechContinuity(clipText(sanitizeSpokenText(String(message || "")).trim(), options.maxChars || 700));
+      if (!mergedText) return 0;
       if (options.clearExisting || remoteHumanSpeechActive()) clearLocalSpeechQueue();
-      localSpeechQueue.push(createLocalSpeechQueueItem(text));
+      localSpeechQueue.push(createLocalSpeechQueueItem(mergedText, options));
       warmLocalSpeechQueue();
       void playLocalSpeechQueue();
       return 1;
     }
 
     function enqueueLocalVoiceSegments(message, options = {}) {
+      if (isStaleAssistantSource(options.sourceCreatedAtMs)) return 0;
       const text = sanitizeSpokenText(String(message || "")).trim();
       if (!text) return 0;
       if (options.clearExisting || remoteHumanSpeechActive()) clearLocalSpeechQueue();
@@ -2191,9 +2261,9 @@
       const segments = (extracted.length ? extracted : [text]).concat(tail && tail !== text ? [tail] : []);
       let queued = 0;
       for (const segment of segments.flatMap((segment) => splitLongSpeechSegment(segment, maxChars))) {
-        const spoken = sanitizeSpokenText(segment).trim();
+        const spoken = mergeWithSpeechContinuity(sanitizeSpokenText(segment).trim());
         if (!isUsefulSpeechSegment(spoken)) continue;
-        localSpeechQueue.push(createLocalSpeechQueueItem(clipText(spoken, maxChars)));
+        localSpeechQueue.push(createLocalSpeechQueueItem(clipText(spoken, maxChars), options));
         queued += 1;
       }
       if (!queued) return 0;
@@ -2202,11 +2272,14 @@
       return queued;
     }
 
-    function createLocalSpeechQueueItem(text) {
+    function createLocalSpeechQueueItem(text, options = {}) {
       return {
         text,
         generation: 0,
+        epoch: assistantOutputEpoch,
+        sourceCreatedAtMs: Number(options.sourceCreatedAtMs || Date.now()),
         synthesis: null,
+        cancelled: false,
         fallbackNoted: false
       };
     }
@@ -2214,13 +2287,19 @@
     function broadcastAssistantSpeechToHumanPeers(text) {
       const spoken = sanitizeSpokenText(String(text || "")).trim();
       if (!spoken || !peerRoom?.broadcastSpeech) return;
+      peerRoom.broadcastAssistantStop?.("new assistant speech");
       const sent = peerRoom.broadcastSpeech(spoken);
       if (sent) void postRealtimeTrace("agent", "Broadcast assistant speech to human peers", { peers: sent, textChars: spoken.length });
     }
 
-    async function broadcastAssistantAudioToHumanPeers(blob) {
+    async function broadcastAssistantAudioToHumanPeers(blob, itemOrOptions = {}) {
       if (!blob || !peerRoom?.broadcastAudioBlob) return 0;
-      const sent = await peerRoom.broadcastAudioBlob(blob, "assistant.audio");
+      const item = itemOrOptions?.text ? itemOrOptions : null;
+      const generation = Number(itemOrOptions?.generation || item?.generation || 0);
+      const sent = await peerRoom.broadcastAudioBlob(blob, "assistant.audio", {
+        stopReason: "stale assistant audio",
+        shouldContinue: () => item ? isLocalSpeechItemFresh(item) : (!generation || generation === localSpeechGeneration)
+      });
       if (sent) void postRealtimeTrace("agent", "Broadcast assistant TTS audio to human peers", { peers: sent, bytes: blob.size, mimeType: blob.type });
       return sent;
     }
@@ -2316,6 +2395,7 @@
     }
 
     function stopPeerAssistantOutput(reason = "human speech") {
+      const hadOutput = Boolean(peerAssistantAudio || peerAssistantAudioUrl || window.speechSynthesis?.speaking || window.speechSynthesis?.pending);
       try { window.speechSynthesis?.cancel?.(); } catch {}
       if (peerAssistantAudio) {
         try { peerAssistantAudio.pause(); } catch {}
@@ -2328,7 +2408,7 @@
         URL.revokeObjectURL(peerAssistantAudioUrl);
         peerAssistantAudioUrl = null;
       }
-      void postRealtimeTrace("agent", "Stopped relayed assistant output for human speech", { reason });
+      if (hadOutput) void postRealtimeTrace("agent", "Stopped relayed assistant output for human speech", { reason });
     }
 
     function unlockPeerAudio(withTest = false) {
@@ -2408,7 +2488,10 @@
     }
 
     function clearLocalSpeechQueue() {
-      for (const item of localSpeechQueue) item.controller?.abort();
+      for (const item of localSpeechQueue) {
+        item.cancelled = true;
+        item.controller?.abort();
+      }
       localSpeechQueue = [];
       codexStreamingSpeech.clear();
     }
@@ -2416,6 +2499,20 @@
     function nextLocalSpeechGeneration() {
       const queuedGenerations = localSpeechQueue.map((item) => Number(item.generation || 0));
       return Math.max(localSpeechGeneration, ...queuedGenerations) + 1;
+    }
+
+    function isLocalSpeechItemFresh(item) {
+      return Boolean(item && !item.cancelled && item.epoch === assistantOutputEpoch && item.generation === localSpeechGeneration);
+    }
+
+    function eventCreatedAtMs(event) {
+      const parsed = Date.parse(String(event?.createdAt || ""));
+      return Number.isFinite(parsed) ? parsed : Date.now();
+    }
+
+    function isStaleAssistantSource(sourceCreatedAtMs) {
+      const createdAt = Number(sourceCreatedAtMs || 0);
+      return Boolean(createdAt && latestSpeechStopAt && createdAt < latestSpeechStopAt - 50);
     }
 
     async function prepareLocalSpeechAudio(text, generation, item = {}) {
@@ -2443,6 +2540,11 @@
     }
 
     async function playPreparedLocalSpeechItem(item) {
+      if (isStaleAssistantSource(item.sourceCreatedAtMs)) {
+        item.cancelled = true;
+        void postRealtimeTrace("agent", "Dropped stale local TTS before playback", { textChars: String(item.text || "").length, sourceCreatedAtMs: item.sourceCreatedAtMs, latestSpeechStopAt });
+        return;
+      }
       const generation = item.generation || (localSpeechGeneration + 1);
       localSpeechGeneration = generation;
       localSpeechCurrentItem = item;
@@ -2450,11 +2552,13 @@
       try {
         const prepared = await item.synthesis;
         if (!prepared?.ok) throw prepared?.error || new Error("local TTS preparation failed");
-        if (prepared.generation !== localSpeechGeneration) return;
+        if (prepared.generation !== localSpeechGeneration || !isLocalSpeechItemFresh(item) || isStaleAssistantSource(item.sourceCreatedAtMs)) return;
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
-        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
+        if (!isLocalSpeechItemFresh(item) || isStaleAssistantSource(item.sourceCreatedAtMs)) return;
+        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob, item);
         else broadcastAssistantSpeechToHumanPeers(item.text);
         if (realtimeMuted) {
+          updateSpeechContinuityText(item.text);
           renderStatus("agent muted here; audio relayed to Guest", "ready");
           resumeLocalSttAfterSpeech();
           void postRealtimeTrace("agent", "Skipped local agent playback because Host muted agent; peer relay preserved", { textChars: String(item.text || "").length });
@@ -2462,6 +2566,7 @@
         }
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
+        updateSpeechContinuityText(item.text);
         if (prepared.kind === "stream") {
           await playPreparedLocalSpeechStream(prepared);
         } else if (prepared.kind === "speechSynthesis") {
@@ -2480,14 +2585,17 @@
     }
 
     async function speakLocalVoiceMessage(message) {
+      assistantOutputEpoch += 1;
       localSpeechGeneration += 1;
       const generation = localSpeechGeneration;
       const text = clipText(message, 360);
       renderStatus("preparing local voice; listening", "ready");
       try {
         const prepared = await prepareLocalSpeechAudio(text, generation, {});
+        if (generation !== localSpeechGeneration) return;
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
-        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
+        if (generation !== localSpeechGeneration) return;
+        if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob, { generation });
         else broadcastAssistantSpeechToHumanPeers(text);
         if (realtimeMuted) {
           renderStatus("agent muted here; audio relayed to Guest", "ready");
@@ -2817,6 +2925,7 @@
       scheduleRealtimeRestoreAfterRemoteSpeech();
       if (now - remotePeerSpeechLastInterruptAt < 900) return;
       remotePeerSpeechLastInterruptAt = now;
+      assistantOutputEpoch += 1;
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
@@ -2840,13 +2949,16 @@
       void postRealtimeTrace("agent", "Realtime assistant output stopped for human speech", { reason });
     }
 
-    function stopAllAssistantOutputForHumanSpeech(reason = "human speech") {
+    function stopAllAssistantOutputForHumanSpeech(reason = "human speech", options = {}) {
+      assistantOutputEpoch += 1;
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
       stopLocalSpeechAudio();
       stopPeerAssistantOutput(reason);
       stopRealtimeAssistantOutputForHumanSpeech(reason);
+      if (options.broadcastStop !== false) peerRoom?.broadcastAssistantStop?.(reason);
+      updateSpeechContinuityText("");
       renderStatus("human speaking; agent muted", "ready");
       publishShellState();
     }
@@ -2976,6 +3088,7 @@
     }
 
     function interruptLocalSpeechForBargeIn(level) {
+      assistantOutputEpoch += 1;
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
@@ -3082,6 +3195,8 @@
 
     function handleCodexStreamingSpeech(event) {
       if (realtimeMuted) return;
+      const sourceCreatedAtMs = eventCreatedAtMs(event);
+      if (isStaleAssistantSource(sourceCreatedAtMs)) return;
       const key = streamingSpeechKey(event);
       const speech = markdownToSpeech(String(event.text || ""));
       if (!speech) return;
@@ -3093,7 +3208,7 @@
       const available = speech.slice(state.consumed);
       const extraction = extractSpeakableSegments(available, false, { first: state.queued === 0 });
       for (const segment of extraction.segments) {
-        enqueueLocalVoiceMessage(segment.text, { maxChars: Math.max(segment.maxChars || 700, segment.text.length) });
+        enqueueLocalVoiceMessage(segment.text, { maxChars: Math.max(segment.maxChars || 700, segment.text.length), sourceCreatedAtMs });
         state.queued += 1;
       }
       state.consumed += extraction.consumed;
@@ -3101,6 +3216,11 @@
     }
 
     function finalizeCodexStreamingSpeech(event) {
+      const sourceCreatedAtMs = eventCreatedAtMs(event);
+      if (isStaleAssistantSource(sourceCreatedAtMs)) {
+        codexStreamingSpeech.delete(streamingSpeechKey(event));
+        return true;
+      }
       const key = streamingSpeechKey(event);
       const state = codexStreamingSpeech.get(key);
       if (!state) return false;
@@ -3108,11 +3228,11 @@
       const available = speech.slice(Math.min(state.consumed, speech.length));
       const extraction = extractSpeakableSegments(available, true, { first: state.queued === 0 });
       for (const segment of extraction.segments) {
-        enqueueLocalVoiceMessage(segment.text, { maxChars: Math.max(segment.maxChars || 700, segment.text.length) });
+        enqueueLocalVoiceMessage(segment.text, { maxChars: Math.max(segment.maxChars || 700, segment.text.length), sourceCreatedAtMs });
         state.queued += 1;
       }
       if (!state.queued && speech) {
-        enqueueLocalVoiceMessage(clipText(speech, 300));
+        enqueueLocalVoiceMessage(clipText(speech, 300), { sourceCreatedAtMs });
       }
       codexStreamingSpeech.delete(key);
       return true;
@@ -3554,6 +3674,78 @@
         if (MediaRecorder.isTypeSupported(type)) return type;
       }
       return "";
+    }
+
+    function updateSpeechContinuityText(text) {
+      assistantSpeechContinuationText = String(text || "").trim();
+      if (!assistantSpeechContinuationText) return;
+      if (assistantSpeechContinuationText.length > 400) {
+        assistantSpeechContinuationText = assistantSpeechContinuationText.slice(-400);
+      }
+    }
+
+    function mergeWithSpeechContinuity(text) {
+      const incoming = String(text || "").trim();
+      if (!incoming || !assistantSpeechContinuationText) return incoming;
+
+      const prior = assistantSpeechContinuationText;
+      const priorLower = prior.toLowerCase();
+      const incomingLower = incoming.toLowerCase();
+
+      if (incomingLower.startsWith(priorLower)) {
+        return incoming.slice(prior.length).replace(/^[\s.,!?;:\-—]+/, "").trim();
+      }
+
+      const trimmedPrior = prior.replace(/^\W+/g, "");
+      if (trimmedPrior) {
+        const trimmedPriorLower = trimmedPrior.toLowerCase();
+        if (incomingLower.startsWith(trimmedPriorLower)) {
+          return incoming.slice(trimmedPrior.length).replace(/^[\s.,!?;:\-—]+/, "").trim();
+        }
+      }
+
+      return incoming;
+    }
+
+    function shouldSuppressDuplicateRealtimeItem(itemId, kind) {
+      const key = `${kind}:${itemId}`;
+      const now = Date.now();
+      const last = assistantSpeechEventSeen.get(key) || 0;
+      if (now - last < 55_000) return true;
+      assistantSpeechEventSeen.set(key, now);
+      if (assistantSpeechEventSeen.size > 600) {
+        const entries = [...assistantSpeechEventSeen.entries()].sort((a, b) => Number(a[1]) - Number(b[1]));
+        for (let i = 0; i < Math.max(0, entries.length - 350); i += 1) {
+          assistantSpeechEventSeen.delete(entries[i][0]);
+        }
+      }
+      return false;
+    }
+    function markRealtimeItemSeen(itemId, kind) {
+      const key = `${kind}:${itemId}`;
+      assistantSpeechEventSeen.set(key, Date.now());
+      if (assistantSpeechEventSeen.size > 600) {
+        const entries = [...assistantSpeechEventSeen.entries()].sort((a, b) => Number(a[1]) - Number(b[1]));
+        for (let i = 0; i < Math.max(0, entries.length - 350); i += 1) {
+          assistantSpeechEventSeen.delete(entries[i][0]);
+        }
+      }
+    }
+
+    function shouldSuppressDuplicateAssistantText(text) {
+      const normalized = String(text || "").trim().toLowerCase();
+      if (!normalized) return false;
+      const now = Date.now();
+      const last = assistantReplyQueueSeen.get(normalized) || 0;
+      if (now - last < 2_500) return true;
+      assistantReplyQueueSeen.set(normalized, now);
+      if (assistantReplyQueueSeen.size > 300) {
+        const entries = [...assistantReplyQueueSeen.entries()].sort((a, b) => Number(a[1]) - Number(b[1]));
+        for (let i = 0; i < Math.max(0, entries.length - 220); i += 1) {
+          assistantReplyQueueSeen.delete(entries[i][0]);
+        }
+      }
+      return false;
     }
 
     function shouldRelayDirectVoiceText(text) {
