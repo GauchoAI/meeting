@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.3.4";
+    const MEETING_STABLE_VERSION = "0.3.5";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -765,7 +765,7 @@
                 }
               }
               const silenceMs = silentSince ? Date.now() - silentSince : 0;
-              if (recorder.state === "recording" && ((heardSpeech && elapsed >= 450 && silenceMs >= localSpeechSilenceMs()) || elapsed >= localSpeechMaxMs())) recorder.stop();
+              if (recorder.state === "recording" && ((heardSpeech && elapsed >= 320 && silenceMs >= localSpeechSilenceMs()) || elapsed >= localSpeechMaxMs())) recorder.stop();
             }, 120);
           } catch (error) {
             active = false;
@@ -1852,7 +1852,7 @@
       if (localSttRecorder?.state === "recording") {
         const elapsedMs = now - localSttRecorderStartedAt;
         const silenceMs = now - localSttLastVoiceAt;
-        if ((elapsedMs >= 320 && silenceMs >= localSpeechSilenceMs()) || elapsedMs >= localSpeechMaxMs()) {
+        if ((elapsedMs >= 240 && silenceMs >= localSpeechSilenceMs()) || elapsedMs >= localSpeechMaxMs()) {
           stopLocalSpeechRecorder({ discard: false });
         }
       }
@@ -2087,9 +2087,9 @@
     }
 
     function localSpeechSilenceMs() {
-      const defaultMs = localCaptureMode() === "auto-vad" ? 650 : 900;
+      const defaultMs = localCaptureMode() === "auto-vad" ? 500 : 750;
       const configured = Number(localStorage.getItem("meeting.localSpeechSilenceMs") || String(defaultMs));
-      return Number.isFinite(configured) ? Math.max(350, Math.min(2500, configured)) : defaultMs;
+      return Number.isFinite(configured) ? Math.max(250, Math.min(2000, configured)) : defaultMs;
     }
 
     function localSpeechMaxMs() {
@@ -2421,6 +2421,9 @@
     async function prepareLocalSpeechAudio(text, generation, item = {}) {
       item.controller = new AbortController();
       const startedAt = Date.now();
+      if (shouldUseSpeechSynthesisForLocalSpeech(text) && !item.forceNetworkTts) {
+        return { ok: true, kind: "speechSynthesis", text, generation, prepareMs: Date.now() - startedAt };
+      }
       if (localStreamingTts) {
         try {
           return await prepareLocalSpeechStream(text, generation, item.controller.signal, startedAt);
@@ -2432,6 +2435,11 @@
         }
       }
       return await prepareLocalSpeechBlob(text, generation, item.controller.signal, startedAt);
+    }
+
+    function shouldUseSpeechSynthesisForLocalSpeech(text) {
+      if (!window.speechSynthesis) return false;
+      return String(text || "").trim().length <= 150;
     }
 
     async function playPreparedLocalSpeechItem(item) {
@@ -2456,6 +2464,8 @@
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") {
           await playPreparedLocalSpeechStream(prepared);
+        } else if (prepared.kind === "speechSynthesis") {
+          await playLocalSpeechSynthesis(prepared.text, prepared.generation);
         } else {
           await playLocalSpeechBlob(prepared.blob, prepared.generation);
         }
@@ -2488,6 +2498,7 @@
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") await playPreparedLocalSpeechStream(prepared);
+        else if (prepared.kind === "speechSynthesis") await playLocalSpeechSynthesis(prepared.text, prepared.generation);
         else await playLocalSpeechBlob(prepared.blob, prepared.generation);
       } catch (error) {
         if (generation !== localSpeechGeneration) return;
@@ -2615,6 +2626,36 @@
           void postRealtimeTrace("error", "Local TTS playback failed", { error: error?.message || String(error) });
           finish();
         });
+      });
+    }
+
+    function playLocalSpeechSynthesis(text, generation) {
+      return new Promise((resolve) => {
+        stopLocalSpeechAudio();
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          if (generation === localSpeechGeneration) resumeLocalSttAfterSpeech();
+          if (localSpeechFinishCurrent === finish) localSpeechFinishCurrent = null;
+          resolve();
+        };
+        const utterance = new SpeechSynthesisUtterance(clipText(String(text || ""), 240));
+        utterance.lang = "en-US";
+        utterance.rate = 1;
+        utterance.volume = assistantVoiceVolume;
+        utterance.onend = finish;
+        utterance.onerror = finish;
+        localSpeechFinishCurrent = finish;
+        renderStatus("local voice speaking", "speaking");
+        const liveLatency = recordPlaybackLatencyPoint("speechSynthesis", { generation });
+        void postRealtimeTrace("latency", "local.tts.playback.start", {
+          kind: "speechSynthesis",
+          generation,
+          clientPlaybackStartedAt: Date.now(),
+          ...liveLatency
+        });
+        window.speechSynthesis.speak(utterance);
       });
     }
 
@@ -2866,13 +2907,13 @@
     }
 
     function localUnconfirmedMicDeferMs() {
-      const configured = Number(localStorage.getItem("meeting.localUnconfirmedMicDeferMs") || "700");
-      return Number.isFinite(configured) ? Math.max(0, Math.min(8000, configured)) : 700;
+      const configured = Number(localStorage.getItem("meeting.localUnconfirmedMicDeferMs") || "600");
+      return Number.isFinite(configured) ? Math.max(0, Math.min(8000, configured)) : 600;
     }
 
     function localSpeechPlaybackQuietMs() {
-      const configured = Number(localStorage.getItem("meeting.localSpeechPlaybackQuietMs") || "250");
-      return Number.isFinite(configured) ? Math.max(0, Math.min(3000, configured)) : 250;
+      const configured = Number(localStorage.getItem("meeting.localSpeechPlaybackQuietMs") || "180");
+      return Number.isFinite(configured) ? Math.max(0, Math.min(3000, configured)) : 180;
     }
 
     function localSpeechAudioPlaying() {
@@ -2890,6 +2931,9 @@
         localSpeechAudio.onerror = null;
         localSpeechAudio.removeAttribute("src");
         localSpeechAudio.load();
+      }
+      if (window.speechSynthesis?.speaking) {
+        window.speechSynthesis.cancel();
       }
       if (localSpeechFinishCurrent) {
         const finish = localSpeechFinishCurrent;
@@ -2912,14 +2956,14 @@
       localSttPausedForSpeech = true;
       localSpeechStartedAt = Date.now();
       localSpeechBargeInStartedAt = 0;
-      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 900);
+      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 260);
       if (localSttRecorder?.state === "recording") stopLocalSpeechRecorder({ discard: true });
       renderStatus(localAcousticBargeInEnabled() ? "local voice speaking; listening for interruption" : "local voice speaking; mic guarded", "speaking");
       publishShellState();
     }
 
     function resumeLocalSttAfterSpeech() {
-      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 650);
+      localSttSuppressUploadsUntil = Math.max(localSttSuppressUploadsUntil, Date.now() + 220);
       if (localSpeechResumeTimer !== null) window.clearTimeout(localSpeechResumeTimer);
       localSpeechResumeTimer = window.setTimeout(() => {
         localSpeechResumeTimer = null;
@@ -2928,7 +2972,7 @@
         localSpeechStartedAt = 0;
         localSpeechBargeInStartedAt = 0;
         if (joined && localStream && usesLocalStt()) startLocalSttCapture(localStream);
-      }, 700);
+      }, 240);
     }
 
     function interruptLocalSpeechForBargeIn(level) {
