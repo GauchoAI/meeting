@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.1.6";
+    const MEETING_STABLE_VERSION = "0.1.7";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -71,6 +71,7 @@
     const api = peerOnly ? "" : (requestedApi || localStorage.getItem("meeting.api") || `${window.location.protocol}//${window.location.hostname}:4317`);
     const meetingId = pageParams.get("meeting") || localStorage.getItem("meeting.id") || "local-demo";
     const autoJoinKey = "meeting.stable.autoJoin";
+    const persistentAutoJoinKey = "meeting.stable.autoJoin.persistent";
     const legacyAutoJoinKey = "meeting.autoJoin";
     const realtimeAgentId = "realtime-codex";
     const piAgentId = "pi-agent";
@@ -219,17 +220,23 @@
       void postRealtimeTrace("error", "Speech provider status failed", { error: error?.message || String(error) });
     });
     if (!peerOnly) connectEventStream();
-    if (sessionStorage.getItem(autoJoinKey) === "true" || sessionStorage.getItem(legacyAutoJoinKey) === "true") {
-      void join().catch((error) => {
+    const shouldAutoJoin = sessionStorage.getItem(autoJoinKey) === "true"
+      || sessionStorage.getItem(legacyAutoJoinKey) === "true"
+      || localStorage.getItem(persistentAutoJoinKey) === "true";
+    console.info("[meeting-stable] boot autojoin decision", { peerOnly, shouldAutoJoin, sessionAutoJoin: sessionStorage.getItem(autoJoinKey), legacyAutoJoin: sessionStorage.getItem(legacyAutoJoinKey), persistentAutoJoin: localStorage.getItem(persistentAutoJoinKey) });
+    if (shouldAutoJoin) {
+      void join({ reason: "boot-autojoin" }).catch((error) => {
         console.warn("stable shell auto-join failed", error);
         sessionStorage.removeItem(autoJoinKey);
+        sessionStorage.removeItem(legacyAutoJoinKey);
         renderStatus("click Join meeting to restore mic permission", "idle");
       });
     } else {
       renderStatus("stable shell idle", "idle");
     }
 
-    async function join() {
+    async function join(options = {}) {
+      console.info("[meeting-stable] join requested", { reason: options.reason || "button", peerOnly, joined, voiceMode });
       if (joined) {
         if (usesRealtimeVoice()) ensureRealtimeConnected("join requested while already joined");
         return;
@@ -240,6 +247,8 @@
       realtimeDesired = !peerOnly && usesRealtimeVoice();
       sessionStorage.setItem(autoJoinKey, "true");
       sessionStorage.setItem(legacyAutoJoinKey, "true");
+      localStorage.setItem(persistentAutoJoinKey, "true");
+      console.info("[meeting-stable] join established; autojoin persisted", { peerOnly, audioTracks: localStream.getAudioTracks().length, videoTracks: localStream.getVideoTracks().length });
       joinButton.hidden = true;
       leaveButton.hidden = false;
       muteButton.disabled = false;
@@ -275,6 +284,7 @@
       realtimeDesired = false;
       sessionStorage.removeItem(autoJoinKey);
       sessionStorage.removeItem(legacyAutoJoinKey);
+      localStorage.removeItem(persistentAutoJoinKey);
       clearRealtimeReconnect();
       disconnectHumanPeerRoom();
       disconnectRealtimeAgent({ intentional: true });
