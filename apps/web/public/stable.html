@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.1";
+    const MEETING_STABLE_VERSION = "0.2.2";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -1293,7 +1293,7 @@
       restoreRealtimeBaseMode();
       if (realtimeState === "connected") {
         configureRealtimeSession();
-        void postRealtimeTrace("agent", muted ? "Realtime agent muted in stable shell" : "Realtime agent unmuted in stable shell", { audioResponses: shouldCreateRealtimeResponse() });
+        void postRealtimeTrace("agent", muted ? "Realtime agent muted locally in stable shell" : "Realtime agent unmuted locally in stable shell", { audioResponses: shouldCreateRealtimeResponse(), peerRelayUnaffected: true });
       }
       renderStatus();
       publishShellState();
@@ -2069,7 +2069,6 @@
     }
 
     async function handleLocalPiAgentUpdate(event) {
-      if (realtimeMuted) return;
       const message = localSpeechTextForPiAgentUpdate(event);
       if (!message) return;
       const direct = isVoiceAgentDirectMessage(event);
@@ -2082,7 +2081,7 @@
 
     function enqueueLocalVoiceMessage(message, options = {}) {
       const text = clipText(sanitizeSpokenText(String(message || "")).trim(), options.maxChars || 700);
-      if (!text || realtimeMuted) return 0;
+      if (!text) return 0;
       if (options.clearExisting) clearLocalSpeechQueue();
       localSpeechQueue.push(createLocalSpeechQueueItem(text));
       warmLocalSpeechQueue();
@@ -2092,7 +2091,7 @@
 
     function enqueueLocalVoiceSegments(message, options = {}) {
       const text = sanitizeSpokenText(String(message || "")).trim();
-      if (!text || realtimeMuted) return 0;
+      if (!text) return 0;
       if (options.clearExisting) clearLocalSpeechQueue();
       const maxChars = Number(options.maxChars || 640);
       const extraction = extractSpeakableSegments(text, true, { first: true });
@@ -2274,7 +2273,7 @@
       if (localSpeechQueuePlaying) return;
       localSpeechQueuePlaying = true;
       try {
-        while (localSpeechQueue.length && joined && usesLocalSpeechOutput() && !realtimeMuted) {
+        while (localSpeechQueue.length && joined && usesLocalSpeechOutput()) {
           warmLocalSpeechQueue();
           const item = localSpeechQueue.shift();
           if (!item) continue;
@@ -2288,7 +2287,7 @@
         }
       } finally {
         localSpeechQueuePlaying = false;
-        if (localSpeechQueue.length && joined && usesLocalSpeechOutput() && !realtimeMuted) void playLocalSpeechQueue();
+        if (localSpeechQueue.length && joined && usesLocalSpeechOutput()) void playLocalSpeechQueue();
       }
     }
 
@@ -2331,6 +2330,12 @@
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
         if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
         else broadcastAssistantSpeechToHumanPeers(item.text);
+        if (realtimeMuted) {
+          renderStatus("agent muted here; audio relayed to Guest", "ready");
+          resumeLocalSttAfterSpeech();
+          void postRealtimeTrace("agent", "Skipped local agent playback because Host muted agent; peer relay preserved", { textChars: String(item.text || "").length });
+          return;
+        }
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") {
@@ -2358,6 +2363,12 @@
         if (!await waitForLocalSpeechPlaybackTurn(generation)) return;
         if (prepared.kind === "blob") void broadcastAssistantAudioToHumanPeers(prepared.blob);
         else broadcastAssistantSpeechToHumanPeers(text);
+        if (realtimeMuted) {
+          renderStatus("agent muted here; audio relayed to Guest", "ready");
+          resumeLocalSttAfterSpeech();
+          void postRealtimeTrace("agent", "Skipped local agent playback because Host muted agent; peer relay preserved", { textChars: String(text || "").length });
+          return;
+        }
         pauseLocalSttForSpeech();
         stopLocalSpeechAudio();
         if (prepared.kind === "stream") await playPreparedLocalSpeechStream(prepared);
@@ -2584,10 +2595,10 @@
     }
 
     async function waitForLocalSpeechPlaybackTurn(generation) {
-      if (localCaptureMode() !== "auto-vad" || !usesLocalStt()) return true;
+      if (localCaptureMode() !== "auto-vad" || !usesLocalStt() || realtimeMuted) return true;
       let notedWait = false;
       const waitStartedAt = Date.now();
-      while (generation === localSpeechGeneration && joined && usesLocalSpeechOutput() && !realtimeMuted) {
+      while (generation === localSpeechGeneration && joined && usesLocalSpeechOutput()) {
         if (!localShouldDeferSpeechPlayback()) return true;
         const waitedMs = Date.now() - waitStartedAt;
         if (waitedMs >= localUnconfirmedMicDeferMs()) {
@@ -3166,7 +3177,7 @@
       }
       const state = forcedState || (!joined ? "idle" : realtimeState === "connected" && !realtimeMuted && realtimeActivationMode === "active" ? "speaking" : "ready");
       dotEl.className = `dot ${state === "ready" ? "ready" : state === "speaking" ? "speaking" : ""}`;
-      muteButton.textContent = realtimeMuted ? "Unmute agent" : "Mute agent";
+      muteButton.textContent = realtimeMuted ? "Unmute agent here" : "Mute agent here";
       muteButton.disabled = !joined;
       selfMuteButton.textContent = selfMuted ? "Unmute self" : "Mute self";
       selfMuteButton.disabled = !joined;
