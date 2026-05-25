@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.1.5";
+    const MEETING_STABLE_VERSION = "0.1.6";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -496,16 +496,21 @@
           return;
         }
         if (message?.type === "meeting.event" && !host) {
+          console.info("[meeting-stable] received direct peer canvas event", { from: peer?.name, eventId: message.event?.id, documentId: message.event?.documentId, textChars: String(message.event?.text || "").length });
           deliverGuestMeetingEvent(message.event, "peer-direct");
           return;
         }
         if (message?.type === "meeting.event.start" && !host) {
-          incomingPeerEvents.set(message.id, { chunks: [], startedAt: Date.now() });
+          incomingPeerEvents.set(message.id, { chunks: [], startedAt: Date.now(), bytes: message.bytes || 0 });
+          console.info("[meeting-stable] peer canvas transfer start", { transferId: message.id, from: peer?.name, bytes: message.bytes || 0 });
           return;
         }
         if (message?.type === "meeting.event.chunk" && !host) {
           const transfer = incomingPeerEvents.get(message.id);
-          if (transfer) transfer.chunks[message.index || 0] = message.data || "";
+          if (transfer) {
+            transfer.chunks[message.index || 0] = message.data || "";
+            if ((message.index || 0) === 0 || (message.index || 0) % 50 === 0) console.info("[meeting-stable] peer canvas transfer chunk", { transferId: message.id, index: message.index || 0, chunksReceived: transfer.chunks.filter(Boolean).length });
+          }
           return;
         }
         if (message?.type === "meeting.event.end" && !host) {
@@ -513,11 +518,15 @@
           incomingPeerEvents.delete(message.id);
           if (transfer) {
             try {
-              const event = JSON.parse(transfer.chunks.join(""));
+              const joined = transfer.chunks.join("");
+              const event = JSON.parse(joined);
+              console.info("[meeting-stable] peer canvas transfer complete", { transferId: message.id, chunksExpected: message.chunks, chunksReceived: transfer.chunks.filter(Boolean).length, payloadChars: joined.length, eventId: event.id, documentId: event.documentId, textChars: String(event.text || "").length });
               deliverGuestMeetingEvent(event, "peer-chunked");
             } catch (error) {
               console.warn("meeting event transfer failed", error);
             }
+          } else {
+            console.warn("[meeting-stable] peer canvas transfer ended without start", { transferId: message.id });
           }
           return;
         }
@@ -562,6 +571,7 @@
         rememberLatestHostCanvasEvent(event);
         const eventPayload = JSON.stringify(event);
         if (eventPayload.length <= 120000) {
+          console.info("[meeting-stable] sending direct canvas event to peer", { eventId: event?.id, documentId: event?.documentId, payloadChars: eventPayload.length, textChars: String(event?.text || "").length });
           channel.send(JSON.stringify({ type: "meeting.event", event, from: self, createdAtMs: Date.now() }));
           return true;
         }
@@ -571,6 +581,7 @@
         let offset = 0;
         let index = 0;
         channel.bufferedAmountLowThreshold = Math.min(channel.bufferedAmountLowThreshold || maxBufferedBytes, maxBufferedBytes);
+        console.info("[meeting-stable] sending chunked canvas event to peer", { transferId: id, eventId: event?.id, documentId: event?.documentId, payloadChars: eventPayload.length, textChars: String(event?.text || "").length, chunkSize, maxBufferedBytes });
         channel.send(JSON.stringify({ type: "meeting.event.start", id, from: self, createdAtMs: Date.now(), bytes: eventPayload.length }));
         const pump = () => {
           if (channel?.readyState !== "open") return;
@@ -580,6 +591,7 @@
             index += 1;
           }
           if (offset >= eventPayload.length) {
+            console.info("[meeting-stable] finished chunked canvas event send", { transferId: id, chunks: index, payloadChars: eventPayload.length });
             channel.send(JSON.stringify({ type: "meeting.event.end", id, from: self, createdAtMs: Date.now(), chunks: index }));
             return;
           }
@@ -600,7 +612,10 @@
       let latestHostCanvasEvent = null;
 
       function rememberLatestHostCanvasEvent(event) {
-        if (event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) latestHostCanvasEvent = event;
+        if (event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) {
+          latestHostCanvasEvent = event;
+          console.info("[meeting-stable] remembered latest host canvas", { eventId: event.id, documentId: event.documentId, textChars: String(event.text || "").length, hasDataImages: String(event.text || "").includes("data:image"), hasAssetRefs: /!\[[^\]]*\]\((?:\.\/)?assets\//.test(String(event.text || "")) });
+        }
       }
 
       async function sendCurrentCanvasToChannel(channel) {
@@ -612,7 +627,11 @@
             const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
             canvasEvent = [...events].reverse().find((event) => event?.type === "agent.message" && event.surface === "canvas" && String(event.text || "").trim()) || canvasEvent;
           }
-          if (!canvasEvent || channel.readyState !== "open") return;
+          if (!canvasEvent || channel.readyState !== "open") {
+            console.info("[meeting-stable] no current canvas available for peer resync", { hasCachedCanvas: Boolean(latestHostCanvasEvent), channelState: channel?.readyState });
+            return;
+          }
+          console.info("[meeting-stable] resyncing current canvas to peer", { eventId: canvasEvent.id, documentId: canvasEvent.documentId, textChars: String(canvasEvent.text || "").length, cached: canvasEvent === latestHostCanvasEvent });
           sendMeetingEventToChannel(channel, canvasEvent);
           void postRealtimeTrace("agent", "Sent current canvas to human peer", { eventId: canvasEvent.id, textChars: String(canvasEvent.text || "").length, cached: canvasEvent === latestHostCanvasEvent });
         } catch (error) {
