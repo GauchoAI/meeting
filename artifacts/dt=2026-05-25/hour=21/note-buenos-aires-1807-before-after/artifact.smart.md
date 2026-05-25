@@ -9,7 +9,7 @@
 
 Esta fue la primera versión del juego: Buenos Aires preparada para resistir, con Álzaga, milicias, barricadas, azoteas y defensa urbana. La conclusión fue que un asalto británico directo contra una ciudad ya organizada era muy difícil y probablemente fracasaba.
 
-![Versión 1: Buenos Aires fortificada en 1807](../dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/assets/before-fortified-buenos-aires-1807.png)
+![Versión 1: Buenos Aires fortificada en 1807](./assets/before-fortified-buenos-aires-1807.png)
 
 ---
 
@@ -22,7 +22,7 @@ Esta fue la primera versión del juego: Buenos Aires preparada para resistir, co
 
 Esta fue la segunda versión del juego: en vez de intentar conquistar Buenos Aires calle por calle, el mando británico conserva Montevideo, mantiene el bloqueo del Río de la Plata, presiona económicamente y abre negociación política/comercial con Buenos Aires.
 
-![Versión 2: Whitelocke y Álzaga sellan una negociación](../dt=2026-05-17/hour=00/note-buenos-aires-1807-wargame-test/assets/after-whitelocke-alzaga-handshake.png)
+![Versión 2: Whitelocke y Álzaga sellan una negociación](./assets/after-whitelocke-alzaga-handshake.png)
 
 ---
 
