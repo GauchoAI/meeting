@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.1.4";
+    const MEETING_STABLE_VERSION = "0.1.5";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -117,6 +117,8 @@
     let lastRealtimeWakeAt = 0;
     let peerAudioUnlocked = false;
     let realtimeReconnectTimer = null;
+    let uiFrameLoaded = false;
+    const pendingUiMeetingEvents = [];
     let realtimeReconnectAttempt = 0;
     let localTtsProvider = "unknown";
     let localStreamingTts = false;
@@ -494,8 +496,7 @@
           return;
         }
         if (message?.type === "meeting.event" && !host) {
-          rememberGuestMeetingEvent(message.event);
-          uiFrame.contentWindow?.postMessage({ type: "meeting.event", event: message.event }, "*");
+          deliverGuestMeetingEvent(message.event, "peer-direct");
           return;
         }
         if (message?.type === "meeting.event.start" && !host) {
@@ -513,8 +514,7 @@
           if (transfer) {
             try {
               const event = JSON.parse(transfer.chunks.join(""));
-              rememberGuestMeetingEvent(event);
-              uiFrame.contentWindow?.postMessage({ type: "meeting.event", event }, "*");
+              deliverGuestMeetingEvent(event, "peer-chunked");
             } catch (error) {
               console.warn("meeting event transfer failed", error);
             }
@@ -2112,13 +2112,32 @@
       }
     }
 
+    function postMeetingEventToUi(event, source = "unknown") {
+      if (!event) return;
+      if (!uiFrameLoaded) {
+        pendingUiMeetingEvents.push(event);
+        console.info("[meeting-stable] queued meeting event until UI iframe load", { source, eventId: event.id, documentId: event.documentId, textChars: String(event.text || "").length, pending: pendingUiMeetingEvents.length });
+        return;
+      }
+      uiFrame.contentWindow?.postMessage({ type: "meeting.event", event }, "*");
+      console.info("[meeting-stable] posted meeting event to UI iframe", { source, eventId: event.id, documentId: event.documentId, textChars: String(event.text || "").length });
+    }
+
+    function deliverGuestMeetingEvent(event, source = "peer") {
+      rememberGuestMeetingEvent(event);
+      postMeetingEventToUi(event, source);
+    }
+
     uiFrame.addEventListener("load", () => {
+      uiFrameLoaded = true;
+      console.info("[meeting-stable] UI iframe loaded", { pendingEvents: pendingUiMeetingEvents.length, peerOnly });
+      while (pendingUiMeetingEvents.length) postMeetingEventToUi(pendingUiMeetingEvents.shift(), "queued-after-load");
       if (!peerOnly) return;
       try {
         const raw = localStorage.getItem(guestCanvasStorageKey());
         if (!raw) return;
         const event = JSON.parse(raw);
-        if (isPersistableGuestCanvasEvent(event)) uiFrame.contentWindow?.postMessage({ type: "meeting.event", event }, "*");
+        if (isPersistableGuestCanvasEvent(event)) postMeetingEventToUi(event, "localStorage");
         else localStorage.removeItem(guestCanvasStorageKey());
       } catch {}
     });
