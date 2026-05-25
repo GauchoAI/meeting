@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.3.3";
+    const MEETING_STABLE_VERSION = "0.3.4";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -1852,7 +1852,7 @@
       if (localSttRecorder?.state === "recording") {
         const elapsedMs = now - localSttRecorderStartedAt;
         const silenceMs = now - localSttLastVoiceAt;
-        if ((elapsedMs >= 450 && silenceMs >= localSpeechSilenceMs()) || elapsedMs >= localSpeechMaxMs()) {
+        if ((elapsedMs >= 320 && silenceMs >= localSpeechSilenceMs()) || elapsedMs >= localSpeechMaxMs()) {
           stopLocalSpeechRecorder({ discard: false });
         }
       }
@@ -2087,9 +2087,9 @@
     }
 
     function localSpeechSilenceMs() {
-      const defaultMs = localCaptureMode() === "auto-vad" ? 1000 : 900;
+      const defaultMs = localCaptureMode() === "auto-vad" ? 650 : 900;
       const configured = Number(localStorage.getItem("meeting.localSpeechSilenceMs") || String(defaultMs));
-      return Number.isFinite(configured) ? Math.max(450, Math.min(4000, configured)) : defaultMs;
+      return Number.isFinite(configured) ? Math.max(350, Math.min(2500, configured)) : defaultMs;
     }
 
     function localSpeechMaxMs() {
@@ -2866,13 +2866,13 @@
     }
 
     function localUnconfirmedMicDeferMs() {
-      const configured = Number(localStorage.getItem("meeting.localUnconfirmedMicDeferMs") || "1200");
-      return Number.isFinite(configured) ? Math.max(0, Math.min(8000, configured)) : 1800;
+      const configured = Number(localStorage.getItem("meeting.localUnconfirmedMicDeferMs") || "700");
+      return Number.isFinite(configured) ? Math.max(0, Math.min(8000, configured)) : 700;
     }
 
     function localSpeechPlaybackQuietMs() {
-      const configured = Number(localStorage.getItem("meeting.localSpeechPlaybackQuietMs") || "500");
-      return Number.isFinite(configured) ? Math.max(0, Math.min(3000, configured)) : 650;
+      const configured = Number(localStorage.getItem("meeting.localSpeechPlaybackQuietMs") || "250");
+      return Number.isFinite(configured) ? Math.max(0, Math.min(3000, configured)) : 250;
     }
 
     function localSpeechAudioPlaying() {

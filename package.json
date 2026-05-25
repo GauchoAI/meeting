@@ -17,7 +17,8 @@
     "benchmark:speech": "node scripts/benchmark-speech-providers.mjs",
     "test:assistant-delivery": "node scripts/check-assistant-delivery.mjs",
     "test:realtime-sleep": "node scripts/test-realtime-sleep.mjs",
-    "test:stable-voice": "node scripts/test-stable-voice-regression.mjs"
+    "test:stable-voice": "node scripts/test-stable-voice-regression.mjs",
+    "test:latency-assert": "node scripts/assert-meeting-latency.mjs"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {

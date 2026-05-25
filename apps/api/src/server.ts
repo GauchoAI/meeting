@@ -438,8 +438,8 @@ async function createRealtimeCall(sdp: string, res: ServerResponse): Promise<voi
           type: "server_vad",
           create_response: true,
           interrupt_response: true,
-          prefix_padding_ms: 220,
-          silence_duration_ms: 650
+          prefix_padding_ms: 140,
+          silence_duration_ms: 500
         }
       },
       output: {
