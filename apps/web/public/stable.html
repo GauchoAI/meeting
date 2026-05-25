@@ -55,7 +55,7 @@
   <iframe id="ui" src="./?embedded=1"></iframe>
 
   <script type="module">
-    const MEETING_STABLE_VERSION = "0.2.3";
+    const MEETING_STABLE_VERSION = "0.2.4";
     console.log(`[meeting-stable] version ${MEETING_STABLE_VERSION}`);
     console.info("[meeting-stable] shell build", {
       version: MEETING_STABLE_VERSION,
@@ -154,6 +154,8 @@
     let localSpeechResumeTimer = null;
     let remotePeerSpeechUntil = 0;
     let remotePeerSpeechLastInterruptAt = 0;
+    let peerAssistantAudio = null;
+    let peerAssistantAudioUrl = null;
     let localSpeechGeneration = 0;
     let directVoiceTurnActive = false;
     let directVoiceTurnToolCalled = false;
@@ -558,6 +560,10 @@
           if (transfer) void playPeerAssistantAudioBlob(transfer.chunks.join(""), transfer.mimeType, transfer.startedAt);
           return;
         }
+        if (message?.type === "assistant.output.stop" && !host) {
+          stopPeerAssistantOutput(message.reason || "human speech");
+          return;
+        }
         if (message?.type === "assistant.speech" && !host) {
           speakPeerAssistantText(message.text || "");
         }
@@ -849,6 +855,9 @@
           rememberLatestHostCanvasEvent(event);
         },
         broadcastAudioBlob,
+        broadcastAssistantStop(reason = "human speech") {
+          return broadcastHumanPeerData({ type: "assistant.output.stop", reason, from: self, createdAtMs: Date.now() });
+        },
         stop() {
           stopped = true;
           void publish({ type: "bye", roomId, from: self }).catch(() => undefined);
@@ -2206,6 +2215,9 @@
       const blob = base64ToBlob(base64Audio, mimeType);
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      stopPeerAssistantOutput("new assistant audio");
+      peerAssistantAudio = audio;
+      peerAssistantAudioUrl = url;
       try {
         await audio.play();
         void postRealtimeTrace("agent", "Playing relayed assistant TTS audio", { bytes: blob.size, mimeType, transferMs: Date.now() - startedAt });
@@ -2214,9 +2226,29 @@
         speakPeerAssistantText("Audio is ready. Please press Enable guest audio.");
         void postRealtimeTrace("error", "Relayed assistant TTS audio playback failed", { error: error?.message || String(error), bytes: blob.size, mimeType });
       } finally {
-        audio.onended = () => URL.revokeObjectURL(url);
+        audio.onended = () => {
+          if (peerAssistantAudio === audio) peerAssistantAudio = null;
+          if (peerAssistantAudioUrl === url) peerAssistantAudioUrl = null;
+          URL.revokeObjectURL(url);
+        };
         window.setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
+    }
+
+    function stopPeerAssistantOutput(reason = "human speech") {
+      try { window.speechSynthesis?.cancel?.(); } catch {}
+      if (peerAssistantAudio) {
+        try { peerAssistantAudio.pause(); } catch {}
+        peerAssistantAudio.onended = null;
+        peerAssistantAudio.removeAttribute("src");
+        try { peerAssistantAudio.load(); } catch {}
+        peerAssistantAudio = null;
+      }
+      if (peerAssistantAudioUrl) {
+        URL.revokeObjectURL(peerAssistantAudioUrl);
+        peerAssistantAudioUrl = null;
+      }
+      void postRealtimeTrace("agent", "Stopped relayed assistant output for human speech", { reason });
     }
 
     function unlockPeerAudio(withTest = false) {
@@ -2638,17 +2670,18 @@
     function noteRemotePeerSpeechActivity(peer, level = 0) {
       const now = Date.now();
       remotePeerSpeechUntil = Math.max(remotePeerSpeechUntil, now + localSpeechPlaybackQuietMs());
-      if (!localSpeechAudioPlaying()) return;
+      if (!localSpeechAudioPlaying() && !localSpeechQueue.length && !localSpeechQueuePlaying) return;
       if (now - remotePeerSpeechLastInterruptAt < 900) return;
       remotePeerSpeechLastInterruptAt = now;
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
       stopLocalSpeechAudio();
+      peerRoom?.broadcastAssistantStop?.("Guest is speaking");
       resumeLocalSttAfterSpeech();
       renderStatus("Guest is speaking; agent voice paused", "ready");
       publishShellState();
-      void postRealtimeTrace("agent", "Local voice interrupted by Guest speech", { peerId: peer?.id, peerName: peer?.name, level });
+      void postRealtimeTrace("agent", "Local voice interrupted by Guest speech; queue compressed", { peerId: peer?.id, peerName: peer?.name, level });
     }
 
     function localUnconfirmedMicDeferMs() {
@@ -2721,6 +2754,7 @@
       localSpeechGeneration += 1;
       abortLocalSpeechCurrentItem();
       clearLocalSpeechQueue();
+      peerRoom?.broadcastAssistantStop?.("Host is speaking");
       localSttPausedForSpeech = false;
       localSpeechStartedAt = 0;
       localSpeechBargeInStartedAt = 0;
@@ -2731,7 +2765,7 @@
       if (!localSttRecorder || localSttRecorder.state === "inactive") startLocalSpeechRecorder();
       renderStatus("local voice interrupted; recording", "speaking");
       publishShellState();
-      void postRealtimeTrace("agent", "Local voice speech interrupted by mic activity; recording human turn", { level });
+      void postRealtimeTrace("agent", "Local voice speech interrupted by Host mic activity; queue compressed", { level });
     }
 
     async function notifyRealtimeOfPiAgentUpdate(event) {
