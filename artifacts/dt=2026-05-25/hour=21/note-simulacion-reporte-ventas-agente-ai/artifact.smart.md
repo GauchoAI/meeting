@@ -29,6 +29,17 @@
 - **Respuestas:** 158
 - **Ventas:** 12
 
+## Comparativa semanal (vs semana anterior)
+- **Indicador base:** usa estos mismos KPIs y compara con el período previo.
+- **Semáforo W/W:** 
+  - Tráfico: [▲ / ▼ / →]
+  - Intenciones: [▲ / ▼ / →]
+  - Respuesta: [▲ / ▼ / →]
+  - Efectividad comercial: [▲ / ▼ / →]
+- **Lectura de tendencia (ejemplo):** si el tráfico sube y la tasa de cierre baja, hay cuello de botella en calidad/seguimiento.
+
+- **Próximo dato a completar:** tráfico, intenciones y ventas de la semana previa para calcular deltas exactos.
+
 ## Checklist para mañana
 - [ ] Optimizar mensaje del 2.º contacto (variant A/B).  
 - [ ] Segmentar leads por intención (frío/tibio/caliente).  
