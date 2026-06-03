@@ -1,0 +1,17 @@
+{
+  "kind": "note",
+  "slug": "simulacion-reporte-ventas-agente-ai",
+  "title": "Simulación — Reporte de ventas de AI Agent",
+  "createdAt": "2026-05-25T00:10:12.000Z",
+  "updatedAt": "2026-05-25T00:10:12.000Z",
+  "artifact": "artifact.smart.md",
+  "tags": [
+    "ventas",
+    "agent",
+    "ia",
+    "reporte",
+    "dashboard",
+    "simulacion"
+  ],
+  "summary": "Borrador de artefacto con un reporte diario simulado de desempeño de un agente de inteligencia artificial de ventas, formato ejecutivo y orientado a dashboard."
+}
