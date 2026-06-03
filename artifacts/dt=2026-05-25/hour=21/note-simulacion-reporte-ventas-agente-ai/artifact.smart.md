@@ -61,7 +61,7 @@
 - **Tasa de conversión por vendedor** = (Ventas por empleado ÷ Leads contactados por empleado) × 100
 
 ## Confiabilidad operacional
-- **Uso de GPU observado:** 88% (cerca del umbral crítico).
+- **Uso de GPU observado:** 90% (cerca del umbral crítico).
 - Semáforo: 🟠 Si supera 85% sostenido 3+ minutos, activar plan de degradación:
   - modo texto corto
   - bajar frecuencia de inferencia no crítica
