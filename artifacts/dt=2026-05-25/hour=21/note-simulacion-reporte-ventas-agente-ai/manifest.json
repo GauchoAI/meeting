@@ -3,7 +3,7 @@
   "slug": "simulacion-reporte-ventas-agente-ai",
   "title": "Simulación — Reporte de ventas de AI Agent",
   "createdAt": "2026-05-25T00:10:12.000Z",
-  "updatedAt": "2026-05-25T00:13:00.000Z",
+  "updatedAt": "2026-05-25T00:15:00.000Z",
   "artifact": "artifact.smart.md",
   "tags": [
     "ventas",
@@ -13,6 +13,5 @@
     "dashboard",
     "simulacion"
   ],
-  "summary": "Dashboard ejecutivo de simulación de desempeño diario de un agente de ventas con inteligencia artificial: KPIs, lectura ejecutiva y plan de mejora.
-"
+  "summary": "Dashboard ejecutivo de simulación de desempeño diario de un agente de ventas con inteligencia artificial: KPIs en vivo, semáforos, lectura ejecutiva y plan de mejora."
 }

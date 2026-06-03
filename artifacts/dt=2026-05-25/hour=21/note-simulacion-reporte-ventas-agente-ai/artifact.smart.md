@@ -1,33 +1,35 @@
 # Simulación — Reporte de ventas de AI Agent (Dashboard CEO)
 
-## Snapshot ejecutivo
-**Fecha:** [simulación]  
-**Agente:** AI Sales Agent — Día 1
+## Reporte en vivo
+**Fecha:** 2026-05-25 (simulación)  
+**Hora de corte:** 00:15  
+**Agente:** AI Sales Agent
 
-| KPI | Valor | Estado |
+## KPIs del día
+
+| KPI | Valor | Semáforo |
 |---|---:|---|
-| Ventas generadas | 12 conversiones | 🟢 objetivo en marcha |
-| Ingresos | USD 4,800 | 🟢 estable |
-| Leads contactados | 210 | 🟢 volumen correcto |
-| Respuestas | 158 (75%) | 🟢 healthy response |
-| Efectividad comercial | 5.7% | 🟡 mejora necesaria |
+| Ventas generadas | 12 conversiones | 🟢 |
+| Ingresos | USD 4,800 | 🟢 |
+| Leads contactados | 210 | 🟢 |
+| Respuestas | 158 (75%) | 🟢 |
+| Efectividad comercial | 5.7% | 🟡 |
 
-## Lectura ejecutiva (CEO)
-- **Fuerza del día:** alto volumen de interacción y buena tasa de respuesta.  
-- **Riesgo:** baja conversión final; hay fugas en tramo de cierre.  
-- **Mensaje clave:** la máquina de generación de demanda funciona, pero el cierre requiere ajuste de mensajes y priorización de leads.
+## What matters today
+- El volumen de demanda está sólido y la tasa de respuesta es buena.  
+- La conversión final es el cuello de botella principal del funnel.  
+- Enfoque: sostener contacto y mejorar cierre sin perder alcance.
 
-## Acciones recomendadas (48h)
-1. Refinar **script de seguimiento** para leads con alta intención.  
-2. Segmentar respuestas por nivel de interés (frío / tibio / caliente).  
-3. Priorizar 20 leads de mayor potencial con mensaje personalizado.
-
-## Fórmula de seguimiento
-- **Tasa de respuesta:** (Respuestas ÷ Contactados) × 100  
-- **Efectividad comercial:** (Ventas ÷ Contactados) × 100
+## Checklist para mañana
+- [ ] Optimizar mensaje del 2.º contacto (variant A/B).  
+- [ ] Segmentar leads por intención (frío/tibio/caliente).  
+- [ ] Priorizar seguimiento a los 20 leads con mayor potencial.
 
 ---
 
-## Próximo ciclo
-- Actualizar con los datos reales de hoy y comparar contra meta diaria.
-- Si quieres, en el siguiente paso te dejo una versión **bilingual** (ES/EN) y con gráfico de tendencia de 7 días.
+## Fórmulas de control
+- **Tasa de respuesta** = (Respuestas ÷ Leads contactados) × 100
+- **Efectividad comercial** = (Ventas ÷ Leads contactados) × 100
+
+## Estado
+*Actualización en vivo de la simulación para revisión ejecutiva.*
