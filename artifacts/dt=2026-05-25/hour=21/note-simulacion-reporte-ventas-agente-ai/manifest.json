@@ -1,9 +1,8 @@
 {
   "kind": "note",
   "slug": "simulacion-reporte-ventas-agente-ai",
-  "title": "Simulación — Reporte de ventas de AI Agent",
   "createdAt": "2026-05-25T00:10:12.000Z",
-  "updatedAt": "2026-05-25T00:17:00.000Z",
+  "updatedAt": "2026-05-25T00:20:00.000Z",
   "artifact": "artifact.smart.md",
   "tags": [
     "ventas",
@@ -12,7 +11,9 @@
     "reporte",
     "dashboard",
     "simulacion",
-    "funnel"
+    "funnel",
+    "jefe",
+    "seguimiento"
   ],
-  "summary": "Dashboard ejecutivo de simulación de desempeño diario de un agente de ventas con IA: KPI de tráfico, intención de compra, conversión y plan de mejora."
+  "summary": "Dashboard ejecutivo de simulación de desempeño de ventas por equipo/empleado: KPI globales, vista de funnel, seguimiento por vendedor y comparativa semanal en modo CEO."
 }

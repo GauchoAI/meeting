@@ -2,25 +2,25 @@
 
 ## Reporte en vivo
 **Fecha:** 2026-05-25 (simulación)  
-**Hora de corte:** 00:17  
-**Agente:** AI Sales Agent
+**Hora de corte:** 00:20  
+**Responsable:** Jefe de ventas (visión de equipo)
 
-## KPIs del día
+## KPIs del día (visión de equipo)
 
 | KPI | Valor | Semáforo |
 |---|---:|---|
-| Tráfico a página | 280 visitas |
-| Intenciones de compra detectadas | 210 |
-| Ventas generadas | 12 conversiones |
-| Ingresos | USD 4,800 |
-| Leads contactados | 210 |
-| Respuestas | 158 (75%) |
-| Efectividad comercial | 5.7% |
+| Tráfico a página | 280 visitas | 🟢 |
+| Intenciones de compra detectadas | 210 | 🟢 |
+| Leads contactados | 210 | 🟢 |
+| Respuestas | 158 (75%) | 🟢 |
+| Ventas generadas | 12 conversiones | 🟢 |
+| Ingresos | USD 4,800 | 🟢 |
+| Efectividad comercial | 5.7% | 🟡 |
 
 ## What matters today
-- El tráfico está llegando y se están detectando muchas intenciones.  
-- La tasa de respuesta es buena; la caída fuerte ocurre en cierre.  
-- Enfoque: preservar volumen de leads y elevar conversión de intención a venta.
+- El tráfico y la intención están fuertes.  
+- La caída ocurre en el tramo de cierre.
+- Prioridad ejecutiva: mantener volumen y aumentar tasa de conversión final.
 
 ## Estados del funnel (importantes)
 - **Tráfico total (sesiones):** 280
@@ -29,28 +29,36 @@
 - **Respuestas:** 158
 - **Ventas:** 12
 
+## Seguimiento por empleado / agente
+- **Objetivo de gestión:** el jefe debe ver desempeño individual, no solo de un agente único.
+- **Tabla de ejemplo (hoy):**
+
+| Empleado | Leads nuevos | Contactados | Respondidos | Ventas | Efectividad | Estado |
+|---|---:|---:|---:|---:|---:|---|
+| AI Agent | 210 | 210 | 158 | 12 | 5.7% | 🟡 |
+| (Ej. Agente 2) | — | — | — | — | — | ⏳ |
+
+## Checklist operativo por liderazgo
+- [ ] Revisar leads sin seguimiento (D+1, D+2, D+3) por empleado.
+- [ ] Asignar leads “calientes” a quienes cierren mejor.
+- [ ] Detectar coaching: baja conversión individual con buena actividad de contacto.
+- [ ] Definir meta de seguimiento semanal por persona (contactos y cierres).
+
 ## Comparativa semanal (vs semana anterior)
-- **Indicador base:** usa estos mismos KPIs y compara con el período previo.
-- **Semáforo W/W:** 
+- **Indicador base:** usa estos mismos KPIs y los mismos empleados.
+- **Semáforo W/W (a completar):** 
   - Tráfico: [▲ / ▼ / →]
   - Intenciones: [▲ / ▼ / →]
   - Respuesta: [▲ / ▼ / →]
   - Efectividad comercial: [▲ / ▼ / →]
-- **Lectura de tendencia (ejemplo):** si el tráfico sube y la tasa de cierre baja, hay cuello de botella en calidad/seguimiento.
-
-- **Próximo dato a completar:** tráfico, intenciones y ventas de la semana previa para calcular deltas exactos.
-
-## Checklist para mañana
-- [ ] Optimizar mensaje del 2.º contacto (variant A/B).  
-- [ ] Segmentar leads por intención (frío/tibio/caliente).  
-- [ ] Priorizar seguimiento a los 20 leads con mayor potencial.
-
----
+- **Lectura de tendencia:** si el tráfico sube y la tasa de cierre baja, priorizar calidad de mensaje y seguimiento.
+- **Próximo paso:** cargar semana anterior para calcular deltas exactos.
 
 ## Fórmulas de control
 - **Tasa de intención** = (Intenciones detectadas ÷ Tráfico a página) × 100
 - **Tasa de respuesta** = (Respuestas ÷ Leads contactados) × 100
 - **Efectividad comercial** = (Ventas ÷ Leads contactados) × 100
+- **Tasa de conversión por vendedor** = (Ventas por empleado ÷ Leads contactados por empleado) × 100
 
 ## Estado
-*Actualización en vivo de la simulación para revisión ejecutiva.*
+*Actualización en vivo de la simulación para revisión ejecutiva de equipo.*
