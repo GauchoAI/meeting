@@ -34,6 +34,14 @@ Esta fue la segunda versión del juego: en vez de intentar conquistar Buenos Air
 - **Juego 2:** estrategia indirecta; Montevideo + bloqueo + comercio + negociación.
 - **Cambio clave:** no gastar el ejército británico en una semana de combate urbano, sino usar la superioridad naval como palanca política.
 
+## Estado actual del juego (Sesión 2 — versión ampliada)
+
+- **Defensa de Álzaga (buen nivel):** ciudad abastecida, milicias de ~7.000–9.000, civiles evacuados, barricadas, azoteas y red de apoyo logístico.
+- **Decisión británica óptima:** evitar asalto urbano frontal; presionar por bloqueo/cortes de ruta y golpes limitados desde posiciones exteriores.
+- **Hecho de guerra clave:** se logra una cabeza de puente exterior (sector río/retaguardia), pero no se rompe la defensa del centro urbano.
+- **Factor político/moral:** ejecuciones y castigos públicos aumentan la fricción moral y reducen posibilidades de rendición negociada, favoreciendo una salida escalonada británica.
+- **Resultado provisional:** con los supuestos actuales, el británico mejora respecto al histórico pero **no logra conquistar Buenos Aires**; el desenlace más plausible es repliegue o retirada táctico-logística.
+
 ## Prompt usado para la imagen de la versión 2
 
 > Históricamente inspirada, óleo alternativo de principios del siglo XIX en el Río de la Plata: General John Whitelocke con uniforme británico rojo y bicornio estrecha la mano de Martín de Álzaga, líder civil de Buenos Aires, en una sala colonial de gobierno o pórtico. Al fondo, oficiales navales británicos, representantes del Cabildo, mapas del Río de la Plata, banderas y vista sutil de barcos en el río. Ambiente tenso pero ceremonial: una negociación político-comercial tras una estrategia de bloqueo, no una batalla. Estilo óleo histórico del siglo XIX, realista, tonos tierra, composición de museo, sin texto legible ni objetos modernos.
