@@ -60,5 +60,12 @@
 - **Efectividad comercial** = (Ventas ÷ Leads contactados) × 100
 - **Tasa de conversión por vendedor** = (Ventas por empleado ÷ Leads contactados por empleado) × 100
 
+## Confiabilidad operacional
+- **Uso de GPU observado:** 88% (cerca del umbral crítico).
+- Semáforo: 🟠 Si supera 85% sostenido 3+ minutos, activar plan de degradación:
+  - modo texto corto
+  - bajar frecuencia de inferencia no crítica
+  - reintento controlado y cola priorizada
+
 ## Estado
 *Actualización en vivo de la simulación para revisión ejecutiva de equipo.*
