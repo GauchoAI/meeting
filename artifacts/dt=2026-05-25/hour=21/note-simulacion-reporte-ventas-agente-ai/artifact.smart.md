@@ -66,6 +66,12 @@
   - modo texto corto
   - bajar frecuencia de inferencia no crítica
   - reintento controlado y cola priorizada
+- **Síntoma reportado:** un único usuario está provocando renderizado continuo de artefactos (re-render repetitivo), elevando carga.
+- **Acción correctiva sugerida (inmediata):**
+  - cachear/validar cambios por `content-hash` antes de render
+  - aplicar `debounce` a re-render por sesión (ej. 2–3 s)
+  - limitar tasa de render por usuario/session (ratelimit)
+  - activar “modo estático” para ese usuario hasta estabilización
 
 ## Estado
 *Actualización en vivo de la simulación para revisión ejecutiva de equipo.*
